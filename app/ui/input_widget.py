@@ -27,7 +27,7 @@ class InputWidget(QWidget):
 
         self._btn = QPushButton("发送")
         self._btn.setObjectName("sendBtn")
-        self._btn.setFixedWidth(58)
+        self._btn.setFixedWidth(64)
         self._btn.clicked.connect(self._submit)
         layout.addWidget(self._btn)
 

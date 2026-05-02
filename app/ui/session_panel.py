@@ -27,7 +27,7 @@ class SessionPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("sessionPanel")
-        self.setFixedWidth(165)
+        self.setFixedWidth(180)
         self._build()
 
     def _build(self):
@@ -90,7 +90,7 @@ class SessionPanel(QFrame):
     # ------------------------------------------------------------------ internals
     @staticmethod
     def _short(title: str) -> str:
-        return title[:18] + "…" if len(title) > 18 else title
+        return title[:20] + "…" if len(title) > 20 else title
 
     def _on_change(self, current, _previous):
         if current:

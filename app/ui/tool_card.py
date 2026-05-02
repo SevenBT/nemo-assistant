@@ -42,7 +42,7 @@ class ToolCard(QFrame):
 
         self._toggle_btn = QPushButton("展开")
         self._toggle_btn.setObjectName("toggleBtn")
-        self._toggle_btn.setFixedSize(46, 22)
+        self._toggle_btn.setFixedSize(54, 22)
         self._toggle_btn.clicked.connect(self._toggle)
         header.addWidget(self._toggle_btn)
         root.addLayout(header)

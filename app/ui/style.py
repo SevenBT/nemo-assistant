@@ -3,7 +3,8 @@ STYLESHEET = """
 QWidget {
     font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
     font-size: 13px;
-    color: #cdd6f4;
+    color: #1A1D23;
+    background: transparent;
 }
 
 /* ── Transparent containers (explicit opt-in only) ────────────────── */
@@ -13,37 +14,36 @@ QStackedWidget, QScrollArea > QWidget > QWidget {
 
 /* ── Main container (QFrame inside transparent top window) ────────── */
 #mainWindow {
-    background: #1e1e2e;
-    border: 1px solid #45475a;
-    border-radius: 10px;
+    background: #F0F2F5;
+    border: 1px solid #D1D5DB;
+    border-radius: 12px;
 }
-/* chat area filler */
 #chatArea {
-    background: #1e1e2e;
+    background: #F0F2F5;
 }
 
 /* ── Title bar ────────────────────────────────────────────────────── */
 #titleBar {
-    background: #181825;
-    border-top-left-radius: 10px;
-    border-top-right-radius: 10px;
-    border-bottom: 1px solid #313244;
+    background: #FFFFFF;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    border-bottom: 1px solid #E5E7EB;
 }
 #titleLabel {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
-    color: #cdd6f4;
+    color: #1A1D23;
 }
 
 /* ── Session panel ────────────────────────────────────────────────── */
 #sessionPanel {
-    background: #181825;
-    border-right: 1px solid #313244;
+    background: #FFFFFF;
+    border-right: 1px solid #E5E7EB;
 }
 #panelTitle {
     font-size: 12px;
     font-weight: 600;
-    color: #6c7086;
+    color: #9CA3AF;
     text-transform: uppercase;
     letter-spacing: 1px;
 }
@@ -55,226 +55,244 @@ QStackedWidget, QScrollArea > QWidget > QWidget {
 #sessionList::item {
     padding: 7px 8px;
     border-radius: 6px;
-    color: #bac2de;
+    color: #4B5563;
     font-size: 12px;
 }
 #sessionList::item:selected {
-    background: #313244;
-    color: #cdd6f4;
+    background: #E8F4FD;
+    color: #1A1D23;
 }
 #sessionList::item:hover:!selected {
-    background: #27273a;
+    background: #F3F4F6;
 }
 
 /* ── Chat scroll area ─────────────────────────────────────────────── */
 #chatScroll {
     border: none;
-    background: #1e1e2e;
+    background: #F0F2F5;
 }
 #chatScroll QScrollBar:vertical {
     width: 4px;
     background: transparent;
 }
 #chatScroll QScrollBar::handle:vertical {
-    background: #45475a;
+    background: #D1D5DB;
     border-radius: 2px;
     min-height: 20px;
+}
+#chatScroll QScrollBar::handle:vertical:hover {
+    background: #9CA3AF;
 }
 
 /* ── Message bubbles ──────────────────────────────────────────────── */
 #userMessage {
-    background: #313244;
-    border-radius: 10px;
+    background: #E8F4FD;
+    border-radius: 14px;
+    border-top-right-radius: 4px;
     margin-left: 40px;
 }
 #aiMessage {
-    background: #252538;
-    border-radius: 10px;
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 14px;
+    border-top-left-radius: 4px;
     margin-right: 40px;
 }
 #userLabel {
     font-size: 11px;
     font-weight: 600;
-    color: #89b4fa;
+    color: #5B9BD5;
 }
 #aiLabel {
     font-size: 11px;
     font-weight: 600;
-    color: #a6e3a1;
+    color: #34D399;
 }
 #userBubble, #aiBubble {
-    color: #cdd6f4;
+    color: #1A1D23;
     font-size: 13px;
-    line-height: 1.5;
+    line-height: 1.6;
     background: transparent;
     border: none;
 }
 
 /* ── Tool card ────────────────────────────────────────────────────── */
 #toolCard {
-    background: #1e1e2e;
-    border: 1px solid #45475a;
+    background: #F9FAFB;
+    border: 1px solid #E5E7EB;
     border-radius: 8px;
     margin-top: 4px;
 }
 #detailLabel {
     font-size: 11px;
-    color: #6c7086;
+    color: #9CA3AF;
     font-weight: 600;
 }
 #detailText {
-    background: #11111b;
-    color: #a6adc8;
-    border: 1px solid #313244;
-    border-radius: 4px;
+    background: #F3F4F6;
+    color: #4B5563;
+    border: 1px solid #E5E7EB;
+    border-radius: 6px;
     font-family: "Cascadia Code", "Consolas", monospace;
     font-size: 11px;
 }
 
 /* ── Input area ───────────────────────────────────────────────────── */
 #inputWidget {
-    background: #181825;
-    border-top: 1px solid #313244;
-    border-bottom-left-radius: 10px;
-    border-bottom-right-radius: 10px;
+    background: #FFFFFF;
+    border-top: 1px solid #E5E7EB;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
 }
 #inputEdit {
-    background: #313244;
-    color: #cdd6f4;
-    border: 1px solid #45475a;
-    border-radius: 8px;
-    padding: 8px 10px;
+    background: #F3F4F6;
+    color: #1A1D23;
+    border: 1px solid #E5E7EB;
+    border-radius: 10px;
+    padding: 8px 12px;
     font-size: 13px;
 }
 #inputEdit:focus {
-    border-color: #89b4fa;
+    border-color: #5B9BD5;
+    background: #FFFFFF;
 }
 
 /* ── Buttons ──────────────────────────────────────────────────────── */
 #sendBtn {
-    background: #89b4fa;
-    color: #1e1e2e;
+    background: #5B9BD5;
+    color: #FFFFFF;
     border: none;
-    border-radius: 8px;
+    border-radius: 10px;
     font-weight: 600;
     font-size: 13px;
     padding: 6px 12px;
 }
-#sendBtn:hover  { background: #b4befe; }
-#sendBtn:pressed{ background: #74c7ec; }
-#sendBtn:disabled { background: #45475a; color: #6c7086; }
+#sendBtn:hover  { background: #7DB9DE; }
+#sendBtn:pressed{ background: #4A8BC5; }
+#sendBtn:disabled {
+    background: #D1D5DB;
+    color: #9CA3AF;
+}
 
 #iconBtn {
     background: transparent;
-    color: #cdd6f4;
+    color: #6B7280;
     border: none;
-    border-radius: 5px;
+    border-radius: 6px;
     font-size: 12px;
     font-weight: 500;
     padding: 0 4px;
 }
-#iconBtn:hover  { background: #313244; color: #ffffff; }
-#iconBtn:pressed{ background: #45475a; }
+#iconBtn:hover  { background: #F3F4F6; color: #1A1D23; }
+#iconBtn:pressed{ background: #E5E7EB; }
 
 #closeBtn {
     background: transparent;
-    color: #bac2de;
+    color: #9CA3AF;
     border: none;
-    border-radius: 5px;
+    border-radius: 6px;
     font-size: 14px;
     font-weight: 600;
     padding: 0 4px;
 }
-#closeBtn:hover  { background: #f38ba8; color: #1e1e2e; }
+#closeBtn:hover  { background: #F87171; color: #FFFFFF; }
 
 /* ── New session button ───────────────────────────────────────────── */
 #newSessionBtn {
-    background: #313244;
-    color: #89b4fa;
+    background: #F3F4F6;
+    color: #5B9BD5;
     border: none;
-    border-radius: 5px;
+    border-radius: 6px;
     font-size: 11px;
     font-weight: 600;
-    padding: 0 6px;
+    padding: 0 8px;
 }
-#newSessionBtn:hover  { background: #45475a; color: #cdd6f4; }
-#newSessionBtn:pressed{ background: #585b70; }
+#newSessionBtn:hover  { background: #E5E7EB; color: #4A8BC5; }
+#newSessionBtn:pressed{ background: #D1D5DB; }
 
-/* ── Resize grip ──────────────────────────────────────────────────── */
-#sizeGrip {
-    background: transparent;
-    width: 14px;
-    height: 14px;
-}
-
+/* ── Toggle button (tool card expand/collapse) ─────────────────────── */
 #toggleBtn {
-    background: #313244;
-    color: #89b4fa;
+    background: #F3F4F6;
+    color: #5B9BD5;
     border: none;
     border-radius: 4px;
     font-size: 11px;
-    padding: 2px 6px;
+    padding: 2px 8px;
 }
-#toggleBtn:hover { background: #45475a; }
+#toggleBtn:hover { background: #E5E7EB; }
 
 /* ── Dialogs ──────────────────────────────────────────────────────── */
 QDialog {
-    background: #1e1e2e;
+    background: #FFFFFF;
 }
 QLabel { background: transparent; }
 QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit, QComboBox {
-    background: #313244;
-    color: #cdd6f4;
-    border: 1px solid #45475a;
-    border-radius: 6px;
-    padding: 4px 8px;
+    background: #F9FAFB;
+    color: #1A1D23;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 6px 10px;
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-    border-color: #89b4fa;
+    border-color: #5B9BD5;
+    background: #FFFFFF;
 }
 QTabWidget::pane {
-    border: 1px solid #313244;
-    border-radius: 6px;
-    background: #1e1e2e;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    background: #FFFFFF;
 }
 QTabBar::tab {
-    background: #181825;
-    color: #6c7086;
+    background: #F3F4F6;
+    color: #9CA3AF;
     padding: 6px 16px;
-    border-radius: 6px 6px 0 0;
+    border-radius: 8px 8px 0 0;
 }
-QTabBar::tab:selected { background: #313244; color: #cdd6f4; }
+QTabBar::tab:selected {
+    background: #FFFFFF;
+    color: #1A1D23;
+}
 QPushButton {
-    background: #313244;
-    color: #cdd6f4;
+    background: #F3F4F6;
+    color: #1A1D23;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 6px 14px;
 }
-QPushButton:hover  { background: #45475a; }
-QPushButton:pressed{ background: #585b70; }
-QDialogButtonBox QPushButton { min-width: 70px; }
+QPushButton:hover  { background: #E5E7EB; }
+QPushButton:pressed{ background: #D1D5DB; }
+QDialogButtonBox QPushButton {
+    min-width: 70px;
+    background: #5B9BD5;
+    color: #FFFFFF;
+}
+QDialogButtonBox QPushButton:hover { background: #7DB9DE; }
 QCheckBox { spacing: 6px; }
 QCheckBox::indicator {
     width: 16px; height: 16px;
-    border: 1px solid #45475a;
+    border: 1px solid #D1D5DB;
     border-radius: 4px;
-    background: #313244;
+    background: #FFFFFF;
 }
-QCheckBox::indicator:checked { background: #89b4fa; border-color: #89b4fa; }
+QCheckBox::indicator:checked {
+    background: #5B9BD5;
+    border-color: #5B9BD5;
+}
 QTableWidget {
-    background: #181825;
-    border: 1px solid #313244;
-    border-radius: 6px;
-    gridline-color: #313244;
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    gridline-color: #F3F4F6;
+    color: #1A1D23;
 }
-QTableWidget::item { padding: 4px 8px; }
-QTableWidget::item:selected { background: #313244; }
+QTableWidget::item { padding: 6px 8px; }
+QTableWidget::item:selected { background: #E8F4FD; color: #1A1D23; }
 QHeaderView::section {
-    background: #11111b;
-    color: #6c7086;
-    padding: 6px 8px;
+    background: #F9FAFB;
+    color: #6B7280;
+    padding: 8px 10px;
     border: none;
+    border-bottom: 1px solid #E5E7EB;
     font-size: 12px;
     font-weight: 600;
 }
@@ -283,50 +301,51 @@ QScrollBar:vertical {
     background: transparent;
 }
 QScrollBar::handle:vertical {
-    background: #45475a;
+    background: #D1D5DB;
     border-radius: 3px;
     min-height: 20px;
 }
+QScrollBar::handle:vertical:hover { background: #9CA3AF; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 
 /* ── Typing indicator ─────────────────────────────────────────────── */
 #typingLabel {
-    color: #6c7086;
+    color: #9CA3AF;
     font-size: 12px;
     font-style: italic;
 }
 
-/* ── Tray / context menu (dark theme) ────────────────────────────── */
+/* ── Tray / context menu ──────────────────────────────────────────── */
 QMenu {
-    background: #1e1e2e;
-    border: 1px solid #45475a;
-    border-radius: 8px;
-    padding: 4px 2px;
-    color: #cdd6f4;
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 10px;
+    padding: 6px 4px;
+    color: #1A1D23;
 }
 QMenu::item {
     padding: 7px 28px 7px 14px;
-    border-radius: 5px;
-    color: #cdd6f4;
+    border-radius: 6px;
+    color: #1A1D23;
     background: transparent;
 }
 QMenu::item:selected {
-    background: #313244;
-    color: #ffffff;
+    background: #F3F4F6;
+    color: #1A1D23;
 }
 QMenu::item:disabled {
-    color: #585b70;
+    color: #D1D5DB;
 }
 QMenu::separator {
     height: 1px;
-    background: #45475a;
+    background: #E5E7EB;
     margin: 4px 10px;
 }
 
-/* ── Notes dialog ─────────────────────────────────────────────────────── */
+/* ── Notes dialog ─────────────────────────────────────────────────── */
 #noteListPanel {
-    background: #181825;
-    border-radius: 6px 0 0 6px;
+    background: #FFFFFF;
+    border-radius: 8px 0 0 8px;
 }
 #noteList {
     background: transparent;
@@ -336,63 +355,76 @@ QMenu::separator {
 #noteList::item {
     padding: 8px 10px;
     border-radius: 6px;
-    color: #bac2de;
+    color: #4B5563;
     font-size: 12px;
     line-height: 1.4;
 }
 #noteList::item:selected {
-    background: #313244;
-    color: #cdd6f4;
+    background: #E8F4FD;
+    color: #1A1D23;
 }
 #noteList::item:hover:!selected {
-    background: #27273a;
+    background: #F3F4F6;
 }
 #noteTitleEdit {
-    background: #313244;
-    color: #cdd6f4;
-    border: 1px solid #45475a;
-    border-radius: 6px;
-    padding: 6px 10px;
+    background: #F9FAFB;
+    color: #1A1D23;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 8px 12px;
     font-size: 14px;
     font-weight: 600;
 }
 #noteTitleEdit:focus {
-    border-color: #89b4fa;
+    border-color: #5B9BD5;
+    background: #FFFFFF;
 }
 #noteContentEdit {
-    background: #252538;
-    color: #cdd6f4;
-    border: 1px solid #45475a;
-    border-radius: 6px;
-    padding: 8px 10px;
+    background: #F9FAFB;
+    color: #1A1D23;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 8px 12px;
     font-size: 13px;
 }
 #noteContentEdit:focus {
-    border-color: #89b4fa;
+    border-color: #5B9BD5;
+    background: #FFFFFF;
 }
 #noteToolBtn {
-    background: #313244;
-    color: #cdd6f4;
+    background: #F3F4F6;
+    color: #1A1D23;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 5px 14px;
     font-size: 12px;
 }
-#noteToolBtn:hover  { background: #45475a; color: #ffffff; }
-#noteToolBtn:pressed { background: #585b70; }
-/* ── View-switcher buttons in title bar ─────────────────────────────── */
+#noteToolBtn:hover  { background: #E5E7EB; color: #1A1D23; }
+#noteToolBtn:pressed { background: #D1D5DB; }
+
+/* ── View-switcher buttons in title bar ────────────────────────────── */
 #viewBtn {
     background: transparent;
-    color: #cdd6f4;
+    color: #6B7280;
     border: none;
-    border-radius: 5px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
 }
-#viewBtn:hover   { background: #313244; color: #ffffff; }
-#viewBtn:checked { background: #313244; color: #89b4fa; }
-#viewBtn:checked:hover { background: #45475a; color: #89b4fa; }
+#viewBtn:hover   { background: #F3F4F6; color: #1A1D23; }
+#viewBtn:checked { background: #E8F4FD; color: #5B9BD5; font-weight: 600; }
+#viewBtn:checked:hover { background: #D9EDFB; color: #4A8BC5; }
+
 #noteStatusLabel {
-    color: #a6e3a1;
+    color: #34D399;
     font-size: 11px;
     padding: 0 6px;
+}
+
+/* ── Size grip (unused but defined) ────────────────────────────────── */
+#sizeGrip {
+    background: transparent;
+    width: 14px;
+    height: 14px;
 }
 """

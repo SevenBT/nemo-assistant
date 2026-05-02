@@ -159,7 +159,7 @@ class TitleBar(QWidget):
         super().__init__(window)
         self._win = window
         self.setObjectName("titleBar")
-        self.setFixedHeight(38)
+        self.setFixedHeight(42)
         self._build()
 
     def _build(self):
@@ -189,7 +189,7 @@ class TitleBar(QWidget):
         ]):
             btn = QPushButton(text)
             btn.setObjectName("viewBtn")
-            btn.setFixedSize(46, 28)
+            btn.setFixedSize(56, 30)
             btn.setToolTip(tip)
             btn.setCheckable(True)
             self._btn_group.addButton(btn, i)
@@ -263,7 +263,7 @@ class MainWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         wcfg = self._config.window_config
-        self.resize(wcfg.get("width", 380), wcfg.get("height", 680))
+        self.resize(wcfg.get("width", 420), wcfg.get("height", 700))
         self.move(wcfg.get("x", 100), wcfg.get("y", 80))
         self.setWindowOpacity(wcfg.get("opacity", 0.97))
         if wcfg.get("always_on_top", True):
