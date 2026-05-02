@@ -1,0 +1,57 @@
+{
+  "id": "5473ce54-6d99-4e4e-bc26-a5dc5a36fcd9",
+  "title": "你好",
+  "created_at": 1777677957.9124513,
+  "updated_at": 1777681842.9394002,
+  "messages": [
+    {
+      "id": "5143f595-4372-4c43-af73-7388babd7c8d",
+      "role": "user",
+      "content": "你好",
+      "timestamp": 1777677964.5201252,
+      "tool_calls": [],
+      "tool_call_id": null
+    },
+    {
+      "id": "653da135-ba15-42f9-bfc7-28d4caebd689",
+      "role": "assistant",
+      "content": "你好！欢迎来到智能AI助手 👋\n\n我是你的智能助理，可以帮你完成以下事情：\n\n- **系统信息查询** — 查看操作系统、CPU、内存等运行状态\n- **定时任务管理** — 创建、查看、删除定时任务，支持每天、每小时或一次性触发\n\n有什么我可以帮你的吗？尽管说！",
+      "timestamp": 1777677964.5221303,
+      "tool_calls": [],
+      "tool_call_id": null
+    },
+    {
+      "id": "39579c49-e43c-4737-9966-cc4e94e2af5f",
+      "role": "user",
+      "content": "好",
+      "timestamp": 1777681277.5716736,
+      "tool_calls": [],
+      "tool_call_id": null
+    },
+    {
+      "id": "8e3d869d-0e7b-4d86-8ea6-a59ce7a5e581",
+      "role": "assistant",
+      "content": "好的！那你想让我帮你做点什么呢？比如：\n\n- 🔍 **查看系统状态** — 我可以帮你看看当前 CPU、内存的使用情况\n- ⏰ **设置定时任务** — 需要定时提醒或自动执行某些操作吗？\n- 📋 **管理已有任务** — 查看或删除之前创建的定时任务\n\n随便挑，直接告诉我你的需求就行！",
+      "timestamp": 1777681277.5736742,
+      "tool_calls": [],
+      "tool_call_id": null
+    },
+    {
+      "id": "7bceab78-da27-4d7a-8e5d-02d9cbec8536",
+      "role": "user",
+      "content": "介绍下你的最新模型",
+      "timestamp": 1777681842.9373963,
+      "tool_calls": [],
+      "tool_call_id": null
+    },
+    {
+      "id": "7025f736-36a4-4cad-b9ca-060b141b5bb2",
+      "role": "assistant",
+      "content": "关于我自身模型的具体版本信息，目前我手头的工具主要偏向**系统运维**和**任务调度**，没有直接查询 AI 模型版本的能力，所以没法给你一个精确的模型编号 😅\n\n不过我可以帮你做的是：\n\n- 用 `get_system_info` 查看当前运行环境的系统信息（操作系统、CPU、内存等），虽然这不等于模型版本，但能让你了解底层基础设施的情况。\n\n如果你想了解最新的模型版本和更新日志，建议查阅官方文档或公告，那里会有最权威的信息。\n\n还有其他需要我帮忙的吗？",
+      "timestamp": 1777681842.9394002,
+      "tool_calls": [],
+      "tool_call_id": null
+    }
+  ],
+  "system_prompt": ""
+}

@@ -1,0 +1,7 @@
+{
+  "tools": {
+    "get_system_info": {
+      "detail_level": "basic"
+    }
+  }
+}

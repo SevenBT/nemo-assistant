@@ -1,0 +1,146 @@
+import json
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Callable, Optional
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+
+from app.core.config import DATA_DIR
+
+JOBS_FILE = DATA_DIR / "jobs.json"
+
+
+class SchedulerManager:
+    def __init__(self):
+        self._scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+        self._jobs: dict[str, dict] = {}
+        self._tool_manager = None
+        self._on_result: Optional[Callable] = None  # (job_id, name, result) -> None
+
+    # ------------------------------------------------------------------ lifecycle
+    def set_tool_manager(self, tm):
+        self._tool_manager = tm
+
+    def set_result_callback(self, cb: Callable):
+        self._on_result = cb
+
+    def start(self):
+        self._scheduler.start()
+        self._load_jobs()
+
+    def stop(self):
+        self._scheduler.shutdown(wait=False)
+
+    # ------------------------------------------------------------------ job management
+    def add_job(
+        self,
+        name: str,
+        tool_name: str,
+        params: dict,
+        trigger_type: str,
+        trigger_config: dict,
+        description: str = "",
+    ) -> str:
+        trigger = self._make_trigger(trigger_type, trigger_config)
+        if trigger is None:
+            raise ValueError(f"Invalid trigger: {trigger_type} / {trigger_config}")
+
+        job_id = str(uuid.uuid4())
+        self._scheduler.add_job(
+            func=self._run_job,
+            trigger=trigger,
+            id=job_id,
+            kwargs={"job_id": job_id},
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+        self._jobs[job_id] = {
+            "id": job_id,
+            "name": name,
+            "tool_name": tool_name,
+            "params": params,
+            "trigger_type": trigger_type,
+            "trigger_config": trigger_config,
+            "description": description,
+            "created_at": datetime.now().isoformat(),
+            "enabled": True,
+        }
+        self._save_jobs()
+        return job_id
+
+    def remove_job(self, job_id: str):
+        self._jobs.pop(job_id, None)
+        self._save_jobs()
+        # Remove from APScheduler; JobLookupError is fine (already gone)
+        try:
+            self._scheduler.remove_job(job_id)
+        except Exception:
+            pass
+
+    def get_jobs(self) -> list[dict]:
+        return list(self._jobs.values())
+
+    # ------------------------------------------------------------------ internals
+    def _make_trigger(self, trigger_type: str, config: dict):
+        try:
+            if trigger_type == "cron":
+                return CronTrigger(**config)
+            if trigger_type == "interval":
+                return IntervalTrigger(**config)
+            if trigger_type == "date":
+                return DateTrigger(**config)
+        except Exception as e:
+            print(f"[Scheduler] Trigger error: {e}")
+        return None
+
+    def _run_job(self, job_id: str):
+        job = self._jobs.get(job_id)
+        if not job:
+            # Job was deleted but APScheduler still fired it — clean up
+            try:
+                self._scheduler.remove_job(job_id)
+            except Exception:
+                pass
+            return
+        if not self._tool_manager:
+            return
+        result = self._tool_manager.execute(job["tool_name"], job["params"])
+        if self._on_result:
+            self._on_result(job_id, job["name"], result)
+
+    def _save_jobs(self):
+        JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(JOBS_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(self._jobs.values()), f, ensure_ascii=False, indent=2)
+
+    def _load_jobs(self):
+        if not JOBS_FILE.exists():
+            return
+        try:
+            with open(JOBS_FILE, encoding="utf-8") as f:
+                jobs: list[dict] = json.load(f)
+        except Exception as e:
+            print(f"[Scheduler] Load failed: {e}")
+            return
+
+        for job in jobs:
+            if not job.get("enabled", True):
+                continue
+            try:
+                trigger = self._make_trigger(job["trigger_type"], job["trigger_config"])
+                if trigger:
+                    self._scheduler.add_job(
+                        func=self._run_job,
+                        trigger=trigger,
+                        id=job["id"],
+                        kwargs={"job_id": job["id"]},
+                        replace_existing=True,
+                        misfire_grace_time=60,
+                    )
+                self._jobs[job["id"]] = job
+            except Exception as e:
+                print(f"[Scheduler] Restore job '{job.get('name')}' failed: {e}")
