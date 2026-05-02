@@ -43,6 +43,7 @@ from app.ui.notes_dialog import NotesPanel
 from app.ui.scheduler_dialog import SchedulerPanel
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_dialog import SettingsDialog
+from app.ui.style import generate_stylesheet
 from app.ui.tray_manager import TrayManager
 
 SYSTEM_PROMPT = """你是一个智能AI助手。你可以调用工具来帮助用户完成任务。
@@ -603,12 +604,17 @@ class MainWindow(QWidget):
 
     # ──────────────────────────────────────────── dialogs / window actions
     def _open_settings(self):
+        old_theme = self._config.theme
         dlg = SettingsDialog(self._config, self)
         if dlg.exec():
             wcfg = self._config.window_config
             self.setWindowOpacity(wcfg.get("opacity", 0.97))
             flag = Qt.WindowType.WindowStaysOnTopHint
             self.setWindowFlag(flag, wcfg.get("always_on_top", True))
+            # Re-apply stylesheet if theme changed
+            new_theme = self._config.theme
+            if new_theme != old_theme:
+                QApplication.instance().setStyleSheet(generate_stylesheet(new_theme))
             self.show()
 
     def _switch_view(self, index: int):

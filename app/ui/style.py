@@ -1,430 +1,369 @@
-STYLESHEET = """
+"""
+Theme system: color palettes + QSS template → runtime stylesheet generation.
+
+Add a new theme by adding an entry to THEMES.  Each theme is a flat dict of
+colour tokens; the template in _TEMPLATE references them as __TOKEN__.
+"""
+from typing import Dict
+
+# ── Theme colour palettes ──────────────────────────────────────────────
+# fmt: off
+THEMES: Dict[str, Dict[str, str]] = {
+    # ── 经典清新 ───────────────────────────────────────────────────────
+    "classic": {
+        "name":    "经典清新",
+        "bg":      "#F0F2F5", "surface": "#FFFFFF", "surface_raised": "#F3F4F6",
+        "border":  "#E5E7EB", "border_focus": "#5B9BD5",
+        "accent":  "#5B9BD5", "accent_hover": "#7DB9DE", "accent_pressed": "#4A8BC5",
+        "text":    "#1A1D23", "text_secondary": "#6B7280", "text_muted": "#9CA3AF",
+        "text_accent": "#FFFFFF",
+        "user_bubble": "#E8F4FD", "selected": "#E8F4FD",
+        "success": "#34D399", "error": "#F87171", "warning": "#FBBF24",
+        "scrollbar": "#D1D5DB", "scrollbar_hover": "#9CA3AF",
+    },
+
+    # ── 暗夜护眼：深邃底色 + 暖琥珀强调，减少蓝光刺激 ─────────────────
+    "dark": {
+        "name":    "暗夜护眼",
+        "bg":      "#1A1B26", "surface": "#24253A", "surface_raised": "#2F3148",
+        "border":  "#3A3C52", "border_focus": "#E5B876",
+        "accent":  "#E5B876", "accent_hover": "#F0D090", "accent_pressed": "#D4A565",
+        "text":    "#D0CCC6", "text_secondary": "#9A9690", "text_muted": "#605E68",
+        "text_accent": "#1A1B26",
+        "user_bubble": "#2D3348", "selected": "#2D3040",
+        "success": "#5ECB8A", "error": "#F07080", "warning": "#E5B876",
+        "scrollbar": "#3A3C52", "scrollbar_hover": "#5A5C72",
+    },
+
+    # ── 薄荷奶绿：清新薄荷绿 + 白底，干净柔和 ─────────────────────────
+    "mint": {
+        "name":    "薄荷奶绿",
+        "bg":      "#F2F7F5", "surface": "#FFFFFF", "surface_raised": "#EDF4F1",
+        "border":  "#DDE8E3", "border_focus": "#5DAA96",
+        "accent":  "#5DAA96", "accent_hover": "#7BC0AE", "accent_pressed": "#4A9582",
+        "text":    "#1D2A26", "text_secondary": "#5E7A70", "text_muted": "#8FA89E",
+        "text_accent": "#FFFFFF",
+        "user_bubble": "#E3F2EC", "selected": "#E3F2EC",
+        "success": "#5DAA96", "error": "#E87878", "warning": "#E8B45A",
+        "scrollbar": "#C8D9D1", "scrollbar_hover": "#96AFA3",
+    },
+
+    # ── 暖橘咖啡：奶油底色 + 珊瑚橘，温暖惬意 ─────────────────────────
+    "latte": {
+        "name":    "暖橘咖啡",
+        "bg":      "#FDF6F0", "surface": "#FFFFFF", "surface_raised": "#F7EFE8",
+        "border":  "#EBE0D5", "border_focus": "#E8896E",
+        "accent":  "#E8896E", "accent_hover": "#F0A590", "accent_pressed": "#D4785E",
+        "text":    "#2D221E", "text_secondary": "#7A6A60", "text_muted": "#A8988E",
+        "text_accent": "#FFFFFF",
+        "user_bubble": "#FBE8DE", "selected": "#FBE8DE",
+        "success": "#6DBE8A", "error": "#E87878", "warning": "#E8B45A",
+        "scrollbar": "#DDD0C5", "scrollbar_hover": "#B0A090",
+    },
+
+    # ── 薰衣草紫：淡紫底色 + 薰衣草紫强调，优雅沉静 ──────────────────
+    "lavender": {
+        "name":    "薰衣草紫",
+        "bg":      "#F4F2F8", "surface": "#FFFFFF", "surface_raised": "#EFECF5",
+        "border":  "#E2DFEC", "border_focus": "#8B7EC8",
+        "accent":  "#8B7EC8", "accent_hover": "#A498D8", "accent_pressed": "#7A6EB5",
+        "text":    "#211F2A", "text_secondary": "#6A6478", "text_muted": "#9A94A8",
+        "text_accent": "#FFFFFF",
+        "user_bubble": "#EBE7F5", "selected": "#EBE7F5",
+        "success": "#6DBE8A", "error": "#E87878", "warning": "#E8B45A",
+        "scrollbar": "#D5D0E2", "scrollbar_hover": "#A8A0B8",
+    },
+}
+# fmt: on
+
+
+# ── QSS template ───────────────────────────────────────────────────────
+# Token format: __TOKEN__  (double-underscore to avoid CSS conflicts)
+
+_TEMPLATE = r"""
 /* ── Base ─────────────────────────────────────────────────────────── */
 QWidget {
     font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
     font-size: 13px;
-    color: #1A1D23;
+    color: __TEXT__;
     background: transparent;
 }
 
-/* ── Transparent containers (explicit opt-in only) ────────────────── */
+/* ── Transparent containers ──────────────────────────────────────── */
 QStackedWidget, QScrollArea > QWidget > QWidget {
     background: transparent;
 }
 
-/* ── Main container (QFrame inside transparent top window) ────────── */
+/* ── Main container ───────────────────────────────────────────────── */
 #mainWindow {
-    background: #F0F2F5;
-    border: 1px solid #D1D5DB;
+    background: __BG__;
+    border: 1px solid __BORDER__;
     border-radius: 12px;
 }
-#chatArea {
-    background: #F0F2F5;
-}
+#chatArea { background: __BG__; }
 
 /* ── Title bar ────────────────────────────────────────────────────── */
 #titleBar {
-    background: #FFFFFF;
+    background: __SURFACE__;
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
-    border-bottom: 1px solid #E5E7EB;
+    border-bottom: 1px solid __BORDER__;
 }
 #titleLabel {
-    font-size: 14px;
-    font-weight: 600;
-    color: #1A1D23;
+    font-size: 14px; font-weight: 600;
+    color: __TEXT__;
 }
 
 /* ── Session panel ────────────────────────────────────────────────── */
 #sessionPanel {
-    background: #FFFFFF;
-    border-right: 1px solid #E5E7EB;
+    background: __SURFACE__;
+    border-right: 1px solid __BORDER__;
 }
 #panelTitle {
-    font-size: 12px;
-    font-weight: 600;
-    color: #9CA3AF;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    font-size: 12px; font-weight: 600; color: __TEXT_MUTED__;
+    text-transform: uppercase; letter-spacing: 1px;
 }
-#sessionList {
-    background: transparent;
-    border: none;
-    outline: none;
-}
+#sessionList { background: transparent; border: none; outline: none; }
 #sessionList::item {
-    padding: 7px 8px;
-    border-radius: 6px;
-    color: #4B5563;
-    font-size: 12px;
+    padding: 7px 8px; border-radius: 6px;
+    color: __TEXT_SECONDARY__; font-size: 12px;
 }
-#sessionList::item:selected {
-    background: #E8F4FD;
-    color: #1A1D23;
-}
-#sessionList::item:hover:!selected {
-    background: #F3F4F6;
-}
+#sessionList::item:selected { background: __SELECTED__; color: __TEXT__; }
+#sessionList::item:hover:!selected { background: __SURFACE_RAISED__; }
 
 /* ── Chat scroll area ─────────────────────────────────────────────── */
-#chatScroll {
-    border: none;
-    background: #F0F2F5;
-}
+#chatScroll { border: none; background: __BG__; }
 #chatScroll QScrollBar:vertical {
-    width: 4px;
-    background: transparent;
+    width: 4px; background: transparent;
 }
 #chatScroll QScrollBar::handle:vertical {
-    background: #D1D5DB;
-    border-radius: 2px;
-    min-height: 20px;
+    background: __SCROLLBAR__; border-radius: 2px; min-height: 20px;
 }
-#chatScroll QScrollBar::handle:vertical:hover {
-    background: #9CA3AF;
-}
+#chatScroll QScrollBar::handle:vertical:hover { background: __SCROLLBAR_HOVER__; }
 
 /* ── Message bubbles ──────────────────────────────────────────────── */
 #userMessage {
-    background: #E8F4FD;
-    border-radius: 14px;
-    border-top-right-radius: 4px;
+    background: __USER_BUBBLE__;
+    border-radius: 14px; border-top-right-radius: 4px;
     margin-left: 40px;
 }
 #aiMessage {
-    background: #FFFFFF;
-    border: 1px solid #E5E7EB;
-    border-radius: 14px;
-    border-top-left-radius: 4px;
+    background: __SURFACE__;
+    border: 1px solid __BORDER__;
+    border-radius: 14px; border-top-left-radius: 4px;
     margin-right: 40px;
 }
-#userLabel {
-    font-size: 11px;
-    font-weight: 600;
-    color: #5B9BD5;
-}
-#aiLabel {
-    font-size: 11px;
-    font-weight: 600;
-    color: #34D399;
-}
+#userLabel { font-size: 11px; font-weight: 600; color: __ACCENT__; }
+#aiLabel   { font-size: 11px; font-weight: 600; color: __SUCCESS__; }
 #userBubble, #aiBubble {
-    color: #1A1D23;
-    font-size: 13px;
-    line-height: 1.6;
-    background: transparent;
-    border: none;
+    color: __TEXT__; font-size: 13px; line-height: 1.6;
+    background: transparent; border: none;
 }
 
 /* ── Tool card ────────────────────────────────────────────────────── */
 #toolCard {
-    background: #F9FAFB;
-    border: 1px solid #E5E7EB;
-    border-radius: 8px;
-    margin-top: 4px;
+    background: __SURFACE_RAISED__;
+    border: 1px solid __BORDER__;
+    border-radius: 8px; margin-top: 4px;
 }
-#detailLabel {
-    font-size: 11px;
-    color: #9CA3AF;
-    font-weight: 600;
-}
+#detailLabel { font-size: 11px; color: __TEXT_MUTED__; font-weight: 600; }
 #detailText {
-    background: #F3F4F6;
-    color: #4B5563;
-    border: 1px solid #E5E7EB;
-    border-radius: 6px;
-    font-family: "Cascadia Code", "Consolas", monospace;
-    font-size: 11px;
+    background: __SURFACE_RAISED__; color: __TEXT_SECONDARY__;
+    border: 1px solid __BORDER__; border-radius: 6px;
+    font-family: "Cascadia Code", "Consolas", monospace; font-size: 11px;
 }
 
 /* ── Input area ───────────────────────────────────────────────────── */
 #inputWidget {
-    background: #FFFFFF;
-    border-top: 1px solid #E5E7EB;
+    background: __SURFACE__;
+    border-top: 1px solid __BORDER__;
     border-bottom-left-radius: 12px;
     border-bottom-right-radius: 12px;
 }
 #inputEdit {
-    background: #F3F4F6;
-    color: #1A1D23;
-    border: 1px solid #E5E7EB;
-    border-radius: 10px;
-    padding: 8px 12px;
-    font-size: 13px;
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: 1px solid __BORDER__; border-radius: 10px;
+    padding: 8px 12px; font-size: 13px;
 }
-#inputEdit:focus {
-    border-color: #5B9BD5;
-    background: #FFFFFF;
-}
+#inputEdit:focus { border-color: __BORDER_FOCUS__; background: __SURFACE__; }
 
 /* ── Buttons ──────────────────────────────────────────────────────── */
 #sendBtn {
-    background: #5B9BD5;
-    color: #FFFFFF;
-    border: none;
-    border-radius: 10px;
-    font-weight: 600;
-    font-size: 13px;
-    padding: 6px 12px;
+    background: __ACCENT__; color: __TEXT_ACCENT__;
+    border: none; border-radius: 10px;
+    font-weight: 600; font-size: 13px; padding: 6px 12px;
 }
-#sendBtn:hover  { background: #7DB9DE; }
-#sendBtn:pressed{ background: #4A8BC5; }
-#sendBtn:disabled {
-    background: #D1D5DB;
-    color: #9CA3AF;
-}
+#sendBtn:hover  { background: __ACCENT_HOVER__; }
+#sendBtn:pressed{ background: __ACCENT_PRESSED__; }
+#sendBtn:disabled { background: __SCROLLBAR__; color: __TEXT_MUTED__; }
 
 #iconBtn {
-    background: transparent;
-    color: #6B7280;
-    border: none;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-    padding: 0 4px;
+    background: transparent; color: __TEXT_SECONDARY__;
+    border: none; border-radius: 6px;
+    font-size: 12px; font-weight: 500; padding: 0 4px;
 }
-#iconBtn:hover  { background: #F3F4F6; color: #1A1D23; }
-#iconBtn:pressed{ background: #E5E7EB; }
+#iconBtn:hover  { background: __SURFACE_RAISED__; color: __TEXT__; }
+#iconBtn:pressed{ background: __BORDER__; }
 
 #closeBtn {
-    background: transparent;
-    color: #9CA3AF;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    padding: 0 4px;
+    background: transparent; color: __TEXT_MUTED__;
+    border: none; border-radius: 6px;
+    font-size: 14px; font-weight: 600; padding: 0 4px;
 }
-#closeBtn:hover  { background: #F87171; color: #FFFFFF; }
+#closeBtn:hover { background: __ERROR__; color: #FFFFFF; }
 
 /* ── New session button ───────────────────────────────────────────── */
 #newSessionBtn {
-    background: #F3F4F6;
-    color: #5B9BD5;
-    border: none;
-    border-radius: 6px;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 0 8px;
+    background: __SURFACE_RAISED__; color: __ACCENT__;
+    border: none; border-radius: 6px;
+    font-size: 11px; font-weight: 600; padding: 0 8px;
 }
-#newSessionBtn:hover  { background: #E5E7EB; color: #4A8BC5; }
-#newSessionBtn:pressed{ background: #D1D5DB; }
+#newSessionBtn:hover  { background: __BORDER__; color: __ACCENT_PRESSED__; }
+#newSessionBtn:pressed{ background: __SCROLLBAR__; }
 
-/* ── Toggle button (tool card expand/collapse) ─────────────────────── */
+/* ── Toggle button (tool card) ────────────────────────────────────── */
 #toggleBtn {
-    background: #F3F4F6;
-    color: #5B9BD5;
-    border: none;
-    border-radius: 4px;
-    font-size: 11px;
-    padding: 2px 8px;
+    background: __SURFACE_RAISED__; color: __ACCENT__;
+    border: none; border-radius: 4px;
+    font-size: 11px; padding: 2px 8px;
 }
-#toggleBtn:hover { background: #E5E7EB; }
+#toggleBtn:hover { background: __BORDER__; }
 
 /* ── Dialogs ──────────────────────────────────────────────────────── */
-QDialog {
-    background: #FFFFFF;
-}
+QDialog { background: __SURFACE__; }
 QLabel { background: transparent; }
 QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit, QComboBox {
-    background: #F9FAFB;
-    color: #1A1D23;
-    border: 1px solid #E5E7EB;
-    border-radius: 8px;
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: 1px solid __BORDER__; border-radius: 8px;
     padding: 6px 10px;
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-    border-color: #5B9BD5;
-    background: #FFFFFF;
+    border-color: __BORDER_FOCUS__; background: __SURFACE__;
 }
 QTabWidget::pane {
-    border: 1px solid #E5E7EB;
-    border-radius: 8px;
-    background: #FFFFFF;
+    border: 1px solid __BORDER__; border-radius: 8px;
+    background: __SURFACE__;
 }
 QTabBar::tab {
-    background: #F3F4F6;
-    color: #9CA3AF;
-    padding: 6px 16px;
-    border-radius: 8px 8px 0 0;
+    background: __SURFACE_RAISED__; color: __TEXT_MUTED__;
+    padding: 6px 16px; border-radius: 8px 8px 0 0;
 }
-QTabBar::tab:selected {
-    background: #FFFFFF;
-    color: #1A1D23;
-}
+QTabBar::tab:selected { background: __SURFACE__; color: __TEXT__; }
 QPushButton {
-    background: #F3F4F6;
-    color: #1A1D23;
-    border: none;
-    border-radius: 8px;
-    padding: 6px 14px;
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: none; border-radius: 8px; padding: 6px 14px;
 }
-QPushButton:hover  { background: #E5E7EB; }
-QPushButton:pressed{ background: #D1D5DB; }
+QPushButton:hover  { background: __BORDER__; }
+QPushButton:pressed{ background: __SCROLLBAR__; }
 QDialogButtonBox QPushButton {
     min-width: 70px;
-    background: #5B9BD5;
-    color: #FFFFFF;
+    background: __ACCENT__; color: __TEXT_ACCENT__;
 }
-QDialogButtonBox QPushButton:hover { background: #7DB9DE; }
+QDialogButtonBox QPushButton:hover { background: __ACCENT_HOVER__; }
 QCheckBox { spacing: 6px; }
 QCheckBox::indicator {
     width: 16px; height: 16px;
-    border: 1px solid #D1D5DB;
-    border-radius: 4px;
-    background: #FFFFFF;
+    border: 1px solid __SCROLLBAR__; border-radius: 4px;
+    background: __SURFACE__;
 }
-QCheckBox::indicator:checked {
-    background: #5B9BD5;
-    border-color: #5B9BD5;
-}
+QCheckBox::indicator:checked { background: __ACCENT__; border-color: __ACCENT__; }
 QTableWidget {
-    background: #FFFFFF;
-    border: 1px solid #E5E7EB;
-    border-radius: 8px;
-    gridline-color: #F3F4F6;
-    color: #1A1D23;
+    background: __SURFACE__;
+    border: 1px solid __BORDER__; border-radius: 8px;
+    gridline-color: __SURFACE_RAISED__; color: __TEXT__;
 }
 QTableWidget::item { padding: 6px 8px; }
-QTableWidget::item:selected { background: #E8F4FD; color: #1A1D23; }
+QTableWidget::item:selected { background: __SELECTED__; color: __TEXT__; }
 QHeaderView::section {
-    background: #F9FAFB;
-    color: #6B7280;
-    padding: 8px 10px;
-    border: none;
-    border-bottom: 1px solid #E5E7EB;
-    font-size: 12px;
-    font-weight: 600;
+    background: __SURFACE_RAISED__; color: __TEXT_SECONDARY__;
+    padding: 8px 10px; border: none;
+    border-bottom: 1px solid __BORDER__;
+    font-size: 12px; font-weight: 600;
 }
-QScrollBar:vertical {
-    width: 6px;
-    background: transparent;
-}
+QScrollBar:vertical { width: 6px; background: transparent; }
 QScrollBar::handle:vertical {
-    background: #D1D5DB;
-    border-radius: 3px;
-    min-height: 20px;
+    background: __SCROLLBAR__; border-radius: 3px; min-height: 20px;
 }
-QScrollBar::handle:vertical:hover { background: #9CA3AF; }
+QScrollBar::handle:vertical:hover { background: __SCROLLBAR_HOVER__; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 
 /* ── Typing indicator ─────────────────────────────────────────────── */
-#typingLabel {
-    color: #9CA3AF;
-    font-size: 12px;
-    font-style: italic;
-}
+#typingLabel { color: __TEXT_MUTED__; font-size: 12px; font-style: italic; }
 
 /* ── Tray / context menu ──────────────────────────────────────────── */
 QMenu {
-    background: #FFFFFF;
-    border: 1px solid #E5E7EB;
-    border-radius: 10px;
-    padding: 6px 4px;
-    color: #1A1D23;
+    background: __SURFACE__;
+    border: 1px solid __BORDER__; border-radius: 10px;
+    padding: 6px 4px; color: __TEXT__;
 }
 QMenu::item {
-    padding: 7px 28px 7px 14px;
-    border-radius: 6px;
-    color: #1A1D23;
-    background: transparent;
+    padding: 7px 28px 7px 14px; border-radius: 6px;
+    color: __TEXT__; background: transparent;
 }
-QMenu::item:selected {
-    background: #F3F4F6;
-    color: #1A1D23;
-}
-QMenu::item:disabled {
-    color: #D1D5DB;
-}
+QMenu::item:selected { background: __SURFACE_RAISED__; color: __TEXT__; }
+QMenu::item:disabled { color: __SCROLLBAR__; }
 QMenu::separator {
-    height: 1px;
-    background: #E5E7EB;
-    margin: 4px 10px;
+    height: 1px; background: __BORDER__; margin: 4px 10px;
 }
 
-/* ── Notes dialog ─────────────────────────────────────────────────── */
-#noteListPanel {
-    background: #FFFFFF;
-    border-radius: 8px 0 0 8px;
-}
-#noteList {
-    background: transparent;
-    border: none;
-    outline: none;
-}
+/* ── Notes panel ──────────────────────────────────────────────────── */
+#noteListPanel { background: __SURFACE__; border-radius: 8px 0 0 8px; }
+#noteList { background: transparent; border: none; outline: none; }
 #noteList::item {
-    padding: 8px 10px;
-    border-radius: 6px;
-    color: #4B5563;
-    font-size: 12px;
-    line-height: 1.4;
+    padding: 8px 10px; border-radius: 6px;
+    color: __TEXT_SECONDARY__; font-size: 12px; line-height: 1.4;
 }
-#noteList::item:selected {
-    background: #E8F4FD;
-    color: #1A1D23;
-}
-#noteList::item:hover:!selected {
-    background: #F3F4F6;
-}
+#noteList::item:selected { background: __SELECTED__; color: __TEXT__; }
+#noteList::item:hover:!selected { background: __SURFACE_RAISED__; }
 #noteTitleEdit {
-    background: #F9FAFB;
-    color: #1A1D23;
-    border: 1px solid #E5E7EB;
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-size: 14px;
-    font-weight: 600;
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: 1px solid __BORDER__; border-radius: 8px;
+    padding: 8px 12px; font-size: 14px; font-weight: 600;
 }
-#noteTitleEdit:focus {
-    border-color: #5B9BD5;
-    background: #FFFFFF;
-}
+#noteTitleEdit:focus { border-color: __BORDER_FOCUS__; background: __SURFACE__; }
 #noteContentEdit {
-    background: #F9FAFB;
-    color: #1A1D23;
-    border: 1px solid #E5E7EB;
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-size: 13px;
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: 1px solid __BORDER__; border-radius: 8px;
+    padding: 8px 12px; font-size: 13px;
 }
-#noteContentEdit:focus {
-    border-color: #5B9BD5;
-    background: #FFFFFF;
-}
+#noteContentEdit:focus { border-color: __BORDER_FOCUS__; background: __SURFACE__; }
 #noteToolBtn {
-    background: #F3F4F6;
-    color: #1A1D23;
-    border: none;
-    border-radius: 8px;
-    padding: 5px 14px;
-    font-size: 12px;
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: none; border-radius: 8px;
+    padding: 5px 14px; font-size: 12px;
 }
-#noteToolBtn:hover  { background: #E5E7EB; color: #1A1D23; }
-#noteToolBtn:pressed { background: #D1D5DB; }
+#noteToolBtn:hover  { background: __BORDER__; color: __TEXT__; }
+#noteToolBtn:pressed{ background: __SCROLLBAR__; }
 
-/* ── View-switcher buttons in title bar ────────────────────────────── */
+/* ── View-switcher buttons ────────────────────────────────────────── */
 #viewBtn {
-    background: transparent;
-    color: #6B7280;
-    border: none;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
+    background: transparent; color: __TEXT_SECONDARY__;
+    border: none; border-radius: 6px;
+    font-size: 12px; font-weight: 500;
 }
-#viewBtn:hover   { background: #F3F4F6; color: #1A1D23; }
-#viewBtn:checked { background: #E8F4FD; color: #5B9BD5; font-weight: 600; }
-#viewBtn:checked:hover { background: #D9EDFB; color: #4A8BC5; }
+#viewBtn:hover   { background: __SURFACE_RAISED__; color: __TEXT__; }
+#viewBtn:checked { background: __SELECTED__; color: __ACCENT__; font-weight: 600; }
+#viewBtn:checked:hover { background: __USER_BUBBLE__; color: __ACCENT_PRESSED__; }
 
-#noteStatusLabel {
-    color: #34D399;
-    font-size: 11px;
-    padding: 0 6px;
-}
+#noteStatusLabel { color: __SUCCESS__; font-size: 11px; padding: 0 6px; }
 
-/* ── Size grip (unused but defined) ────────────────────────────────── */
-#sizeGrip {
-    background: transparent;
-    width: 14px;
-    height: 14px;
-}
+/* ── Size grip (unused) ───────────────────────────────────────────── */
+#sizeGrip { background: transparent; width: 14px; height: 14px; }
 """
+
+
+# ── Public API ─────────────────────────────────────────────────────────
+
+def generate_stylesheet(theme_name: str) -> str:
+    """Fill the QSS template with a theme's colour tokens."""
+    colors = THEMES.get(theme_name, THEMES["classic"])
+    css = _TEMPLATE
+    for key, val in colors.items():
+        if key == "name":
+            continue
+        css = css.replace(f"__{key.upper()}__", val)
+    return css
+
+
+# Default – kept for backward compat (used at import time by main.py)
+STYLESHEET = generate_stylesheet("classic")

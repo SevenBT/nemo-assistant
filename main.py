@@ -34,16 +34,16 @@ from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
 from app.core.tool_manager import ToolManager
 from app.ui.main_window import MainWindow
-from app.ui.style import STYLESHEET
+from app.ui.style import generate_stylesheet
 
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("AI Agent")
     app.setQuitOnLastWindowClosed(False)  # keep alive in tray
-    app.setStyleSheet(STYLESHEET)
 
     config = ConfigManager()
+    app.setStyleSheet(generate_stylesheet(config.theme))
     sessions = SessionManager()
     tools = ToolManager(config)
     notes = NoteManager()

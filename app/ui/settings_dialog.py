@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -12,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.config import ConfigManager
+from app.ui.style import THEMES
 
 
 class SettingsDialog(QDialog):
@@ -71,6 +73,11 @@ class SettingsDialog(QDialog):
         self._always_on_top = QCheckBox("始终置顶")
         win_form.addRow("", self._always_on_top)
 
+        self._theme_combo = QComboBox()
+        for key, t in THEMES.items():
+            self._theme_combo.addItem(t["name"], key)
+        win_form.addRow("主题:", self._theme_combo)
+
         tabs.addTab(win_w, "窗口")
 
         layout.addWidget(tabs)
@@ -92,6 +99,10 @@ class SettingsDialog(QDialog):
         self._temperature.setValue(api.get("temperature", 0.7))
         self._opacity.setValue(win.get("opacity", 0.97))
         self._always_on_top.setChecked(win.get("always_on_top", True))
+        theme = win.get("theme", "classic")
+        idx = self._theme_combo.findData(theme)
+        if idx >= 0:
+            self._theme_combo.setCurrentIndex(idx)
 
     def _save(self):
         self._config.update_api_config(
@@ -104,5 +115,6 @@ class SettingsDialog(QDialog):
         self._config.update_window_config(
             opacity=self._opacity.value(),
             always_on_top=self._always_on_top.isChecked(),
+            theme=self._theme_combo.currentData(),
         )
         self.accept()

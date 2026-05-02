@@ -30,6 +30,7 @@ DEFAULT_APP_CONFIG: dict = {
         "y": 80,
         "opacity": 0.97,
         "always_on_top": True,
+        "theme": "classic",
     },
 }
 
@@ -99,6 +100,10 @@ class ConfigManager:
     @property
     def window_config(self) -> dict:
         return self._app["window"]
+
+    @property
+    def theme(self) -> str:
+        return self._app["window"].get("theme", "classic")
 
     @property
     def app_config(self) -> dict:
