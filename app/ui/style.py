@@ -322,4 +322,77 @@ QMenu::separator {
     background: #45475a;
     margin: 4px 10px;
 }
+
+/* ── Notes dialog ─────────────────────────────────────────────────────── */
+#noteListPanel {
+    background: #181825;
+    border-radius: 6px 0 0 6px;
+}
+#noteList {
+    background: transparent;
+    border: none;
+    outline: none;
+}
+#noteList::item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    color: #bac2de;
+    font-size: 12px;
+    line-height: 1.4;
+}
+#noteList::item:selected {
+    background: #313244;
+    color: #cdd6f4;
+}
+#noteList::item:hover:!selected {
+    background: #27273a;
+}
+#noteTitleEdit {
+    background: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 14px;
+    font-weight: 600;
+}
+#noteTitleEdit:focus {
+    border-color: #89b4fa;
+}
+#noteContentEdit {
+    background: #252538;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+}
+#noteContentEdit:focus {
+    border-color: #89b4fa;
+}
+#noteToolBtn {
+    background: #313244;
+    color: #cdd6f4;
+    border: none;
+    border-radius: 6px;
+    padding: 5px 14px;
+    font-size: 12px;
+}
+#noteToolBtn:hover  { background: #45475a; color: #ffffff; }
+#noteToolBtn:pressed { background: #585b70; }
+/* ── View-switcher buttons in title bar ─────────────────────────────── */
+#viewBtn {
+    background: transparent;
+    color: #cdd6f4;
+    border: none;
+    border-radius: 5px;
+}
+#viewBtn:hover   { background: #313244; color: #ffffff; }
+#viewBtn:checked { background: #313244; color: #89b4fa; }
+#viewBtn:checked:hover { background: #45475a; color: #89b4fa; }
+#noteStatusLabel {
+    color: #a6e3a1;
+    font-size: 11px;
+    padding: 0 6px;
+}
 """

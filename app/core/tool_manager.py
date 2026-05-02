@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -6,6 +7,18 @@ from typing import Optional
 
 from app.core.config import TOOLS_DIR, ConfigManager
 from app.models.tool_def import ParameterDef, ToolDefinition
+
+
+def _get_python_exe() -> str:
+    """Return a usable Python interpreter path.
+
+    When packaged with PyInstaller sys.executable points to the frozen .exe,
+    not to a Python interpreter.  Fall back to whatever 'python' is on PATH.
+    """
+    if getattr(sys, "frozen", False):
+        python = shutil.which("python") or shutil.which("python3")
+        return python if python else sys.executable
+    return sys.executable
 
 
 class ToolManager:
@@ -118,7 +131,7 @@ class ToolManager:
         )
         try:
             proc = subprocess.run(
-                [sys.executable, tool.script_path],
+                [_get_python_exe(), tool.script_path],
                 input=stdin_payload,
                 capture_output=True,
                 text=True,

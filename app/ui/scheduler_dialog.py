@@ -1,37 +1,38 @@
 from PyQt6.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QHeaderView,
-    QLabel,
     QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from app.core.scheduler import SchedulerManager
 
 
-class SchedulerDialog(QDialog):
+class SchedulerPanel(QWidget):
+    """定时任务面板，嵌入主窗口 QStackedWidget 中。"""
+
     def __init__(self, scheduler: SchedulerManager, parent=None):
         super().__init__(parent)
         self._scheduler = scheduler
-        self.setWindowTitle("定时任务管理")
-        self.setMinimumSize(620, 380)
         self._build()
-        self._load()
 
     def _build(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
 
-        # header
+        # header toolbar
         header = QHBoxLayout()
-        header.addWidget(QLabel("定时任务"))
-        header.addStretch()
+        header.setSpacing(6)
         refresh_btn = QPushButton("刷新")
+        refresh_btn.setObjectName("noteToolBtn")
         refresh_btn.clicked.connect(self._load)
         header.addWidget(refresh_btn)
+        header.addStretch()
         layout.addLayout(header)
 
         # table
@@ -49,10 +50,6 @@ class SchedulerDialog(QDialog):
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self._table)
 
-        close_btn = QPushButton("关闭")
-        close_btn.clicked.connect(self.accept)
-        layout.addWidget(close_btn)
-
     def _load(self):
         jobs = self._scheduler.get_jobs()
         self._table.setRowCount(len(jobs))
@@ -61,7 +58,6 @@ class SchedulerDialog(QDialog):
             self._table.setItem(row, 1, QTableWidgetItem(job.get("tool_name", "")))
             self._table.setItem(row, 2, QTableWidgetItem(job.get("trigger_type", "")))
             self._table.setItem(row, 3, QTableWidgetItem(job.get("description", "")))
-
             del_btn = QPushButton("删除")
             del_btn.setFixedWidth(54)
             jid = job["id"]
@@ -78,3 +74,11 @@ class SchedulerDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             self._scheduler.remove_job(job_id)
             self._load()
+
+    def showEvent(self, event):
+        """切换到此视图时自动刷新任务列表。"""
+        self._load()
+        super().showEvent(event)
+
+    def refresh(self):
+        self._load()

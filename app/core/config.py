@@ -1,11 +1,18 @@
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-BASE_DIR = Path(__file__).parent.parent.parent
+# PyInstaller 打包后 __file__ 指向临时目录，需要用 exe 所在目录作为根目录
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).parent.parent.parent
 CONFIG_DIR = BASE_DIR / "config"
 DATA_DIR = BASE_DIR / "data"
 SESSIONS_DIR = DATA_DIR / "sessions"
+NOTES_DIR = DATA_DIR / "notes"
+TRASH_DIR = NOTES_DIR / "trash"
 TOOLS_DIR = BASE_DIR / "tools"
 
 DEFAULT_APP_CONFIG: dict = {
@@ -37,7 +44,7 @@ class ConfigManager:
 
     # ------------------------------------------------------------------ dirs
     def _ensure_dirs(self):
-        for d in [CONFIG_DIR, DATA_DIR, SESSIONS_DIR, TOOLS_DIR]:
+        for d in [CONFIG_DIR, DATA_DIR, SESSIONS_DIR, NOTES_DIR, TRASH_DIR, TOOLS_DIR]:
             d.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ io
