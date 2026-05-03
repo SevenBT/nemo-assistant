@@ -71,6 +71,7 @@ def _make_icon() -> QIcon:
 class TrayManager(QObject):
     show_requested = pyqtSignal()
     settings_requested = pyqtSignal()
+    screenshot_requested = pyqtSignal()
     quit_requested = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -88,6 +89,12 @@ class TrayManager(QObject):
         show_act = QAction("显示窗口", menu)
         show_act.triggered.connect(self.show_requested)
         menu.addAction(show_act)
+
+        snap_act = QAction("截图", menu)
+        snap_act.triggered.connect(self.screenshot_requested)
+        menu.addAction(snap_act)
+
+        menu.addSeparator()
 
         settings_act = QAction("设置", menu)
         settings_act.triggered.connect(self.settings_requested)

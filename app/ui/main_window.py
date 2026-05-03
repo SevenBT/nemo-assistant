@@ -2,23 +2,24 @@
 Main floating window.
 
 Layout:
-  ┌─ TitleBar ─────────────────────────────────────────┐
-  │ [≡] AI Agent ── [聊天] [笔记] [定时] ── [─] [✕]   │
-  ├────────────────────────────────────────────────────┤
-  │ QStackedWidget                                     │
-  │  page 0: SessionPanel | ChatWidget + InputWidget   │
-  │  page 1: NotesPanel                                │
-  │  page 2: SchedulerPanel                            │
-  └────────────────────────────────────────────────────┘
+  ┌─ TitleBar ───────────────────────────────────────────────────┐
+  │ [≡] AI Agent ── [聊天] [笔记] [定时] ── [□] [─] [✕]        │
+  ├──────────────────────────────────────────────────────────────┤
+  │ QStackedWidget                                               │
+  │  page 0: SessionPanel | ChatWidget + InputWidget             │
+  │  page 1: NotesPanel                                          │
+  │  page 2: SchedulerPanel                                      │
+  └──────────────────────────────────────────────────────────────┘
 """
 import json
 import time
 
-from PyQt6.QtCore import Qt, pyqtSlot
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSlot
+from PyQt6.QtGui import QMouseEvent, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -41,7 +42,9 @@ from app.ui.edge_snap import EdgeSnapManager
 from app.ui.input_widget import InputWidget
 from app.ui.manual_params_dialog import ManualParamsDialog
 from app.ui.notes_dialog import NotesPanel
+from app.ui.pin_window import PinWindow
 from app.ui.scheduler_dialog import SchedulerPanel
+from app.ui.screenshot_overlay import ScreenshotOverlay
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.style import generate_stylesheet
@@ -199,6 +202,16 @@ class TitleBar(QWidget):
         self._btn_group.button(0).setChecked(True)
         self._btn_group.idClicked.connect(self._win._switch_view)
 
+        snap_btn = QPushButton("✂")
+        snap_btn.setObjectName("iconBtn")
+        snap_btn.setFixedSize(32, 28)
+        snap_btn.setToolTip("截图")
+        f = snap_btn.font()
+        f.setPointSize(16)
+        snap_btn.setFont(f)
+        snap_btn.clicked.connect(self._win._start_screenshot)
+        layout.addWidget(snap_btn)
+
         min_btn = QPushButton("─")
         min_btn.setObjectName("iconBtn")
         min_btn.setFixedSize(32, 28)
@@ -340,6 +353,7 @@ class MainWindow(QWidget):
         self._tray = TrayManager(self)
         self._tray.show_requested.connect(self._show_window)
         self._tray.settings_requested.connect(self._open_settings)
+        self._tray.screenshot_requested.connect(self._start_screenshot)
         self._tray.quit_requested.connect(QApplication.instance().quit)
         self._scheduler.set_result_callback(self._on_scheduler_result)
 
@@ -448,6 +462,24 @@ class MainWindow(QWidget):
         result = [{"role": "system", "content": SYSTEM_PROMPT}]
         for m in messages:
             result.append(m.to_api_dict())
+            # Every assistant message with tool_calls MUST be immediately followed
+            # by a tool result message for each call_id, otherwise the API returns 400.
+            # Tool results are stored in ToolCall.result (not as separate Message objects).
+            if m.role == MessageRole.ASSISTANT and m.tool_calls:
+                # Only inject tool results when ALL calls in this turn have a result.
+                # If any result is missing (incomplete turn), drop this whole turn from
+                # history to avoid sending a tool_calls message without matching tool messages.
+                all_done = all(tc.result is not None for tc in m.tool_calls)
+                if all_done:
+                    for tc in m.tool_calls:
+                        result.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": json.dumps(tc.result, ensure_ascii=False),
+                        })
+                else:
+                    # Remove the incomplete assistant message we just appended
+                    result.pop()
         return result
 
     # ── worker signal handlers ──────────────────────────────────────────
@@ -631,6 +663,52 @@ class MainWindow(QWidget):
 
     def _minimize(self):
         self.hide()
+
+    # ──────────────────────────────────────────── screenshot
+    def _start_screenshot(self):
+        if hasattr(self, '_overlay') and self._overlay is not None:
+            return  # already capturing
+        self.hide()
+        # Delay to let the window disappear before capturing
+        QTimer.singleShot(200, self._do_screenshot)
+
+    def _do_screenshot(self):
+        self._overlay = ScreenshotOverlay()
+        self._overlay.captured.connect(self._on_screenshot_done)
+        self._overlay.show()
+        self._overlay.activateWindow()  # ensure keyboard focus for Esc
+
+    def _on_screenshot_done(self, pixmap: QPixmap, action: str, ocr_text: str, pos: QPoint):
+        self._overlay = None
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+        if action == "cancel":
+            return
+        if action == "ocr":
+            if ocr_text:
+                QApplication.clipboard().setText(ocr_text)
+            return
+        if pixmap.isNull():
+            return
+
+        if action == "pin":
+            pw = PinWindow(pixmap, pos=pos)
+            pw.show()
+            # Keep reference so it isn't garbage-collected
+            if not hasattr(self, '_pin_windows'):
+                self._pin_windows = []
+            self._pin_windows.append(pw)
+            pw.closed.connect(lambda w=pw: self._pin_windows.remove(w) if w in self._pin_windows else None)
+        elif action == "copy":
+            QApplication.clipboard().setPixmap(pixmap)
+        elif action == "save":
+            path, _ = QFileDialog.getSaveFileName(
+                self, "保存截图", "screenshot.png", "PNG (*.png)"
+            )
+            if path:
+                pixmap.save(path, "PNG")
 
     def _show_window(self):
         if self._snap_mgr is not None and self._snap_mgr.is_snapped:

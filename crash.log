@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "D:\claudecode-projects\assistant\app\ui\screenshot_overlay.py", line 253, in paintEvent
+    full.addRect(self.rect())
+TypeError: arguments did not match any overloaded call:
+  addRect(self, rect: QRectF): argument 1 has unexpected type 'QRect'
+  addRect(self, x: float, y: float, w: float, h: float): argument 1 has unexpected type 'QRect'
