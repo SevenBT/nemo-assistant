@@ -14,7 +14,7 @@ Layout:
 import json
 import time
 
-from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSlot
+from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QMouseEvent, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -47,7 +47,8 @@ from app.ui.scheduler_dialog import SchedulerPanel
 from app.ui.screenshot_overlay import ScreenshotOverlay
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_dialog import SettingsDialog
-from app.ui.style import generate_stylesheet
+from app.ui.style import THEMES, generate_stylesheet
+from app.ui.toast import show_toast
 from app.ui.tray_manager import TrayManager
 
 SYSTEM_PROMPT = """你是一个智能AI助手。你可以调用工具来帮助用户完成任务。
@@ -243,6 +244,9 @@ class TitleBar(QWidget):
 
 # ─────────────────────────────────────────────────────────────────────
 class MainWindow(QWidget):
+    # Used to marshal scheduler callbacks from background threads to the main thread
+    _notify_signal = pyqtSignal(str, str)  # title, body
+
     def __init__(
         self,
         config: ConfigManager,
@@ -275,6 +279,7 @@ class MainWindow(QWidget):
         self._install_resize_filter()
         self._snap_mgr = EdgeSnapManager(self)
         self._snap_mgr.set_enabled(self._config.window_config.get("edge_snap", True))
+        self._notify_signal.connect(self._on_notify)
 
     # ──────────────────────────────────────────── window setup
     def _build_window(self):
@@ -637,8 +642,18 @@ class MainWindow(QWidget):
 
     # ──────────────────────────────────────────── scheduler callback
     def _on_scheduler_result(self, job_id: str, job_name: str, result: dict):
-        status = "成功" if result.get("status") == "success" else "失败"
-        self._tray.notify(f"定时任务: {job_name}", f"执行{status}")
+        # Called from APScheduler's background thread — use signal to reach main thread.
+        data = result.get("data", {})
+        if result.get("status") == "success":
+            body = data.get("message") or "执行成功"
+        else:
+            body = data.get("message") or "执行失败"
+        self._notify_signal.emit(job_name, body)
+
+    @pyqtSlot(str, str)
+    def _on_notify(self, title: str, body: str):
+        colors = THEMES.get(self._config.theme, THEMES["classic"])
+        show_toast(title, body, accent=colors["accent"])
 
     # ──────────────────────────────────────────── dialogs / window actions
     def _open_settings(self):

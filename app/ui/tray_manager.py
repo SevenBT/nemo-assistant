@@ -112,7 +112,3 @@ class TrayManager(QObject):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show_requested.emit()
 
-    def notify(self, title: str, message: str):
-        self._tray.showMessage(
-            title, message, QSystemTrayIcon.MessageIcon.Information, 4000
-        )

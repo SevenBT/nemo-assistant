@@ -9,7 +9,15 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=openai_binaries + httpx_binaries + httpcore_binaries,
-    datas=openai_datas + httpx_datas + httpcore_datas,
+    datas=[
+        *openai_datas,
+        *httpx_datas,
+        *httpcore_datas,
+        # Ship the tools directory next to the exe so users can add/edit scripts
+        # without repackaging.  At runtime TOOLS_DIR resolves to
+        # Path(sys.executable).parent / "tools".
+        ('tools', 'tools'),
+    ],
     hiddenimports=[
         *openai_hiddenimports,
         *httpx_hiddenimports,
@@ -25,6 +33,11 @@ a = Analysis(
         'PyQt6.QtCore',
         'PyQt6.QtGui',
         'PyQt6.QtWidgets',
+        # Common packages that user scripts may import.
+        # Add more here when bundling tools that need extra dependencies.
+        'psutil',
+        'requests',
+        'runpy',
     ],
     hookspath=[],
     hooksconfig={},

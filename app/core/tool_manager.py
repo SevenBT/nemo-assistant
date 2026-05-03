@@ -1,24 +1,16 @@
+import io
 import json
-import shutil
-import subprocess
+import runpy
 import sys
+import threading
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Optional
 
 from app.core.config import TOOLS_DIR, ConfigManager
 from app.models.tool_def import ParameterDef, ToolDefinition
 
-
-def _get_python_exe() -> str:
-    """Return a usable Python interpreter path.
-
-    When packaged with PyInstaller sys.executable points to the frozen .exe,
-    not to a Python interpreter.  Fall back to whatever 'python' is on PATH.
-    """
-    if getattr(sys, "frozen", False):
-        python = shutil.which("python") or shutil.which("python3")
-        return python if python else sys.executable
-    return sys.executable
+_TOOL_TIMEOUT = 60  # seconds
 
 
 class ToolManager:
@@ -121,36 +113,76 @@ class ToolManager:
 
     # ------------------------------------------------------------------ execution
     def execute(self, tool_name: str, params: dict) -> dict:
-        """Run the Python script, pass params via stdin JSON, parse stdout last line."""
+        """Run the tool script in-process using the bundled Python interpreter.
+
+        The script is executed via runpy inside a daemon thread so the calling
+        thread can enforce a timeout.  stdin/stdout are redirected per-call so
+        the existing script API (read JSON from stdin, print JSON to stdout) is
+        preserved without any subprocess overhead.
+        """
         tool = self._tools.get(tool_name)
         if not tool:
             return {"status": "error", "data": {"message": f"Tool not found: {tool_name}"}}
 
+        result_holder: list[dict] = []
+
+        def _run():
+            result_holder.append(self._exec_script(tool, params))
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=_TOOL_TIMEOUT)
+
+        if t.is_alive():
+            return {
+                "status": "error",
+                "data": {"message": f"Execution timed out ({_TOOL_TIMEOUT}s)"},
+            }
+        if result_holder:
+            return result_holder[0]
+        return {"status": "success", "data": {}}
+
+    def _exec_script(self, tool: ToolDefinition, params: dict) -> dict:
+        """Execute *tool.script_path* in-process and return its JSON result."""
         stdin_payload = json.dumps(
             {"params": params, "context": {}}, ensure_ascii=False
         )
+        stdout_buf = io.StringIO()
+        stdin_buf = io.StringIO(stdin_payload)
+
+        # Temporarily add the script's own directory to sys.path so it can
+        # import sibling modules (helpers, shared utils, etc.).
+        script_dir = str(Path(tool.script_path).parent)
+        path_inserted = script_dir not in sys.path
+        if path_inserted:
+            sys.path.insert(0, script_dir)
+
+        old_stdin = sys.stdin
+        sys.stdin = stdin_buf
         try:
-            proc = subprocess.run(
-                [_get_python_exe(), tool.script_path],
-                input=stdin_payload,
-                capture_output=True,
-                text=True,
-                timeout=60,
-                encoding="utf-8",
-            )
-            stdout = proc.stdout.strip()
-            if not stdout:
-                if proc.returncode != 0:
-                    return {
-                        "status": "error",
-                        "data": {"message": proc.stderr.strip() or "No output"},
-                    }
-                return {"status": "success", "data": {}}
-            last_line = stdout.splitlines()[-1]
-            return json.loads(last_line)
-        except subprocess.TimeoutExpired:
-            return {"status": "error", "data": {"message": "Execution timed out (60s)"}}
-        except json.JSONDecodeError as e:
-            return {"status": "error", "data": {"message": f"Invalid JSON output: {e}"}}
+            with redirect_stdout(stdout_buf):
+                runpy.run_path(tool.script_path, run_name="__main__")
+        except SystemExit:
+            pass  # scripts may call sys.exit(0) to signal clean completion
         except Exception as e:
             return {"status": "error", "data": {"message": str(e)}}
+        finally:
+            sys.stdin = old_stdin
+            if path_inserted:
+                try:
+                    sys.path.remove(script_dir)
+                except ValueError:
+                    pass
+
+        output = stdout_buf.getvalue().strip()
+        if not output:
+            return {"status": "success", "data": {}}
+
+        last_line = output.splitlines()[-1]
+        try:
+            return json.loads(last_line)
+        except json.JSONDecodeError as e:
+            return {
+                "status": "error",
+                "data": {"message": f"Invalid JSON output: {e}", "raw": output},
+            }
