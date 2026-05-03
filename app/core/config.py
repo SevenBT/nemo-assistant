@@ -31,6 +31,7 @@ DEFAULT_APP_CONFIG: dict = {
         "opacity": 0.97,
         "always_on_top": True,
         "theme": "classic",
+        "edge_snap": True,
     },
 }
 

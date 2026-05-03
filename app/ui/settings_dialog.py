@@ -73,6 +73,9 @@ class SettingsDialog(QDialog):
         self._always_on_top = QCheckBox("始终置顶")
         win_form.addRow("", self._always_on_top)
 
+        self._edge_snap = QCheckBox("贴边自动吸附（上/右边缘）")
+        win_form.addRow("", self._edge_snap)
+
         self._theme_combo = QComboBox()
         for key, t in THEMES.items():
             self._theme_combo.addItem(t["name"], key)
@@ -99,6 +102,7 @@ class SettingsDialog(QDialog):
         self._temperature.setValue(api.get("temperature", 0.7))
         self._opacity.setValue(win.get("opacity", 0.97))
         self._always_on_top.setChecked(win.get("always_on_top", True))
+        self._edge_snap.setChecked(win.get("edge_snap", True))
         theme = win.get("theme", "classic")
         idx = self._theme_combo.findData(theme)
         if idx >= 0:
@@ -116,5 +120,6 @@ class SettingsDialog(QDialog):
             opacity=self._opacity.value(),
             always_on_top=self._always_on_top.isChecked(),
             theme=self._theme_combo.currentData(),
+            edge_snap=self._edge_snap.isChecked(),
         )
         self.accept()

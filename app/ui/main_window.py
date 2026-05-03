@@ -37,6 +37,7 @@ from app.core.tool_manager import ToolManager
 from app.models.message import Message, MessageRole, ToolCall
 from app.ui.chat_widget import ChatWidget, MessageBubble
 from app.ui.chat_worker import ChatWorker
+from app.ui.edge_snap import EdgeSnapManager
 from app.ui.input_widget import InputWidget
 from app.ui.manual_params_dialog import ManualParamsDialog
 from app.ui.notes_dialog import NotesPanel
@@ -220,6 +221,8 @@ class TitleBar(QWidget):
 
     def mousePressEvent(self, e: QMouseEvent):
         if e.button() == Qt.MouseButton.LeftButton:
+            if self._win._snap_mgr is not None:
+                self._win._snap_mgr.cancel_animation()
             handle = self._win.windowHandle()
             if handle:
                 handle.startSystemMove()
@@ -251,11 +254,14 @@ class MainWindow(QWidget):
         self._resize_edges_active = None
         self._resize_start_geo = None
         self._resize_start_pos = None
+        self._snap_mgr: EdgeSnapManager | None = None
         self._build_window()
         self._build_ui()
         self._setup_tray()
         self._init_sessions()
         self._install_resize_filter()
+        self._snap_mgr = EdgeSnapManager(self)
+        self._snap_mgr.set_enabled(self._config.window_config.get("edge_snap", True))
 
     # ──────────────────────────────────────────── window setup
     def _build_window(self):
@@ -611,6 +617,8 @@ class MainWindow(QWidget):
             self.setWindowOpacity(wcfg.get("opacity", 0.97))
             flag = Qt.WindowType.WindowStaysOnTopHint
             self.setWindowFlag(flag, wcfg.get("always_on_top", True))
+            if self._snap_mgr is not None:
+                self._snap_mgr.set_enabled(wcfg.get("edge_snap", True))
             # Re-apply stylesheet if theme changed
             new_theme = self._config.theme
             if new_theme != old_theme:
@@ -625,9 +633,27 @@ class MainWindow(QWidget):
         self.hide()
 
     def _show_window(self):
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        if self._snap_mgr is not None and self._snap_mgr.is_snapped:
+            self._snap_mgr.unsnap_full()
+        else:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if self._snap_mgr is not None:
+            self._snap_mgr.check_position()
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        if self._snap_mgr is not None:
+            self._snap_mgr.on_enter()
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        if self._snap_mgr is not None:
+            self._snap_mgr.on_leave()
 
     def _toggle_session_panel(self):
         if self._session_panel.isVisible():
@@ -696,6 +722,10 @@ class MainWindow(QWidget):
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent
         etype = event.type()
+
+        # Suppress resize while snapped or animating to avoid interfering with snap
+        if self._snap_mgr is not None and (self._snap_mgr.is_snapped or self._snap_mgr.is_animating):
+            return False
 
         if etype == QEvent.Type.MouseMove:
             gpos = event.globalPosition().toPoint()
