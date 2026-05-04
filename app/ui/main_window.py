@@ -263,7 +263,8 @@ class MainWindow(QWidget):
         self._notes = note_mgr
         self._ai = AIClient(config)
         self._current_session_id: str | None = None
-        self._worker: ChatWorker | None = None
+        self._workers: dict[str, ChatWorker] = {}
+        self._session_live: dict[str, dict] = {}  # sid -> {ai_msg, ai_text}
         self._current_ai_bubble: MessageBubble | None = None
         self._current_ai_msg: Message | None = None
         self._current_ai_text = ""
@@ -359,7 +360,7 @@ class MainWindow(QWidget):
         self._tray.show_requested.connect(self._show_window)
         self._tray.settings_requested.connect(self._open_settings)
         self._tray.screenshot_requested.connect(self._start_screenshot)
-        self._tray.quit_requested.connect(QApplication.instance().quit)
+        self._tray.quit_requested.connect(self._on_quit)
         self._scheduler.set_result_callback(self._on_scheduler_result)
 
     # ──────────────────────────────────────────── sessions
@@ -394,53 +395,79 @@ class MainWindow(QWidget):
         if sid != self._current_session_id:
             self._switch_session(sid)
 
+    def _cancel_worker(self, sid: str | None = None):
+        """Stop and discard the worker for the given session (default: current)."""
+        if sid is None:
+            sid = self._current_session_id
+        if not sid:
+            return
+        worker = self._workers.pop(sid, None)
+        self._session_live.pop(sid, None)
+        if worker is None:
+            return
+        worker.stop()
+        try:
+            worker.disconnect()
+        except RuntimeError:
+            pass
+
     def _switch_session(self, sid: str):
-        # Cancel any in-progress streaming first; null refs before destroying widgets
-        if self._worker and self._worker.isRunning():
-            self._worker.stop()
+        # Don't stop any running worker — let it continue in the background.
+        # Null out the foreground bubble/msg refs (they belong to the old session's UI).
         self._current_ai_bubble = None
         self._current_ai_msg = None
         self._current_ai_text = ""
         self._current_session_id = sid
+
+        # Reload chat history (background worker has been updating session.messages live)
         session = self._sessions.get(sid)
         if session:
             self._chat.load_session(session.messages)
-        self._input.set_enabled(True)
+
+        # If the new session has a running worker, re-attach foreground references
+        live = self._session_live.get(sid)
+        if live:
+            self._current_ai_msg = live["ai_msg"]
+            self._current_ai_text = live["ai_text"]
+            self._current_ai_bubble = self._chat.last_bubble()
+            self._input.set_enabled(False)
+        else:
+            self._input.set_enabled(True)
+
         self._input.focus()
 
     # ──────────────────────────────────────────── chat
     @pyqtSlot(str)
     def _on_submit(self, text: str):
-        if not self._current_session_id:
+        sid = self._current_session_id
+        if not sid:
             return
-        if self._worker and self._worker.isRunning():
-            return
+        if sid in self._workers:
+            return  # already running for this session
 
         # Add user message
         user_msg = Message(role=MessageRole.USER, content=text)
-        self._sessions.add_message(self._current_session_id, user_msg)
+        self._sessions.add_message(sid, user_msg)
         self._chat.add_message(user_msg)
-        self._session_panel.update_title(
-            self._current_session_id,
-            self._sessions.get(self._current_session_id).title,
-        )
+        self._session_panel.update_title(sid, self._sessions.get(sid).title)
 
-        # Placeholder AI message – track the object so we can write content into it live
+        # Placeholder AI message
         ai_msg = Message(role=MessageRole.ASSISTANT, content="")
-        self._sessions.add_message(self._current_session_id, ai_msg)
+        self._sessions.add_message(sid, ai_msg)
         self._current_ai_msg = ai_msg
         self._current_ai_bubble = self._chat.add_message(ai_msg)
         self._current_ai_text = ""
         self._input.set_enabled(False)
 
-        # Build API message list
-        session = self._sessions.get(self._current_session_id)
-        api_msgs = self._build_api_messages(session.messages[:-1])  # exclude placeholder
+        # Per-session live state (used when this session goes to background)
+        self._session_live[sid] = {"ai_msg": ai_msg, "ai_text": ""}
 
-        # All tools = script tools + built-ins
+        # Build API message list
+        session = self._sessions.get(sid)
+        api_msgs = self._build_api_messages(session.messages[:-1])  # exclude placeholder
         all_tools = self._tools.get_openai_functions() + BUILTIN_TOOLS
 
-        self._worker = ChatWorker(
+        worker = ChatWorker(
             ai_client=self._ai,
             tool_manager=self._tools,
             api_messages=api_msgs,
@@ -454,14 +481,9 @@ class MainWindow(QWidget):
                 "summarize_session_as_note": self._handle_summarize_as_note,
             },
         )
-        self._worker.text_chunk.connect(self._on_text_chunk)
-        self._worker.tool_started.connect(self._on_tool_started)
-        self._worker.tool_done.connect(self._on_tool_done)
-        self._worker.need_manual_params.connect(self._on_need_manual_params)
-        self._worker.new_ai_turn.connect(self._on_new_ai_turn)
-        self._worker.finished.connect(self._on_chat_done)
-        self._worker.error.connect(self._on_chat_error)
-        self._worker.start()
+        self._workers[sid] = worker
+        self._connect_worker(sid, worker)
+        worker.start()
 
     def _build_api_messages(self, messages: list[Message]) -> list[dict]:
         result = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -487,99 +509,128 @@ class MainWindow(QWidget):
                     result.pop()
         return result
 
-    # ── worker signal handlers ──────────────────────────────────────────
-    @pyqtSlot(str)
-    def _on_text_chunk(self, delta: str):
-        self._current_ai_text += delta
+    # ── worker wiring ───────────────────────────────────────────────────
+    def _connect_worker(self, sid: str, worker: ChatWorker):
+        """Wire all worker signals with the session id captured in closures."""
+        worker.text_chunk.connect(lambda d, s=sid: self._on_bg_text_chunk(s, d))
+        worker.tool_started.connect(lambda cid, tn, p, s=sid: self._on_bg_tool_started(s, cid, tn, p))
+        worker.tool_done.connect(lambda cid, r, s=sid: self._on_bg_tool_done(s, cid, r))
+        worker.need_manual_params.connect(lambda cid, tn, ps, s=sid: self._on_bg_need_manual(s, cid, tn, ps))
+        worker.new_ai_turn.connect(lambda s=sid: self._on_bg_new_ai_turn(s))
+        worker.finished.connect(lambda s=sid: self._on_bg_finished(s))
+        worker.error.connect(lambda msg, s=sid: self._on_bg_error(s, msg))
+
+    # ── session-aware signal handlers ───────────────────────────────────
+    def _on_bg_text_chunk(self, sid: str, delta: str):
+        live = self._session_live.get(sid)
+        if live is None:
+            return
+        live["ai_text"] += delta
+        if live["ai_msg"]:
+            live["ai_msg"].content = live["ai_text"]
+        if sid != self._current_session_id:
+            return
+        self._current_ai_text = live["ai_text"]
         try:
             if self._current_ai_bubble:
                 self._current_ai_bubble.set_content(self._current_ai_text)
         except RuntimeError:
             self._current_ai_bubble = None
-        if self._current_ai_msg:
-            self._current_ai_msg.content = self._current_ai_text
         self._chat.scroll_bottom()
 
-    @pyqtSlot(str, str, dict)
-    def _on_tool_started(self, call_id: str, tool_name: str, params: dict):
+    def _on_bg_tool_started(self, sid: str, call_id: str, tool_name: str, params: dict):
+        session = self._sessions.get(sid)
+        if session and session.messages:
+            tc = ToolCall(id=call_id, name=tool_name, arguments=params, status="running")
+            session.messages[-1].tool_calls.append(tc)
+        if sid != self._current_session_id:
+            return
         if self._current_ai_bubble:
             try:
-                tc = ToolCall(id=call_id, name=tool_name, arguments=params, status="running")
-                session = self._sessions.get(self._current_session_id)
-                if session and session.messages:
-                    session.messages[-1].tool_calls.append(tc)
                 self._current_ai_bubble.add_tool_card(call_id, tool_name, params)
                 self._chat.scroll_bottom()
             except RuntimeError:
                 self._current_ai_bubble = None
 
-    @pyqtSlot(str, dict)
-    def _on_tool_done(self, call_id: str, result: dict):
-        if self._current_ai_bubble:
-            try:
-                self._current_ai_bubble.update_tool_card(call_id, result)
-            except RuntimeError:
-                self._current_ai_bubble = None
-        # Update session
-        session = self._sessions.get(self._current_session_id)
-        if session and session.messages:
+    def _on_bg_tool_done(self, sid: str, call_id: str, result: dict):
+        session = self._sessions.get(sid)
+        if session:
             for msg in reversed(session.messages):
                 for tc in msg.tool_calls:
                     if tc.id == call_id:
                         tc.result = result
                         tc.status = result.get("status", "success")
                         break
+        if sid != self._current_session_id:
+            return
+        if self._current_ai_bubble:
+            try:
+                self._current_ai_bubble.update_tool_card(call_id, result)
+            except RuntimeError:
+                self._current_ai_bubble = None
 
-    @pyqtSlot(str, str, list)
-    def _on_need_manual_params(self, call_id: str, tool_name: str, param_names: list):
-        dlg = ManualParamsDialog(tool_name, param_names, self)
-        if dlg.exec():
-            params = dlg.get_values()
+    def _on_bg_need_manual(self, sid: str, call_id: str, tool_name: str, param_names: list):
+        worker = self._workers.get(sid)
+        if worker is None:
+            return
+        if sid == self._current_session_id:
+            dlg = ManualParamsDialog(tool_name, param_names, self)
+            params = dlg.get_values() if dlg.exec() else {}
         else:
-            params = {}
-        if self._worker:
-            self._worker.supply_manual_params(params)
+            params = {}  # auto-skip for background sessions
+        worker.supply_manual_params(params)
 
-    @pyqtSlot()
-    def _on_new_ai_turn(self):
-        # Start a new AI message bubble for the follow-up response
+    def _on_bg_new_ai_turn(self, sid: str):
         ai_msg = Message(role=MessageRole.ASSISTANT, content="")
-        self._sessions.add_message(self._current_session_id, ai_msg)
+        self._sessions.add_message(sid, ai_msg)
+        live = self._session_live.get(sid)
+        if live:
+            live["ai_msg"] = ai_msg
+            live["ai_text"] = ""
+        if sid != self._current_session_id:
+            return
         self._current_ai_msg = ai_msg
         self._current_ai_bubble = self._chat.add_message(ai_msg)
         self._current_ai_text = ""
 
-    @pyqtSlot()
-    def _on_chat_done(self):
-        # Content is written live via _on_text_chunk; ensure it's set if nothing arrived
-        if self._current_ai_msg and not self._current_ai_msg.content:
-            self._current_ai_msg.content = self._current_ai_text
-        if self._current_session_id:
-            self._sessions.save_session(self._current_session_id)
+    def _on_bg_finished(self, sid: str):
+        live = self._session_live.get(sid)
+        if live and live["ai_msg"] and not live["ai_msg"].content:
+            live["ai_msg"].content = live["ai_text"]
+        self._sessions.save_session(sid)
+        self._workers.pop(sid, None)
+        self._session_live.pop(sid, None)
+        if sid != self._current_session_id:
+            return
         self._input.set_enabled(True)
         self._input.focus()
-        self._worker = None
         self._current_ai_msg = None
+        self._current_ai_bubble = None
 
-    @pyqtSlot(str)
-    def _on_chat_error(self, message: str):
+    def _on_bg_error(self, sid: str, message: str):
         hint = ""
         if "404" in message:
             hint = f"\n\n提示：请在设置中检查 API 地址（当前: {self._config.api_base_url}）和模型名称（当前: {self._config.model}）"
         elif "401" in message or "Unauthorized" in message:
             hint = "\n\n提示：API Key 无效，请在设置中重新填写"
-
         error_text = f"❌ 请求失败：{message}{hint}"
-        if self._current_ai_msg:
-            self._current_ai_msg.content = error_text
+        live = self._session_live.get(sid)
+        if live and live["ai_msg"]:
+            live["ai_msg"].content = error_text
+        self._sessions.save_session(sid)
+        self._workers.pop(sid, None)
+        self._session_live.pop(sid, None)
+        if sid != self._current_session_id:
+            return
         if self._current_ai_bubble:
-            self._current_ai_bubble.set_content(error_text)
-        if self._current_session_id:
-            self._sessions.save_session(self._current_session_id)
+            try:
+                self._current_ai_bubble.set_content(error_text)
+            except RuntimeError:
+                pass
         self._input.set_enabled(True)
         self._input.focus()
-        self._worker = None
         self._current_ai_msg = None
+        self._current_ai_bubble = None
 
     # ──────────────────────────────────────────── built-in tool handlers
     def _handle_create_task(self, args: dict) -> dict:
@@ -867,3 +918,12 @@ class MainWindow(QWidget):
         )
         event.ignore()
         self.hide()
+
+    def cleanup(self):
+        """Stop all background workers. Call before app quit."""
+        for sid in list(self._workers):
+            self._cancel_worker(sid)
+
+    def _on_quit(self):
+        self.cleanup()
+        QApplication.instance().quit()

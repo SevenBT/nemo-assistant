@@ -1,9 +1,12 @@
 import json
 from typing import Iterator, Optional
 
+import httpx
 from openai import OpenAI
 
 from app.core.config import ConfigManager
+
+_TIMEOUT = httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0)
 
 
 class AIClient:
@@ -14,6 +17,7 @@ class AIClient:
         return OpenAI(
             api_key=self._config.api_key or "sk-placeholder",
             base_url=self._config.api_base_url,
+            timeout=_TIMEOUT,
         )
 
     def chat_stream(

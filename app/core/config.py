@@ -129,3 +129,9 @@ class ConfigManager:
     def set_tool_param(self, tool_name: str, param: str, value: Any):
         self._params["tools"].setdefault(tool_name, {})[param] = value
         self._write(CONFIG_DIR / "params_config.json", self._params)
+
+    def update_tools_config(self, updates: dict):
+        """Batch-update tool params. updates = {tool_name: {param: value, ...}, ...}"""
+        for tool_name, params in updates.items():
+            self._params["tools"].setdefault(tool_name, {}).update(params)
+        self._write(CONFIG_DIR / "params_config.json", self._params)

@@ -31,6 +31,8 @@ class ToolDefinition:
         properties = {}
         required_params = []
         for param_name, param_def in self.parameters.items():
+            if param_def.source == "config":  # Config params are internal, not exposed to AI
+                continue
             properties[param_name] = param_def.to_schema_dict()
             if param_def.required:
                 required_params.append(param_name)
