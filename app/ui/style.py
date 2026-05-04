@@ -287,8 +287,22 @@ QScrollBar::handle:vertical {
 QScrollBar::handle:vertical:hover { background: __SCROLLBAR_HOVER__; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 
+/* ── Tool status bar ──────────────────────────────────────────────── */
+#toolStatus {
+	color: __TEXT_MUTED__; font-size: 11px;
+	padding: 2px 14px; background: transparent;
+}
+
 /* ── Typing indicator ─────────────────────────────────────────────── */
-#typingLabel { color: __TEXT_MUTED__; font-size: 12px; font-style: italic; }
+#typingIndicator {
+    background: __SURFACE__;
+    border-radius: 12px;
+    border: 1px solid __BORDER__;
+}
+#typingDot {
+    background: __TEXT_MUTED__;
+    border-radius: 4px;
+}
 
 /* ── Tray / context menu ──────────────────────────────────────────── */
 QMenu {

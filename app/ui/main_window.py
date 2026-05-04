@@ -333,6 +333,10 @@ class MainWindow(QWidget):
         chat_col.setSpacing(0)
         self._chat = ChatWidget()
         chat_col.addWidget(self._chat)
+        self._tool_status = QLabel()
+        self._tool_status.setObjectName("toolStatus")
+        self._tool_status.hide()
+        chat_col.addWidget(self._tool_status)
         self._input = InputWidget()
         self._input.submitted.connect(self._on_submit)
         chat_col.addWidget(self._input)
@@ -418,6 +422,8 @@ class MainWindow(QWidget):
         self._current_ai_msg = None
         self._current_ai_text = ""
         self._current_session_id = sid
+        self._tool_status.hide()  # prevent old session's tool status leaking into new session
+        self._chat.stop_typing()
 
         # Reload chat history (background worker has been updating session.messages live)
         session = self._sessions.get(sid)
@@ -429,8 +435,15 @@ class MainWindow(QWidget):
         if live:
             self._current_ai_msg = live["ai_msg"]
             self._current_ai_text = live["ai_text"]
-            self._current_ai_bubble = self._chat.last_bubble()
+            # Only set bubble if we've received text (bubble exists in chat)
+            if live.get("first_chunk_sent") and live["ai_text"]:
+                self._current_ai_bubble = self._chat.last_bubble()
+            else:
+                self._current_ai_bubble = None
             self._input.set_enabled(False)
+            # Resume typing animation if still waiting for first chunk
+            if not live.get("first_chunk_sent"):
+                self._chat.start_typing()
         else:
             self._input.set_enabled(True)
 
@@ -451,16 +464,18 @@ class MainWindow(QWidget):
         self._chat.add_message(user_msg)
         self._session_panel.update_title(sid, self._sessions.get(sid).title)
 
-        # Placeholder AI message
+        # Placeholder AI message (don't add bubble yet - wait for actual content)
         ai_msg = Message(role=MessageRole.ASSISTANT, content="")
         self._sessions.add_message(sid, ai_msg)
         self._current_ai_msg = ai_msg
-        self._current_ai_bubble = self._chat.add_message(ai_msg)
+        self._current_ai_bubble = None  # Will be created when text arrives
         self._current_ai_text = ""
         self._input.set_enabled(False)
+        self._tool_status.hide()
+        self._chat.start_typing()  # show typing animation
 
         # Per-session live state (used when this session goes to background)
-        self._session_live[sid] = {"ai_msg": ai_msg, "ai_text": ""}
+        self._session_live[sid] = {"ai_msg": ai_msg, "ai_text": "", "first_chunk_sent": False}
 
         # Build API message list
         session = self._sessions.get(sid)
@@ -530,7 +545,14 @@ class MainWindow(QWidget):
             live["ai_msg"].content = live["ai_text"]
         if sid != self._current_session_id:
             return
+        # Stop typing animation on first chunk
+        if not live.get("first_chunk_sent"):
+            self._chat.stop_typing()
+            live["first_chunk_sent"] = True
         self._current_ai_text = live["ai_text"]
+        # Create bubble on first text if not exists
+        if self._current_ai_bubble is None and self._current_ai_msg:
+            self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
         try:
             if self._current_ai_bubble:
                 self._current_ai_bubble.set_content(self._current_ai_text)
@@ -545,12 +567,8 @@ class MainWindow(QWidget):
             session.messages[-1].tool_calls.append(tc)
         if sid != self._current_session_id:
             return
-        if self._current_ai_bubble:
-            try:
-                self._current_ai_bubble.add_tool_card(call_id, tool_name, params)
-                self._chat.scroll_bottom()
-            except RuntimeError:
-                self._current_ai_bubble = None
+        self._tool_status.setText(f"⏳ 正在使用工具: {tool_name}...")
+        self._tool_status.show()
 
     def _on_bg_tool_done(self, sid: str, call_id: str, result: dict):
         session = self._sessions.get(sid)
@@ -563,11 +581,6 @@ class MainWindow(QWidget):
                         break
         if sid != self._current_session_id:
             return
-        if self._current_ai_bubble:
-            try:
-                self._current_ai_bubble.update_tool_card(call_id, result)
-            except RuntimeError:
-                self._current_ai_bubble = None
 
     def _on_bg_need_manual(self, sid: str, call_id: str, tool_name: str, param_names: list):
         worker = self._workers.get(sid)
@@ -587,21 +600,35 @@ class MainWindow(QWidget):
         if live:
             live["ai_msg"] = ai_msg
             live["ai_text"] = ""
+            live["first_chunk_sent"] = False
         if sid != self._current_session_id:
             return
         self._current_ai_msg = ai_msg
-        self._current_ai_bubble = self._chat.add_message(ai_msg)
+        self._current_ai_bubble = None  # Will be created when text arrives
         self._current_ai_text = ""
+        self._chat.start_typing()
 
     def _on_bg_finished(self, sid: str):
         live = self._session_live.get(sid)
         if live and live["ai_msg"] and not live["ai_msg"].content:
             live["ai_msg"].content = live["ai_text"]
+            # Create bubble for final text if we have content but no bubble yet
+            if live["ai_text"] and sid == self._current_session_id and self._current_ai_bubble is None:
+                self._current_ai_bubble = self._chat.add_message(live["ai_msg"])
+        # Remove empty AI messages (no content, no tool calls) from session
+        session = self._sessions.get(sid)
+        if session:
+            session.messages = [
+                m for m in session.messages
+                if not (m.role == "assistant" and not m.content and not m.tool_calls)
+            ]
         self._sessions.save_session(sid)
         self._workers.pop(sid, None)
         self._session_live.pop(sid, None)
         if sid != self._current_session_id:
             return
+        self._chat.stop_typing()
+        self._tool_status.hide()
         self._input.set_enabled(True)
         self._input.focus()
         self._current_ai_msg = None
@@ -622,6 +649,10 @@ class MainWindow(QWidget):
         self._session_live.pop(sid, None)
         if sid != self._current_session_id:
             return
+        self._chat.stop_typing()
+        # Create bubble for error if not exists
+        if self._current_ai_bubble is None and self._current_ai_msg:
+            self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
         if self._current_ai_bubble:
             try:
                 self._current_ai_bubble.set_content(error_text)
@@ -631,6 +662,7 @@ class MainWindow(QWidget):
         self._input.focus()
         self._current_ai_msg = None
         self._current_ai_bubble = None
+        self._tool_status.hide()
 
     # ──────────────────────────────────────────── built-in tool handlers
     def _handle_create_task(self, args: dict) -> dict:

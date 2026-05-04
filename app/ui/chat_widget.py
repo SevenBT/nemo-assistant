@@ -1,6 +1,7 @@
 from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtWidgets import (
     QFrame,
+    QHBoxLayout,
     QLabel,
     QScrollArea,
     QSizePolicy,
@@ -10,7 +11,59 @@ from PyQt6.QtWidgets import (
 )
 
 from app.models.message import Message, MessageRole
-from app.ui.tool_card import ToolCard
+
+
+class TypingIndicator(QWidget):
+    """Three pulsing dots animation indicating AI is thinking."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("typingIndicator")
+        self.setFixedHeight(36)
+        self._build()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._animate)
+        self._step = 0
+
+    def _build(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(5)
+        layout.addStretch()
+
+        self._dots: list[QWidget] = []
+        for i in range(3):
+            dot = QWidget()
+            dot.setFixedSize(8, 8)
+            dot.setObjectName("typingDot")
+            layout.addWidget(dot)
+            self._dots.append(dot)
+        layout.addStretch()
+
+    def start(self):
+        self._step = 0
+        self._timer.start(120)
+        self.show()
+
+    def stop(self):
+        self._timer.stop()
+        self.hide()
+
+    def _animate(self):
+        """Pulse each dot sequentially."""
+        for i, dot in enumerate(self._dots):
+            # Active dot is brighter, others are dimmer
+            phase = (self._step - i) % 3
+            if phase == 0:
+                opacity = 1.0
+            elif phase == 1:
+                opacity = 0.4
+            else:
+                opacity = 0.2
+            dot.setStyleSheet(
+                f"background: rgba(120, 120, 140, {opacity}); border-radius: 4px;"
+            )
+        self._step += 1
 
 
 class _MessageText(QTextBrowser):
@@ -47,12 +100,12 @@ class _MessageText(QTextBrowser):
 
 
 class MessageBubble(QFrame):
-    """Renders one message (user or assistant). Supports inline tool cards."""
+    """Renders one message (user or assistant). Tool cards are NOT shown here."""
 
     def __init__(self, message: Message, parent=None):
         super().__init__(parent)
         self._is_user = message.role == MessageRole.USER
-        self._tool_cards: dict[str, ToolCard] = {}
+        self._tool_count = len(message.tool_calls)
         self.setObjectName("userMessage" if self._is_user else "aiMessage")
         self._build(message)
 
@@ -69,25 +122,9 @@ class MessageBubble(QFrame):
         self._content.set_text(message.content or "")
         layout.addWidget(self._content)
 
-        for tc in message.tool_calls:
-            card = ToolCard(tc.name, tc.arguments, tc.result)
-            self._tool_cards[tc.id] = card
-            layout.addWidget(card)
-
     # ------------------------------------------------------------------ update
     def set_content(self, text: str):
         self._content.set_text(text)
-
-    def add_tool_card(self, call_id: str, tool_name: str, params: dict) -> ToolCard:
-        card = ToolCard(tool_name, params)
-        self._tool_cards[call_id] = card
-        self.layout().addWidget(card)
-        return card
-
-    def update_tool_card(self, call_id: str, result: dict):
-        card = self._tool_cards.get(call_id)
-        if card:
-            card.update_result(result)
 
 
 class ChatWidget(QWidget):
@@ -116,6 +153,11 @@ class ChatWidget(QWidget):
         self._scroll.setWidget(self._inner)
         root.addWidget(self._scroll)
 
+        # Typing indicator at bottom
+        self._typing = TypingIndicator()
+        root.addWidget(self._typing)
+        self._typing.hide()
+
     # ------------------------------------------------------------------ public
     def add_message(self, message: Message) -> MessageBubble:
         bubble = MessageBubble(message)
@@ -127,6 +169,13 @@ class ChatWidget(QWidget):
     def last_bubble(self) -> MessageBubble | None:
         return self._bubbles[-1] if self._bubbles else None
 
+    def remove_bubble(self, bubble: MessageBubble):
+        """Remove a bubble from the layout and tracking list."""
+        if bubble in self._bubbles:
+            self._bubbles.remove(bubble)
+        bubble.setParent(None)
+        bubble.deleteLater()
+
     def clear(self):
         for b in self._bubbles:
             b.deleteLater()
@@ -137,6 +186,9 @@ class ChatWidget(QWidget):
         for msg in messages:
             if msg.role == "tool":
                 continue  # tool-result messages are context-only, not displayed
+            # Skip empty AI messages (created during tool calls but never received text)
+            if msg.role == "assistant" and not msg.content and not msg.tool_calls:
+                continue
             self.add_message(msg)
         QTimer.singleShot(80, self._scroll_bottom)
 
@@ -146,3 +198,12 @@ class ChatWidget(QWidget):
     def _scroll_bottom(self):
         sb = self._scroll.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    def start_typing(self):
+        """Show typing indicator and scroll to bottom."""
+        self._typing.start()
+        QTimer.singleShot(30, self._scroll_bottom)
+
+    def stop_typing(self):
+        """Hide typing indicator."""
+        self._typing.stop()
