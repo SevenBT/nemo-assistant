@@ -12,6 +12,7 @@ CONFIG_DIR = BASE_DIR / "config"
 DATA_DIR = BASE_DIR / "data"
 SESSIONS_DIR = DATA_DIR / "sessions"
 NOTES_DIR = DATA_DIR / "notes"
+NOTES_IMAGES_DIR = NOTES_DIR / "images"
 TRASH_DIR = NOTES_DIR / "trash"
 TOOLS_DIR = BASE_DIR / "tools"
 
@@ -46,7 +47,7 @@ class ConfigManager:
 
     # ------------------------------------------------------------------ dirs
     def _ensure_dirs(self):
-        for d in [CONFIG_DIR, DATA_DIR, SESSIONS_DIR, NOTES_DIR, TRASH_DIR, TOOLS_DIR]:
+        for d in [CONFIG_DIR, DATA_DIR, SESSIONS_DIR, NOTES_DIR, NOTES_IMAGES_DIR, TRASH_DIR, TOOLS_DIR]:
             d.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ io

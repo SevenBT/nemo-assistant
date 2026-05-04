@@ -141,6 +141,22 @@ QStackedWidget, QScrollArea > QWidget > QWidget {
 }
 #chatScroll QScrollBar::handle:vertical:hover { background: __SCROLLBAR_HOVER__; }
 
+/* ── Splitter ─────────────────────────────────────────────────────── */
+QSplitter {
+    background: transparent;
+}
+QSplitter::handle {
+    background: __BORDER__;
+    margin: 2px 0;
+    border-radius: 2px;
+}
+QSplitter::handle:hover {
+    background: __ACCENT__;
+}
+QSplitter::handle:pressed {
+    background: __ACCENT_PRESSED__;
+}
+
 /* ── Message bubbles ──────────────────────────────────────────────── */
 #userMessage {
     background: __USER_BUBBLE__;
@@ -196,6 +212,14 @@ QStackedWidget, QScrollArea > QWidget > QWidget {
 #sendBtn:hover  { background: __ACCENT_HOVER__; }
 #sendBtn:pressed{ background: __ACCENT_PRESSED__; }
 #sendBtn:disabled { background: __SCROLLBAR__; color: __TEXT_MUTED__; }
+
+#toggleBtn {
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: none; border-radius: 8px;
+    font-size: 18px; font-weight: 600;
+}
+#toggleBtn:hover  { background: __BORDER__; color: __ACCENT__; }
+#toggleBtn:pressed{ background: __SCROLLBAR__; }
 
 #iconBtn {
     background: transparent; color: __TEXT_SECONDARY__;

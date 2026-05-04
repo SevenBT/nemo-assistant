@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.models.message import Message, MessageRole
+from app.ui.tool_card import ToolCard
 
 
 class TypingIndicator(QWidget):
@@ -52,7 +53,6 @@ class TypingIndicator(QWidget):
     def _animate(self):
         """Pulse each dot sequentially."""
         for i, dot in enumerate(self._dots):
-            # Active dot is brighter, others are dimmer
             phase = (self._step - i) % 3
             if phase == 0:
                 opacity = 1.0
@@ -100,14 +100,25 @@ class _MessageText(QTextBrowser):
 
 
 class MessageBubble(QFrame):
-    """Renders one message (user or assistant). Tool cards are NOT shown here."""
+    """
+    Renders one message (user or assistant).
+
+    AI bubbles support inline tool cards (ChatGPT-style):
+      [AI label]
+      [ToolCard …]  ← collapsed by default, one per tool call
+      [answer text] ← only the final response text
+    """
 
     def __init__(self, message: Message, parent=None):
         super().__init__(parent)
         self._is_user = message.role == MessageRole.USER
-        self._tool_count = len(message.tool_calls)
+        self._tool_cards: dict = {}  # call_id -> ToolCard
         self.setObjectName("userMessage" if self._is_user else "aiMessage")
         self._build(message)
+
+    @property
+    def is_user(self) -> bool:
+        return self._is_user
 
     def _build(self, message: Message):
         layout = QVBoxLayout(self)
@@ -118,13 +129,60 @@ class MessageBubble(QFrame):
         role_label.setObjectName("userLabel" if self._is_user else "aiLabel")
         layout.addWidget(role_label)
 
+        # Tool cards section — AI bubbles only
+        if not self._is_user:
+            self._tools_widget = QWidget()
+            self._tools_widget.setObjectName("toolsContainer")
+            self._tools_layout = QVBoxLayout(self._tools_widget)
+            self._tools_layout.setContentsMargins(0, 0, 0, 0)
+            self._tools_layout.setSpacing(3)
+            layout.addWidget(self._tools_widget)
+            # Populate existing tool calls (used by load_session)
+            for tc in message.tool_calls:
+                self._insert_tool_card(tc.id, tc.name, tc.arguments, tc.result)
+            self._tools_widget.setVisible(bool(message.tool_calls))
+
         self._content = _MessageText(self._is_user)
         self._content.set_text(message.content or "")
+        # Hide empty AI content; shown when text actually arrives
+        if not self._is_user and not message.content:
+            self._content.hide()
         layout.addWidget(self._content)
 
-    # ------------------------------------------------------------------ update
+    # ── internal ────────────────────────────────────────────────────────
+
+    def _insert_tool_card(self, call_id: str, name: str, params: dict, result=None):
+        card = ToolCard(name, params, result)
+        self._tool_cards[call_id] = card
+        self._tools_layout.addWidget(card)
+
+    # ── public API ───────────────────────────────────────────────────────
+
+    def add_tool_card(self, call_id: str, name: str, params: dict):
+        """Append a pending tool card during live streaming."""
+        if self._is_user:
+            return
+        self._insert_tool_card(call_id, name, params)
+        self._tools_widget.show()
+
+    def update_tool_card(self, call_id: str, result: dict):
+        """Update an existing tool card with its final result."""
+        card = self._tool_cards.get(call_id)
+        if card:
+            card.update_result(result)
+
+    def clear_text(self):
+        """Hide and clear the text area (called when a tool call starts)."""
+        if self._is_user:
+            return
+        self._content.set_text("")
+        self._content.hide()
+
     def set_content(self, text: str):
+        """Set the main answer text; shows or hides the widget accordingly."""
         self._content.set_text(text)
+        if not self._is_user:
+            self._content.setVisible(bool(text))
 
 
 class ChatWidget(QWidget):
@@ -153,12 +211,13 @@ class ChatWidget(QWidget):
         self._scroll.setWidget(self._inner)
         root.addWidget(self._scroll)
 
-        # Typing indicator at bottom
+        # Typing indicator at bottom (outside scroll area)
         self._typing = TypingIndicator()
         root.addWidget(self._typing)
         self._typing.hide()
 
-    # ------------------------------------------------------------------ public
+    # ── public ──────────────────────────────────────────────────────────
+
     def add_message(self, message: Message) -> MessageBubble:
         bubble = MessageBubble(message)
         self._bubbles.append(bubble)
@@ -170,7 +229,6 @@ class ChatWidget(QWidget):
         return self._bubbles[-1] if self._bubbles else None
 
     def remove_bubble(self, bubble: MessageBubble):
-        """Remove a bubble from the layout and tracking list."""
         if bubble in self._bubbles:
             self._bubbles.remove(bubble)
         bubble.setParent(None)
@@ -182,15 +240,63 @@ class ChatWidget(QWidget):
         self._bubbles.clear()
 
     def load_session(self, messages: list[Message]):
+        """
+        Rebuild the chat from session messages.
+
+        Consecutive assistant messages (produced by multi-turn tool loops) are
+        merged into ONE bubble:
+          - Tool calls from every message in the chain → tool cards
+          - Content of the LAST message with text → answer text
+        This prevents intermediate "thinking" text and empty tool-call
+        placeholders from appearing as separate reply boxes.
+        """
         self.clear()
-        for msg in messages:
-            if msg.role == "tool":
-                continue  # tool-result messages are context-only, not displayed
-            # Skip empty AI messages (created during tool calls but never received text)
-            if msg.role == "assistant" and not msg.content and not msg.tool_calls:
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            if msg.role in (MessageRole.TOOL, MessageRole.SYSTEM):
+                i += 1
                 continue
-            self.add_message(msg)
+            if msg.role == MessageRole.USER:
+                self.add_message(msg)
+                i += 1
+            else:  # ASSISTANT
+                group: list[Message] = []
+                while i < len(messages) and messages[i].role == MessageRole.ASSISTANT:
+                    group.append(messages[i])
+                    i += 1
+                self._add_assistant_group(group)
         QTimer.singleShot(80, self._scroll_bottom)
+
+    def _add_assistant_group(self, group: list[Message]):
+        """
+        Collapse a run of consecutive assistant messages into a single bubble.
+        Collects all tool_calls across the chain; uses only the last non-empty
+        content as the answer text.
+        """
+        if not group:
+            return
+        all_tool_calls = []
+        for msg in group:
+            all_tool_calls.extend(msg.tool_calls)
+        final_content = ""
+        for msg in reversed(group):
+            if msg.content:
+                final_content = msg.content
+                break
+        # Skip entirely empty groups
+        if not final_content and not all_tool_calls:
+            return
+        combined = Message(
+            id=group[-1].id,
+            role=MessageRole.ASSISTANT,
+            content=final_content,
+            timestamp=group[-1].timestamp,
+            tool_calls=all_tool_calls,
+        )
+        bubble = MessageBubble(combined)
+        self._bubbles.append(bubble)
+        self._layout.addWidget(bubble)
 
     def scroll_bottom(self):
         QTimer.singleShot(30, self._scroll_bottom)

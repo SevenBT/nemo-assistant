@@ -14,7 +14,7 @@ Layout:
 import json
 import time
 
-from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QEvent, QPoint, Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QMouseEvent, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -170,19 +171,17 @@ class TitleBar(QWidget):
 
     def _build(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 6, 0)
+        layout.setContentsMargins(6, 0, 6, 0)
         layout.setSpacing(4)
 
-        self._toggle_btn = QPushButton("≡")
-        self._toggle_btn.setObjectName("iconBtn")
-        self._toggle_btn.setFixedSize(32, 28)
+        # Session panel toggle button (2x larger: 64x36)
+        self._toggle_btn = QPushButton("☰")
+        self._toggle_btn.setObjectName("toggleBtn")
+        self._toggle_btn.setFixedSize(64, 36)
         self._toggle_btn.setToolTip("显示/隐藏会话列表")
         self._toggle_btn.clicked.connect(self._win._toggle_session_panel)
         layout.addWidget(self._toggle_btn)
 
-        title = QLabel("AI Agent")
-        title.setObjectName("titleLabel")
-        layout.addWidget(title)
         layout.addStretch()
 
         # View-switcher buttons (exclusive, checkable)
@@ -316,17 +315,21 @@ class MainWindow(QWidget):
 
         # ── page 0: chat view ─────────────────────────────────────────
         chat_page = QWidget()
-        body = QHBoxLayout(chat_page)
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
+        page_layout = QVBoxLayout(chat_page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        # Use QSplitter for resizable session panel
+        self._chat_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._chat_splitter.setHandleWidth(6)  # Wider handle for easier dragging
+        self._chat_splitter.setChildrenCollapsible(True)
 
         self._session_panel = SessionPanel()
         self._session_panel.session_selected.connect(self._on_session_select)
         self._session_panel.session_create_requested.connect(self._new_session)
         self._session_panel.session_delete_requested.connect(self._delete_session)
         self._session_panel.session_rename_requested.connect(self._rename_session)
-        self._session_panel.hide()
-        body.addWidget(self._session_panel)
+        self._chat_splitter.addWidget(self._session_panel)
 
         chat_col = QVBoxLayout()
         chat_col.setContentsMargins(0, 0, 0, 0)
@@ -343,8 +346,19 @@ class MainWindow(QWidget):
         chat_area = QFrame()
         chat_area.setObjectName("chatArea")
         chat_area.setLayout(chat_col)
-        body.addWidget(chat_area, 1)
+        self._chat_splitter.addWidget(chat_area)
 
+        # Set initial sizes from config (session panel width)
+        wcfg = self._config.window_config
+        session_width = wcfg.get("session_panel_width", 180)
+        chat_width = wcfg.get("width", 420) - session_width
+        self._chat_splitter.setSizes([session_width, chat_width])
+
+        # Collapse session panel if config says it should be hidden
+        if not wcfg.get("session_panel_visible", True):
+            self._chat_splitter.setSizes([0, session_width + chat_width])
+
+        page_layout.addWidget(self._chat_splitter)
         self._stack.addWidget(chat_page)          # index 0
 
         # ── page 1: notes panel ───────────────────────────────────────
@@ -435,9 +449,11 @@ class MainWindow(QWidget):
         if live:
             self._current_ai_msg = live["ai_msg"]
             self._current_ai_text = live["ai_text"]
-            # Only set bubble if we've received text (bubble exists in chat)
-            if live.get("first_chunk_sent") and live["ai_text"]:
-                self._current_ai_bubble = self._chat.last_bubble()
+            # Attach to the last AI bubble (may already contain tool cards even
+            # before any text has arrived, so don't gate on first_chunk_sent)
+            last = self._chat.last_bubble()
+            if last and not last.is_user:
+                self._current_ai_bubble = last
             else:
                 self._current_ai_bubble = None
             self._input.set_enabled(False)
@@ -567,8 +583,14 @@ class MainWindow(QWidget):
             session.messages[-1].tool_calls.append(tc)
         if sid != self._current_session_id:
             return
-        self._tool_status.setText(f"⏳ 正在使用工具: {tool_name}...")
-        self._tool_status.show()
+        self._chat.stop_typing()
+        # Ensure the AI bubble exists (may not if AI had no text before this tool call)
+        if self._current_ai_bubble is None and self._current_ai_msg:
+            self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
+        if self._current_ai_bubble:
+            self._current_ai_bubble.clear_text()   # discard any intermediate AI text
+            self._current_ai_bubble.add_tool_card(call_id, tool_name, params)
+        self._chat.scroll_bottom()
 
     def _on_bg_tool_done(self, sid: str, call_id: str, result: dict):
         session = self._sessions.get(sid)
@@ -581,6 +603,8 @@ class MainWindow(QWidget):
                         break
         if sid != self._current_session_id:
             return
+        if self._current_ai_bubble:
+            self._current_ai_bubble.update_tool_card(call_id, result)
 
     def _on_bg_need_manual(self, sid: str, call_id: str, tool_name: str, param_names: list):
         worker = self._workers.get(sid)
@@ -604,8 +628,11 @@ class MainWindow(QWidget):
         if sid != self._current_session_id:
             return
         self._current_ai_msg = ai_msg
-        self._current_ai_bubble = None  # Will be created when text arrives
         self._current_ai_text = ""
+        # Keep the same bubble for the whole response chain — only clear its text
+        # so the next turn's answer replaces it; tool cards persist above.
+        if self._current_ai_bubble:
+            self._current_ai_bubble.clear_text()
         self._chat.start_typing()
 
     def _on_bg_finished(self, sid: str):
@@ -832,10 +859,18 @@ class MainWindow(QWidget):
             self._snap_mgr.on_leave()
 
     def _toggle_session_panel(self):
-        if self._session_panel.isVisible():
-            self._session_panel.hide()
+        sizes = self._chat_splitter.sizes()
+        total = sum(sizes)
+        session_width = sizes[0]
+
+        if session_width > 0:
+            # Hide: save current width and collapse
+            self._saved_session_width = session_width
+            self._chat_splitter.setSizes([0, total])
         else:
-            self._session_panel.show()
+            # Show: restore saved width or use default
+            width = getattr(self, '_saved_session_width', None) or self._config.window_config.get("session_panel_width", 180)
+            self._chat_splitter.setSizes([width, total - width])
 
     # ──────────────────────────────────────────── edge resize
     _RESIZE_BORDER = 8
@@ -896,7 +931,6 @@ class MainWindow(QWidget):
         self.setGeometry(nx, ny, nw, nh)
 
     def eventFilter(self, obj, event):
-        from PyQt6.QtCore import QEvent
         etype = event.type()
 
         # Suppress resize while snapped or animating to avoid interfering with snap
@@ -943,10 +977,15 @@ class MainWindow(QWidget):
 
     # ──────────────────────────────────────────── intercept close → tray
     def closeEvent(self, event):
-        # Save position, then hide to tray instead of quitting
+        # Save position and splitter state, then hide to tray instead of quitting
+        sizes = self._chat_splitter.sizes()
+        session_width = sizes[0] if sizes[0] > 0 else getattr(self, '_saved_session_width', 180)
+        session_visible = sizes[0] > 0
         self._config.update_window_config(
             x=self.x(), y=self.y(),
             width=self.width(), height=self.height(),
+            session_panel_width=max(session_width, 120),  # minimum 120px
+            session_panel_visible=session_visible,
         )
         event.ignore()
         self.hide()

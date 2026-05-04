@@ -1,8 +1,13 @@
+import re
+import uuid
 from datetime import datetime
+from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QPoint
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -16,12 +21,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.core.config import NOTES_IMAGES_DIR
 from app.core.note_manager import NoteManager
+from app.ui.screenshot_overlay import ScreenshotOverlay
 
 
 class NotesPanel(QWidget):
     """笔记面板，嵌入主窗口 QStackedWidget 中。
-    支持：多选删除、回收站、无笔记时隐藏编辑区。
+    支持：多选删除、回收站、无笔记时隐藏编辑区、贴图功能。
     """
 
     def __init__(self, note_mgr: NoteManager, parent=None):
@@ -29,6 +36,7 @@ class NotesPanel(QWidget):
         self._mgr = note_mgr
         self._current_note_id: str | None = None
         self._trash_mode = False
+        self._screenshot_overlay = None
         self._build()
         self._load()
 
@@ -52,6 +60,11 @@ class NotesPanel(QWidget):
         self._del_btn.setObjectName("noteToolBtn")
         self._del_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self._del_btn)
+
+        self._image_btn = QPushButton("贴图")
+        self._image_btn.setObjectName("noteToolBtn")
+        self._image_btn.clicked.connect(self._on_screenshot)
+        toolbar.addWidget(self._image_btn)
 
         self._trash_btn = QPushButton("回收站")
         self._trash_btn.setObjectName("noteToolBtn")
@@ -177,7 +190,15 @@ class NotesPanel(QWidget):
         self._title_edit.blockSignals(True)
         self._content_edit.blockSignals(True)
         self._title_edit.setText(note.title)
-        self._content_edit.setPlainText(note.content)
+        # Convert relative image paths to absolute for display
+        content = note.content
+        if "images/" in content:
+            def replace_path(m):
+                rel_path = m.group(1)
+                abs_path = NOTES_IMAGES_DIR.parent / rel_path
+                return f'<img src="{abs_path}"'
+            content = re.sub(r'<img src="(images/[^"]+)"', replace_path, content)
+        self._content_edit.setHtml(content)
         self._title_edit.blockSignals(False)
         self._content_edit.blockSignals(False)
 
@@ -213,6 +234,7 @@ class NotesPanel(QWidget):
         if self._trash_mode:
             self._new_btn.hide()
             self._del_btn.hide()
+            self._image_btn.hide()
             self._trash_btn.hide()
             self._back_btn.show()
             self._restore_btn.show()
@@ -229,6 +251,8 @@ class NotesPanel(QWidget):
             self._new_btn.show()
             self._del_btn.show()
             self._del_btn.setEnabled(selected_n > 0)
+            self._image_btn.show()
+            self._image_btn.setEnabled(selected_n == 1)
             tc = self._mgr.trash_count()
             self._trash_btn.setText(f"回收站({tc})" if tc > 0 else "回收站")
             self._trash_btn.show()
@@ -329,7 +353,12 @@ class NotesPanel(QWidget):
         if not self._current_note_id:
             return
         title = self._title_edit.text().strip() or "无标题"
-        content = self._content_edit.toPlainText()
+        # Get HTML content and convert absolute paths back to relative
+        content = self._content_edit.toHtml()
+        if str(NOTES_IMAGES_DIR) in content:
+            # Convert absolute paths back to relative
+            content = content.replace(str(NOTES_IMAGES_DIR) + "/", "images/")
+            content = content.replace(str(NOTES_IMAGES_DIR.parent) + "/images/", "images/")
         note = self._mgr.update(self._current_note_id, title, content)
         if note:
             self._status_label.setText("已保存")
@@ -359,6 +388,74 @@ class NotesPanel(QWidget):
         self._auto_save_timer.stop()
         self._flush_current()
         super().hideEvent(event)
+
+    # ------------------------------------------------------------------ screenshot
+    def _on_screenshot(self):
+        """开始截图流程。"""
+        if not self._current_note_id:
+            return
+        self._flush_current()
+        # Find the main window to hide it
+        main_win = self.window()
+        if main_win:
+            main_win.hide()
+        QTimer.singleShot(200, self._do_screenshot)
+
+    def _do_screenshot(self):
+        """显示截图遮罩层。"""
+        self._screenshot_overlay = ScreenshotOverlay()
+        self._screenshot_overlay.captured.connect(self._on_screenshot_done)
+        self._screenshot_overlay.show()
+        self._screenshot_overlay.activateWindow()
+
+    def _on_screenshot_done(self, pixmap: QPixmap, action: str, ocr_text: str, pos: QPoint):
+        """截图完成后的处理。"""
+        self._screenshot_overlay = None
+        # Show main window again
+        main_win = self.window()
+        if main_win:
+            main_win.show()
+            main_win.raise_()
+            main_win.activateWindow()
+
+        if action == "cancel" or pixmap.isNull():
+            return
+
+        if action == "pin":
+            # Just pin the image, don't insert into note
+            from app.ui.pin_window import PinWindow
+            pw = PinWindow(pixmap, pos=pos)
+            pw.show()
+            if not hasattr(self, '_pin_windows'):
+                self._pin_windows = []
+            self._pin_windows.append(pw)
+            pw.closed.connect(lambda w=pw: self._pin_windows.remove(w) if w in self._pin_windows else None)
+        else:
+            # Insert image into note (copy or save action)
+            self._insert_image(pixmap)
+
+    def _insert_image(self, pixmap: QPixmap):
+        """将图片插入到当前笔记中。"""
+        if not self._current_note_id:
+            return
+
+        # Ensure images directory exists
+        NOTES_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Save image with unique name
+        img_id = str(uuid.uuid4())[:8]
+        img_path = NOTES_IMAGES_DIR / f"{self._current_note_id}_{img_id}.png"
+        pixmap.save(str(img_path), "PNG")
+
+        # Insert HTML img tag into content
+        cursor = self._content_edit.textCursor()
+        # Use relative path for portability
+        relative_path = f"images/{self._current_note_id}_{img_id}.png"
+        img_html = f'<img src="{relative_path}" alt="截图" style="max-width:100%;">'
+        cursor.insertHtml(img_html)
+        cursor.insertText("\n")
+
+        self._auto_save_timer.start()
 
     def refresh(self):
         """外部调用：AI 工具写入新笔记后刷新列表。"""

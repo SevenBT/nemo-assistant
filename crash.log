@@ -1,5 +1,12 @@
 Traceback (most recent call last):
-  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 815, in eventFilter
-    def eventFilter(self, obj, event):
-    
-KeyboardInterrupt
+  File "D:\claudecode-projects\assistant\main.py", line 63, in <module>
+    main()
+  File "D:\claudecode-projects\assistant\main.py", line 54, in main
+    window = MainWindow(config, sessions, tools, scheduler, notes)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 276, in __init__
+    self._build_ui()
+  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 352, in _build_ui
+    session_width = wcfg.get("session_panel_width", 180)
+                    ^^^^
+NameError: name 'wcfg' is not defined

@@ -154,12 +154,24 @@ class PinWindow(QWidget):
             self._drag_started = False
             self.close()
 
-    # ── Opacity via scroll wheel ───────────────────────────────────────
+    # ── Size via scroll wheel (Ctrl+wheel for opacity) ──────────────────
 
     def wheelEvent(self, event: QWheelEvent):
         delta = event.angleDelta().y() / 120.0
-        self._opacity = max(0.3, min(1.0, self._opacity + delta * 0.05))
-        self.setWindowOpacity(self._opacity)
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            # Ctrl+wheel: adjust opacity
+            self._opacity = max(0.3, min(1.0, self._opacity + delta * 0.05))
+            self.setWindowOpacity(self._opacity)
+        else:
+            # Wheel: adjust size
+            scale = 1.1 if delta > 0 else 0.9
+            w = max(_MIN_W, int(self.width() * scale))
+            h = max(_MIN_H, int(self.height() * scale))
+            # Keep center position
+            cx = self.x() + self.width() // 2
+            cy = self.y() + self.height() // 2
+            self.setGeometry(cx - w // 2, cy - h // 2, w, h)
+            self._update_pixmap()
 
     # ── Context menu ───────────────────────────────────────────────────
 
@@ -167,6 +179,9 @@ class PinWindow(QWidget):
         menu = QMenu(self)
         menu.addAction("📋 复制", self._copy_to_clipboard)
         menu.addAction("💾 另存为...", self._save_as)
+        menu.addSeparator()
+        menu.addAction("🔍 滚轮缩放大小", lambda: None)  # hint
+        menu.addAction("💫 Ctrl+滚轮调节透明度", lambda: None)  # hint
         menu.addSeparator()
         menu.addAction("✕ 关闭", self.close)
         menu.exec(event.globalPos())

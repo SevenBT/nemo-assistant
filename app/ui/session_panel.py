@@ -27,7 +27,7 @@ class SessionPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("sessionPanel")
-        self.setFixedWidth(180)
+        self.setMinimumWidth(120)  # Minimum width, but can be resized by splitter
         self._build()
 
     def _build(self):
@@ -52,6 +52,8 @@ class SessionPanel(QFrame):
         # list
         self._list = QListWidget()
         self._list.setObjectName("sessionList")
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list.currentItemChanged.connect(self._on_change)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._context_menu)

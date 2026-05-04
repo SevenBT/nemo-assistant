@@ -1,6 +1,35 @@
+import subprocess
 import sys
 import traceback
 from pathlib import Path
+
+# ── 依赖自动安装 ──────────────────────────────────────────────────────────
+# 每个元组: (import名, pip包名)
+_REQUIRED_PACKAGES = [
+    ("bs4",         "beautifulsoup4"),
+    ("httpx",       "httpx"),
+    ("openai",      "openai"),
+    ("apscheduler", "APScheduler"),
+    ("pyperclip",   "pyperclip"),
+]
+
+def _can_import(name: str) -> bool:
+    try:
+        __import__(name)
+        return True
+    except ImportError:
+        return False
+
+def _ensure_deps():
+    missing = [pkg for imp, pkg in _REQUIRED_PACKAGES if not _can_import(imp)]
+    if missing:
+        print(f"[startup] 安装缺失依赖: {missing}")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "--quiet"] + missing
+        )
+
+_ensure_deps()
+# ─────────────────────────────────────────────────────────────────────────
 
 
 def _setup_crash_log():
