@@ -4,7 +4,8 @@ Frameless pin window — displays a screenshot pinned on top of other windows.
 Features:
 - Draggable (startSystemMove after small threshold)
 - Resizable from all edges and corners (QApplication event filter)
-- Scroll wheel adjusts opacity (0.3 ~ 1.0)
+- Scroll wheel adjusts size (maintains aspect ratio)
+- Ctrl+scroll wheel adjusts opacity (0.3 ~ 1.0)
 - Right-click context menu: copy / save-as / close
 - Double-click to close
 - Placed at the capture position, full resolution
@@ -17,20 +18,18 @@ from PyQt6.QtCore import (
     QPoint,
     QRect,
     Qt,
-    QTimer,
     pyqtSignal,
 )
 from PyQt6.QtGui import (
     QMouseEvent,
+    QPainter,
     QPixmap,
     QWheelEvent,
 )
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QLabel,
     QMenu,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -64,7 +63,6 @@ class PinWindow(QWidget):
         self._resize_cursor_shape = None
 
         self._build_window()
-        self._build_ui()
         self._install_resize_filter()
 
     # ── Window setup ───────────────────────────────────────────────────
@@ -103,37 +101,16 @@ class PinWindow(QWidget):
                 (sg.height() - self.height()) // 2 + sg.y(),
             )
 
-    def _build_ui(self):
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+    # ── Paint — draw pixmap directly, no QLabel ────────────────────────
 
-        self._label = QLabel()
-        self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        outer.addWidget(self._label)
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.drawPixmap(self.rect(), self._pixmap)
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        QTimer.singleShot(0, self._update_pixmap)
-
-    def _update_pixmap(self):
-        """Display the pixmap at native resolution, or scale when resized."""
-        lw = self._label.width()
-        lh = self._label.height()
-        if lw <= 0 or lh <= 0:
-            return
-        dpr = self._pixmap.devicePixelRatio()
-        logical_w = round(self._pixmap.width() / dpr)
-        logical_h = round(self._pixmap.height() / dpr)
-        if lw == logical_w and lh == logical_h:
-            self._label.setPixmap(self._pixmap)
-        else:
-            scaled = self._pixmap.scaled(
-                lw, lh,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self._label.setPixmap(scaled)
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update()
 
     # ── Drag (threshold to allow double-click) ────────────────────────
 
@@ -163,15 +140,18 @@ class PinWindow(QWidget):
             self._opacity = max(0.3, min(1.0, self._opacity + delta * 0.05))
             self.setWindowOpacity(self._opacity)
         else:
-            # Wheel: adjust size
+            # Wheel: adjust size — maintain image aspect ratio
+            dpr = self._pixmap.devicePixelRatio()
+            img_w = round(self._pixmap.width() / dpr)
+            img_h = round(self._pixmap.height() / dpr)
+            aspect = img_w / img_h if img_h > 0 else 1.0
             scale = 1.1 if delta > 0 else 0.9
-            w = max(_MIN_W, int(self.width() * scale))
-            h = max(_MIN_H, int(self.height() * scale))
+            new_w = max(_MIN_W, int(self.width() * scale))
+            new_h = max(_MIN_H, round(new_w / aspect))
             # Keep center position
             cx = self.x() + self.width() // 2
             cy = self.y() + self.height() // 2
-            self.setGeometry(cx - w // 2, cy - h // 2, w, h)
-            self._update_pixmap()
+            self.setGeometry(cx - new_w // 2, cy - new_h // 2, new_w, new_h)
 
     # ── Context menu ───────────────────────────────────────────────────
 
@@ -269,7 +249,6 @@ class PinWindow(QWidget):
             nh = max(_MIN_H, min(sg.height(), h - dy))
             ny = y + h - nh
         self.setGeometry(nx, ny, nw, nh)
-        self._update_pixmap()
 
     def eventFilter(self, obj, event):
         etype = event.type()

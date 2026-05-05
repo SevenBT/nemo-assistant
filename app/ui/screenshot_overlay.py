@@ -434,7 +434,7 @@ class ScreenshotOverlay(QWidget):
                 p.drawText(
                     self.rect(),
                     Qt.AlignmentFlag.AlignCenter,
-                    "拖拽鼠标框选截图区域 · 按 Esc 取消",
+                    "拖拽鼠标框选截图区域 · 右键或 Esc 取消",
                 )
             return
 
@@ -547,11 +547,8 @@ class ScreenshotOverlay(QWidget):
             self._state = "DRAGGING"
             self.update()
         elif event.button() == Qt.MouseButton.RightButton:
-            if self._state in ("SELECTED", "OCR_EDIT"):
-                self._state = "IDLE"
-                self._hide_toolbar()
-                self._hide_ocr_panel()
-                self.update()
+            self.captured.emit(QPixmap(), "cancel", "", QPoint())
+            self.close()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._state == "DRAGGING":

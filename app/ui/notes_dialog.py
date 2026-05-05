@@ -1,10 +1,8 @@
 import re
-import uuid
 from datetime import datetime
-from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, QPoint
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -13,6 +11,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSplitter,
@@ -23,12 +22,12 @@ from PyQt6.QtWidgets import (
 
 from app.core.config import NOTES_IMAGES_DIR
 from app.core.note_manager import NoteManager
-from app.ui.screenshot_overlay import ScreenshotOverlay
+from app.ui.sticky_note_window import _html_to_plain
 
 
 class NotesPanel(QWidget):
     """笔记面板，嵌入主窗口 QStackedWidget 中。
-    支持：多选删除、回收站、无笔记时隐藏编辑区、贴图功能。
+    支持：多选删除、回收站、无笔记时隐藏编辑区、右键将便签贴到屏幕上。
     """
 
     def __init__(self, note_mgr: NoteManager, parent=None):
@@ -36,7 +35,7 @@ class NotesPanel(QWidget):
         self._mgr = note_mgr
         self._current_note_id: str | None = None
         self._trash_mode = False
-        self._screenshot_overlay = None
+        self._pin_windows: list = []
         self._build()
         self._load()
 
@@ -55,16 +54,6 @@ class NotesPanel(QWidget):
         self._new_btn.setObjectName("noteToolBtn")
         self._new_btn.clicked.connect(self._on_new)
         toolbar.addWidget(self._new_btn)
-
-        self._del_btn = QPushButton("删除")
-        self._del_btn.setObjectName("noteToolBtn")
-        self._del_btn.clicked.connect(self._on_delete)
-        toolbar.addWidget(self._del_btn)
-
-        self._image_btn = QPushButton("贴图")
-        self._image_btn.setObjectName("noteToolBtn")
-        self._image_btn.clicked.connect(self._on_screenshot)
-        toolbar.addWidget(self._image_btn)
 
         self._trash_btn = QPushButton("回收站")
         self._trash_btn.setObjectName("noteToolBtn")
@@ -109,8 +98,9 @@ class NotesPanel(QWidget):
 
         layout.addLayout(toolbar)
 
-        # ── splitter: list | editor ───────────────────────────────────
+        # ── list | editor ─────────────────────────────────────────────
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(4)
 
         # Left: note list (multi-select)
         left = QWidget()
@@ -122,10 +112,13 @@ class NotesPanel(QWidget):
         self._list.setObjectName("noteList")
         self._list.setWordWrap(True)
         self._list.setUniformItemSizes(False)
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
         self._list.itemSelectionChanged.connect(self._on_selection_changed)
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_list_context_menu)
         left_layout.addWidget(self._list)
         splitter.addWidget(left)
 
@@ -144,8 +137,8 @@ class NotesPanel(QWidget):
         right_layout.addWidget(self._content_edit)
         self._editor_widget.hide()  # hidden until a note is selected
         splitter.addWidget(self._editor_widget)
-
         splitter.setSizes([200, 460])
+
         layout.addWidget(splitter, 1)
 
         # ── auto-save timer (1.5s debounce) ──────────────────────────
@@ -233,8 +226,6 @@ class NotesPanel(QWidget):
         selected_n = len(self._list.selectedItems())
         if self._trash_mode:
             self._new_btn.hide()
-            self._del_btn.hide()
-            self._image_btn.hide()
             self._trash_btn.hide()
             self._back_btn.show()
             self._restore_btn.show()
@@ -249,10 +240,6 @@ class NotesPanel(QWidget):
             self._purge_btn.hide()
             self._purge_all_btn.hide()
             self._new_btn.show()
-            self._del_btn.show()
-            self._del_btn.setEnabled(selected_n > 0)
-            self._image_btn.show()
-            self._image_btn.setEnabled(selected_n == 1)
             tc = self._mgr.trash_count()
             self._trash_btn.setText(f"回收站({tc})" if tc > 0 else "回收站")
             self._trash_btn.show()
@@ -274,6 +261,7 @@ class NotesPanel(QWidget):
         self._title_edit.setFocus()
 
     def _on_delete(self):
+        """多选删除：移入回收站（供回收站以外的多选场景使用）。"""
         selected = self._list.selectedItems()
         if not selected:
             return
@@ -389,73 +377,151 @@ class NotesPanel(QWidget):
         self._flush_current()
         super().hideEvent(event)
 
-    # ------------------------------------------------------------------ screenshot
-    def _on_screenshot(self):
-        """开始截图流程。"""
-        if not self._current_note_id:
+    # ------------------------------------------------------------------ context menu
+    def _on_list_context_menu(self, pos):
+        """便签列表右键菜单。"""
+        item = self._list.itemAt(pos)
+        global_pos = self._list.viewport().mapToGlobal(pos)
+
+        if self._trash_mode:
+            if not item:
+                return
+            note_id = item.data(Qt.ItemDataRole.UserRole)
+            menu = QMenu(self)
+            restore_action = menu.addAction("↩ 恢复")
+            menu.addSeparator()
+            purge_action = menu.addAction("🗑 永久删除")
+            action = menu.exec(global_pos)
+            if action == restore_action:
+                self._mgr.restore(note_id)
+                self._load()
+            elif action == purge_action:
+                self._confirm_purge([item])
+            return
+
+        # Normal mode — item required for most actions
+        menu = QMenu(self)
+
+        if item:
+            note_id = item.data(Qt.ItemDataRole.UserRole)
+            pin_action = menu.addAction("📌 贴到屏幕")
+            menu.addSeparator()
+            copy_content_action = menu.addAction("📋 复制内容")
+            duplicate_action = menu.addAction("📄 创建副本")
+            export_action = menu.addAction("💾 导出 .txt")
+            menu.addSeparator()
+            delete_action = menu.addAction("🗑 删除")
+        else:
+            note_id = None
+            pin_action = copy_content_action = duplicate_action = export_action = delete_action = None
+            new_action = menu.addAction("✏ 新建便签")
+            action = menu.exec(global_pos)
+            if action == new_action:
+                self._on_new()
+            return
+
+        action = menu.exec(global_pos)
+
+        if action == pin_action:
+            self._pin_note_to_screen(note_id)
+        elif action == copy_content_action:
+            self._copy_note_content(note_id)
+        elif action == duplicate_action:
+            self._duplicate_note(note_id)
+        elif action == export_action:
+            self._export_note_txt(note_id)
+        elif action == delete_action:
+            self._on_delete_by_id(note_id)
+
+    def _copy_note_content(self, note_id: str):
+        """复制笔记纯文本内容到剪贴板。"""
+        note = self._mgr.get(note_id)
+        if not note:
+            return
+        QGuiApplication.clipboard().setText(_html_to_plain(note.content))
+        self._show_status("已复制到剪贴板")
+
+    def _duplicate_note(self, note_id: str):
+        """创建便签副本。"""
+        note = self._mgr.get(note_id)
+        if not note:
             return
         self._flush_current()
-        # Find the main window to hide it
-        main_win = self.window()
-        if main_win:
-            main_win.hide()
-        QTimer.singleShot(200, self._do_screenshot)
+        new_note = self._mgr.create()
+        self._mgr.update(new_note.id, f"{note.title} (副本)", note.content)
+        self._load()
+        self._show_status("已创建副本")
 
-    def _do_screenshot(self):
-        """显示截图遮罩层。"""
-        self._screenshot_overlay = ScreenshotOverlay()
-        self._screenshot_overlay.captured.connect(self._on_screenshot_done)
-        self._screenshot_overlay.show()
-        self._screenshot_overlay.activateWindow()
-
-    def _on_screenshot_done(self, pixmap: QPixmap, action: str, ocr_text: str, pos: QPoint):
-        """截图完成后的处理。"""
-        self._screenshot_overlay = None
-        # Show main window again
-        main_win = self.window()
-        if main_win:
-            main_win.show()
-            main_win.raise_()
-            main_win.activateWindow()
-
-        if action == "cancel" or pixmap.isNull():
+    def _export_note_txt(self, note_id: str):
+        """将笔记导出为 .txt 文件。"""
+        note = self._mgr.get(note_id)
+        if not note:
             return
-
-        if action == "pin":
-            # Just pin the image, don't insert into note
-            from app.ui.pin_window import PinWindow
-            pw = PinWindow(pixmap, pos=pos)
-            pw.show()
-            if not hasattr(self, '_pin_windows'):
-                self._pin_windows = []
-            self._pin_windows.append(pw)
-            pw.closed.connect(lambda w=pw: self._pin_windows.remove(w) if w in self._pin_windows else None)
-        else:
-            # Insert image into note (copy or save action)
-            self._insert_image(pixmap)
-
-    def _insert_image(self, pixmap: QPixmap):
-        """将图片插入到当前笔记中。"""
-        if not self._current_note_id:
+        safe_name = note.title[:40].replace("/", "-").replace("\\", "-") or "笔记"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出笔记", f"{safe_name}.txt", "文本文件 (*.txt)"
+        )
+        if not path:
             return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"{note.title}\n{'─' * 40}\n{_html_to_plain(note.content)}\n")
+            self._show_status("已导出")
+        except OSError:
+            QMessageBox.warning(self, "导出失败", "无法写入文件，请检查路径权限。")
 
-        # Ensure images directory exists
-        NOTES_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    def _on_delete_by_id(self, note_id: str):
+        """右键删除单条便签（移入回收站）。"""
+        reply = QMessageBox.question(
+            self, "移入回收站", "确定要将这条笔记移入回收站吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._auto_save_timer.stop()
+        if note_id == self._current_note_id:
+            self._current_note_id = None
+            self._clear_editor()
+        self._mgr.delete(note_id)
+        self._load()
 
-        # Save image with unique name
-        img_id = str(uuid.uuid4())[:8]
-        img_path = NOTES_IMAGES_DIR / f"{self._current_note_id}_{img_id}.png"
-        pixmap.save(str(img_path), "PNG")
+    def _confirm_purge(self, items: list):
+        """永久删除（回收站模式）。"""
+        n = len(items)
+        msg = (f"确定要永久删除选中的 {n} 条笔记吗？此操作不可撤销！"
+               if n > 1 else "确定要永久删除这条笔记吗？此操作不可撤销！")
+        reply = QMessageBox.question(
+            self, "永久删除", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            for item in items:
+                self._mgr.purge(item.data(Qt.ItemDataRole.UserRole))
+            self._load()
 
-        # Insert HTML img tag into content
-        cursor = self._content_edit.textCursor()
-        # Use relative path for portability
-        relative_path = f"images/{self._current_note_id}_{img_id}.png"
-        img_html = f'<img src="{relative_path}" alt="截图" style="max-width:100%;">'
-        cursor.insertHtml(img_html)
-        cursor.insertText("\n")
+    def _show_status(self, msg: str):
+        self._status_label.setText(msg)
+        self._status_timer.start()
 
-        self._auto_save_timer.start()
+    def _pin_note_to_screen(self, note_id: str):
+        """将指定便签独立显示为屏幕浮窗。"""
+        from app.ui.sticky_note_window import StickyNoteWindow
+        note = self._mgr.get(note_id)
+        if not note:
+            return
+        win = StickyNoteWindow(
+            note_id=note.id,
+            title=note.title,
+            content=note.content,
+            note_mgr=self._mgr,
+        )
+        win.show()
+        self._pin_windows.append(win)
+        win.closed.connect(
+            lambda w=win: self._pin_windows.remove(w) if w in self._pin_windows else None
+        )
+
+    # ------------------------------------------------------------------ screenshot (removed)
 
     def refresh(self):
         """外部调用：AI 工具写入新笔记后刷新列表。"""

@@ -251,13 +251,10 @@ class TitleBar(QWidget):
         self._btn_group.button(0).setChecked(True)
         self._btn_group.idClicked.connect(self._win._switch_view)
 
-        snap_btn = QPushButton("✂")
+        snap_btn = QPushButton("截图")
         snap_btn.setObjectName("iconBtn")
-        snap_btn.setFixedSize(32, 28)
+        snap_btn.setFixedSize(44, 28)
         snap_btn.setToolTip("截图")
-        f = snap_btn.font()
-        f.setPointSize(16)
-        snap_btn.setFont(f)
         snap_btn.clicked.connect(self._win._start_screenshot)
         layout.addWidget(snap_btn)
 
