@@ -3,6 +3,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import keyring
+
+_SERVICE_NAME = "ai-agent-desktop"
+_ACCOUNT_API_KEY = "api_key"
+
 # PyInstaller 打包后 __file__ 指向临时目录，需要用 exe 所在目录作为根目录
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).parent
@@ -44,6 +49,15 @@ class ConfigManager:
         self._ensure_dirs()
         self._app = self._load(CONFIG_DIR / "app_config.json", DEFAULT_APP_CONFIG)
         self._params = self._load(CONFIG_DIR / "params_config.json", DEFAULT_PARAMS_CONFIG)
+        self._migrate_key_to_keyring()
+
+    def _migrate_key_to_keyring(self):
+        """One-time migration: move plaintext API key from JSON into the system keyring."""
+        json_key = self._app["api"].get("api_key", "")
+        if json_key:
+            keyring.set_password(_SERVICE_NAME, _ACCOUNT_API_KEY, json_key)
+            self._app["api"]["api_key"] = ""
+            self._write(CONFIG_DIR / "app_config.json", self._app)
 
     # ------------------------------------------------------------------ dirs
     def _ensure_dirs(self):
@@ -85,7 +99,7 @@ class ConfigManager:
 
     @property
     def api_key(self) -> str:
-        return self._app["api"]["api_key"]
+        return keyring.get_password(_SERVICE_NAME, _ACCOUNT_API_KEY) or ""
 
     @property
     def model(self) -> str:
@@ -117,6 +131,8 @@ class ConfigManager:
 
     # ------------------------------------------------------------------ write
     def update_api_config(self, **kwargs):
+        if "api_key" in kwargs:
+            keyring.set_password(_SERVICE_NAME, _ACCOUNT_API_KEY, kwargs.pop("api_key"))
         self._app["api"].update(kwargs)
         self._write(CONFIG_DIR / "app_config.json", self._app)
 

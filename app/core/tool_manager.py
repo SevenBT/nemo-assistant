@@ -17,6 +17,9 @@ class ToolManager:
     def __init__(self, config: ConfigManager):
         self._config = config
         self._tools: dict[str, ToolDefinition] = {}
+        # Serializes sys.stdin/stdout redirection across concurrent tool executions
+        # (e.g. a scheduler-triggered tool running while a chat tool is in progress).
+        self._exec_lock = threading.Lock()
         self._discover()
 
     # ------------------------------------------------------------------ discovery
@@ -150,29 +153,30 @@ class ToolManager:
         stdout_buf = io.StringIO()
         stdin_buf = io.StringIO(stdin_payload)
 
-        # Temporarily add the script's own directory to sys.path so it can
-        # import sibling modules (helpers, shared utils, etc.).
-        script_dir = str(Path(tool.script_path).parent)
-        path_inserted = script_dir not in sys.path
-        if path_inserted:
-            sys.path.insert(0, script_dir)
-
-        old_stdin = sys.stdin
-        sys.stdin = stdin_buf
-        try:
-            with redirect_stdout(stdout_buf):
-                runpy.run_path(tool.script_path, run_name="__main__")
-        except SystemExit:
-            pass  # scripts may call sys.exit(0) to signal clean completion
-        except Exception as e:
-            return {"status": "error", "data": {"message": str(e)}}
-        finally:
-            sys.stdin = old_stdin
+        # The lock serializes sys.stdin/stdout/path mutations so a scheduler-
+        # triggered tool and a chat tool can't clobber each other's streams.
+        with self._exec_lock:
+            script_dir = str(Path(tool.script_path).parent)
+            path_inserted = script_dir not in sys.path
             if path_inserted:
-                try:
-                    sys.path.remove(script_dir)
-                except ValueError:
-                    pass
+                sys.path.insert(0, script_dir)
+
+            old_stdin = sys.stdin
+            sys.stdin = stdin_buf
+            try:
+                with redirect_stdout(stdout_buf):
+                    runpy.run_path(tool.script_path, run_name="__main__")
+            except SystemExit:
+                pass  # scripts may call sys.exit(0) to signal clean completion
+            except Exception as e:
+                return {"status": "error", "data": {"message": str(e)}}
+            finally:
+                sys.stdin = old_stdin
+                if path_inserted:
+                    try:
+                        sys.path.remove(script_dir)
+                    except ValueError:
+                        pass
 
         output = stdout_buf.getvalue().strip()
         if not output:

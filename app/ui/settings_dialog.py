@@ -160,7 +160,7 @@ class SettingsDialog(QDialog):
         api = self._config.app_config["api"]
         win = self._config.window_config
         self._base_url.setText(api.get("base_url", ""))
-        self._api_key.setText(api.get("api_key", ""))
+        self._api_key.setText(self._config.api_key)
         self._model.setText(api.get("model", ""))
         self._max_tokens.setValue(api.get("max_tokens", 4096))
         self._temperature.setValue(api.get("temperature", 0.7))
