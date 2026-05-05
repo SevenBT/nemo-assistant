@@ -92,7 +92,7 @@ class SettingsDialog(QDialog):
         self._always_on_top = QCheckBox("始终置顶")
         win_form.addRow("", self._always_on_top)
 
-        self._edge_snap = QCheckBox("贴边自动吸附（上/右边缘）")
+        self._edge_snap = QCheckBox("顶栏吸附")
         win_form.addRow("", self._edge_snap)
 
         self._theme_combo = QComboBox()

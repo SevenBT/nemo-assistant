@@ -4,7 +4,7 @@ Fullscreen screenshot overlay with region selection and action toolbar.
 Actions after selection: pin (贴图), copy (复制), save (保存), ocr (识别文字), cancel.
 """
 
-import os
+import threading
 
 from PyQt6.QtCore import (
     QPoint,
@@ -25,6 +25,8 @@ from PyQt6.QtGui import (
     QTextCursor,
 )
 from PyQt6.QtWidgets import (
+    QAbstractButton,
+    QAbstractScrollArea,
     QApplication,
     QFrame,
     QHBoxLayout,
@@ -67,23 +69,27 @@ TOOLBAR_STYLE = f"""
     #ocrPanel QPushButton#ocrConfirmBtn:hover {{
         background: #3A8EDB;
     }}
+    #ocrPanel QPushButton#ocrCloseBtn {{
+        background: transparent;
+        border: 1px solid #555;
+        padding: 6px 18px;
+    }}
+    #ocrPanel QPushButton#ocrCloseBtn:hover {{
+        background: #3D3D3D;
+    }}
 """
 
 
-def _find_tesseract() -> str | None:
-    """Locate tesseract.exe on Windows. Returns path or None."""
-    candidates = [
-        os.path.expandvars(r"%ProgramFiles%\Tesseract-OCR\tesseract.exe"),
-        os.path.expandvars(r"%ProgramFiles(x86)%\Tesseract-OCR\tesseract.exe"),
-        os.path.expandvars(r"%LOCALAPPDATA%\Tesseract-OCR\tesseract.exe"),
-    ]
-    for p in candidates:
-        if os.path.isfile(p):
-            return p
-    # Check PATH
-    import shutil
-    found = shutil.which("tesseract")
-    return found
+# Module-level RapidOCR singleton — loaded once, reused across calls
+_rapid_ocr_engine = None
+
+
+def _get_rapid_ocr():
+    global _rapid_ocr_engine
+    if _rapid_ocr_engine is None:
+        from rapidocr_onnxruntime import RapidOCR
+        _rapid_ocr_engine = RapidOCR()
+    return _rapid_ocr_engine
 
 
 class ScreenshotOverlay(QWidget):
@@ -94,6 +100,7 @@ class ScreenshotOverlay(QWidget):
     """
 
     captured = pyqtSignal(QPixmap, str, str, QPoint)  # (pixmap, action, ocr_text, capture_pos)
+    _ocr_done = pyqtSignal(str)  # internal signal for thread-safe OCR result delivery
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -102,8 +109,14 @@ class ScreenshotOverlay(QWidget):
         self._state = "IDLE"  # IDLE | DRAGGING | SELECTED | OCR_EDIT
         self._toolbar: QFrame | None = None
         self._ocr_panel: QFrame | None = None
+        self._ocr_edit: QTextEdit | None = None
+        self._dragging_panel = False
+        self._panel_drag_offset = QPoint()
 
         self._setup_window()
+        self._ocr_done.connect(self._on_ocr_ready)
+        # Warm up OCR engine in background so first recognition is instant
+        threading.Thread(target=_get_rapid_ocr, daemon=True).start()
 
     # ── Window ─────────────────────────────────────────────────────────
 
@@ -282,52 +295,57 @@ class ScreenshotOverlay(QWidget):
     # ── OCR ────────────────────────────────────────────────────────────
 
     def _do_ocr(self):
+        import numpy as np
+
         r = self._normalized_rect()
         self.hide()
         QApplication.processEvents()
         pixmap = self._grab_rect(r)
-        self.show()  # Bring overlay back for editing
+        self.show()
         self.raise_()
         self.activateWindow()
 
-        text = self._run_ocr(pixmap)
+        # Extract pixel data in main thread (Qt objects can't cross threads)
+        img = pixmap.toImage()
+        ptr = img.bits()
+        ptr.setsize(img.sizeInBytes())
+        arr = np.frombuffer(ptr.asstring(), dtype=np.uint8).reshape(
+            img.height(), img.width(), 4
+        )
+        bgr = arr[:, :, :3][:, :, ::-1].copy()
+
         self._hide_toolbar()
         self._state = "OCR_EDIT"
-        self._show_ocr_panel(text)
+        self._show_ocr_panel("[识别中...]")
 
-    def _run_ocr(self, pixmap: QPixmap) -> str:
-        """Try OCR via pytesseract; fall back to a notice if unavailable."""
+        def _worker():
+            try:
+                text = self._run_ocr_from_array(bgr)
+            except Exception as e:
+                text = f"[OCR 错误: {e}]"
+            self._ocr_done.emit(text)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _run_ocr_from_array(self, bgr) -> str:
+        """Run OCR on a BGR numpy array. Safe to call from any thread."""
         try:
-            import pytesseract
-
-            tesseract_path = _find_tesseract()
-            if tesseract_path:
-                pytesseract.pytesseract.tesseract_cmd = tesseract_path
-
-            img = pixmap.toImage()
-            ptr = img.bits()
-            ptr.setsize(img.sizeInBytes())
-            from PIL import Image
-            pil_img = Image.frombuffer(
-                "RGBA", (img.width(), img.height()), ptr.asstring(),
-                "raw", "BGRA", 0, 1,
-            )
-
-            # Try Chinese first; fall back to English
-            for lang in ("chi_sim+eng", "eng"):
-                try:
-                    result = pytesseract.image_to_string(pil_img, lang=lang)
-                    return result.strip()
-                except pytesseract.TesseractError:
-                    continue
+            engine = _get_rapid_ocr()
+            result, _ = engine(bgr)
+            if result:
+                return "\n".join(line[1] for line in result).strip()
             return "[未识别到文字]"
-        except ImportError:
-            return "[OCR 不可用] 请运行 pip install pytesseract pillow 并下载 Tesseract OCR\n"
-            "下载地址: https://github.com/UB-Mannheim/tesseract/wiki\n"
-            "中文语言包: https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata\n"
-            "  放入 C:\\Program Files\\Tesseract-OCR\\tessdata\\"
         except Exception as e:
             return f"[OCR 错误: {e}]"
+
+    def _on_ocr_ready(self, text: str):
+        if self._ocr_edit is not None:
+            self._ocr_edit.setPlainText(text)
+            self._ocr_edit.moveCursor(QTextCursor.MoveOperation.Start)
+            self._ocr_edit.moveCursor(
+                QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor
+            )
+
 
     # ── OCR editor panel ───────────────────────────────────────────────
 
@@ -375,9 +393,13 @@ class ScreenshotOverlay(QWidget):
         """)
         root.addWidget(self._ocr_edit)
 
-        # Footer: confirm button
+        # Footer: close and confirm buttons
         footer = QHBoxLayout()
         footer.addStretch()
+        close_btn = QPushButton("关闭")
+        close_btn.setObjectName("ocrCloseBtn")
+        close_btn.clicked.connect(lambda: (self.captured.emit(QPixmap(), "cancel", "", QPoint()), self.close()))
+        footer.addWidget(close_btn)
         confirm_btn = QPushButton("复制并关闭")
         confirm_btn.setObjectName("ocrConfirmBtn")
         confirm_btn.clicked.connect(self._on_ocr_confirm)
@@ -532,11 +554,23 @@ class ScreenshotOverlay(QWidget):
                 return True
         return False
 
+    def _is_interactive_at(self, gpos: QPoint) -> bool:
+        """Return True if the widget under gpos should receive events directly."""
+        w = QApplication.widgetAt(gpos)
+        return w is not None and isinstance(w, (QAbstractButton, QAbstractScrollArea))
+
     def mousePressEvent(self, event: QMouseEvent):
+        pos = event.position().toPoint()
+        gpos = event.globalPosition().toPoint()
+
         if event.button() == Qt.MouseButton.LeftButton:
-            pos = event.position().toPoint()
             if self._is_on_panel(pos):
-                super().mousePressEvent(event)
+                if self._ocr_panel and not self._is_interactive_at(gpos):
+                    # Non-interactive area of the panel → start drag
+                    self._dragging_panel = True
+                    self._panel_drag_offset = pos - self._ocr_panel.pos()
+                else:
+                    super().mousePressEvent(event)
                 return
             if self._state == "OCR_EDIT":
                 return  # Block new selection during OCR editing
@@ -546,25 +580,38 @@ class ScreenshotOverlay(QWidget):
             self._end = self._start
             self._state = "DRAGGING"
             self.update()
+
         elif event.button() == Qt.MouseButton.RightButton:
+            if self._is_on_panel(pos):
+                # Allow context menu inside the panel (e.g. text selection)
+                super().mousePressEvent(event)
+                return
             self.captured.emit(QPixmap(), "cancel", "", QPoint())
             self.close()
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        if self._dragging_panel and self._ocr_panel:
+            new_pos = event.position().toPoint() - self._panel_drag_offset
+            pw, ph = self._ocr_panel.width(), self._ocr_panel.height()
+            x = max(0, min(new_pos.x(), self.width() - pw))
+            y = max(0, min(new_pos.y(), self.height() - ph))
+            self._ocr_panel.move(x, y)
+            return
         if self._state == "DRAGGING":
             self._end = event.globalPosition().toPoint()
             self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and self._state == "DRAGGING"
-        ):
-            self._end = event.globalPosition().toPoint()
-            self._state = "SELECTED"
-            self.update()
-            if self._has_selection():
-                self._show_toolbar()
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._dragging_panel:
+                self._dragging_panel = False
+                return
+            if self._state == "DRAGGING":
+                self._end = event.globalPosition().toPoint()
+                self._state = "SELECTED"
+                self.update()
+                if self._has_selection():
+                    self._show_toolbar()
 
     # ── Keyboard ───────────────────────────────────────────────────────
 

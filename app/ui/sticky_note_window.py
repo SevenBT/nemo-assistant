@@ -1,0 +1,412 @@
+"""
+Sticky note window — displays a note as a floating, always-on-top editable widget.
+
+Features:
+- Frameless, always-on-top, translucent background
+- Draggable via title bar (startSystemMove)
+- Resizable from all edges/corners (QApplication event filter)
+- Editable title and content in-place
+- Auto-saves changes back to NoteManager on close / focus-out
+- Right-click context menu: close / pin-on-top toggle
+- Double-click title bar to close
+
+Follows the frameless window conventions from CLAUDE.md.
+"""
+
+from PyQt6.QtCore import (
+    QEvent,
+    QPoint,
+    QRect,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
+from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PyQt6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+_RESIZE_BORDER = 6
+_MIN_W = 180
+_MIN_H = 120
+_TITLE_H = 32
+
+# Pastel background colours for sticky notes (cycles through on creation)
+_NOTE_COLORS = [
+    "#FFFDE7",  # warm yellow
+    "#E8F5E9",  # mint green
+    "#E3F2FD",  # sky blue
+    "#FCE4EC",  # rose pink
+    "#F3E5F5",  # lavender
+    "#FFF3E0",  # peach
+]
+_color_index = 0
+
+
+def _next_color() -> str:
+    global _color_index
+    c = _NOTE_COLORS[_color_index % len(_NOTE_COLORS)]
+    _color_index += 1
+    return c
+
+
+class _TitleBar(QWidget):
+    """Drag handle + close button for the sticky note."""
+
+    close_requested = pyqtSignal()
+    double_clicked = pyqtSignal()
+
+    def __init__(self, color: str, parent=None):
+        super().__init__(parent)
+        self._color = color
+        self.setFixedHeight(_TITLE_H)
+        self.setCursor(Qt.CursorShape.SizeAllCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 6, 0)
+        layout.setSpacing(4)
+
+        self._label = QLabel("便签")
+        self._label.setStyleSheet(
+            "color: rgba(0,0,0,0.55); font-size: 11px; font-weight: 600;"
+            "background: transparent; border: none;"
+        )
+        self._label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        layout.addWidget(self._label)
+
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(20, 20)
+        close_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        close_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: rgba(0,0,0,0.45);"
+            "border: none; border-radius: 10px; font-size: 12px; padding: 0; }"
+            "QPushButton:hover { background: rgba(0,0,0,0.15); color: rgba(0,0,0,0.85); }"
+        )
+        close_btn.clicked.connect(self.close_requested)
+        layout.addWidget(close_btn)
+
+    def set_title(self, title: str):
+        short = title[:18] + "…" if len(title) > 18 else title
+        self._label.setText(short or "便签")
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = self.rect()
+        # Rounded top corners only
+        path = QPainterPath()
+        radius = 10.0
+        path.moveTo(r.left(), r.bottom())
+        path.lineTo(r.left(), r.top() + radius)
+        path.quadTo(r.left(), r.top(), r.left() + radius, r.top())
+        path.lineTo(r.right() - radius, r.top())
+        path.quadTo(r.right(), r.top(), r.right(), r.top() + radius)
+        path.lineTo(r.right(), r.bottom())
+        path.closeSubpath()
+        # Darken the title bar slightly
+        base = QColor(self._color)
+        base = base.darker(108)
+        p.fillPath(path, base)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_started = False
+            self._press_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            if not getattr(self, "_drag_started", False):
+                delta = (
+                    event.globalPosition().toPoint() - self._press_pos
+                ).manhattanLength()
+                if delta > 4:
+                    self._drag_started = True
+                    self.window().windowHandle().startSystemMove()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.double_clicked.emit()
+
+
+class StickyNoteWindow(QWidget):
+    """A frameless, always-on-top sticky note window with editable content."""
+
+    closed = pyqtSignal()
+
+    def __init__(self, note_id: str, title: str, content: str,
+                 note_mgr=None, parent=None):
+        super().__init__(parent)
+        self._note_id = note_id
+        self._note_mgr = note_mgr
+        self._color = _next_color()
+
+        # Resize state
+        self._resize_active = False
+        self._resize_edges = Qt.Edge(0)
+        self._resize_start_geo = QRect()
+        self._resize_start_pos = QPoint()
+        self._resize_cursor_shape = None
+
+        self._build_window()
+        self._build_ui(title, content)
+        self._install_resize_filter()
+
+        # Auto-save timer (1.5 s debounce)
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(1500)
+        self._save_timer.timeout.connect(self._flush)
+        self._content_edit.textChanged.connect(self._save_timer.start)
+
+    # ── Window setup ───────────────────────────────────────────────────
+
+    def _build_window(self):
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.resize(240, 200)
+        self.setMinimumSize(_MIN_W, _MIN_H)
+
+        # Center on screen
+        sg = QApplication.primaryScreen().availableGeometry()
+        self.move(
+            (sg.width() - self.width()) // 2 + sg.x(),
+            (sg.height() - self.height()) // 2 + sg.y(),
+        )
+
+    def _build_ui(self, title: str, content: str):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Inner container (draws the rounded background)
+        self._container = _NoteContainer(self._color, self)
+        container_layout = QVBoxLayout(self._container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        # Title bar
+        self._title_bar = _TitleBar(self._color, self._container)
+        self._title_bar.set_title(title)
+        self._title_bar.close_requested.connect(self.close)
+        self._title_bar.double_clicked.connect(self.close)
+        container_layout.addWidget(self._title_bar)
+
+        # Content editor
+        self._content_edit = QTextEdit(self._container)
+        self._content_edit.setFrameShape(QTextEdit.Shape.NoFrame)
+        self._content_edit.setStyleSheet(
+            f"QTextEdit {{ background: transparent; color: rgba(0,0,0,0.75);"
+            f"border: none; padding: 8px 10px; font-size: 13px; line-height: 1.5; }}"
+        )
+        self._content_edit.setPlaceholderText("在此记录…")
+        # Load plain text from HTML content
+        self._content_edit.setPlainText(_html_to_plain(content))
+        container_layout.addWidget(self._content_edit, 1)
+
+        outer.addWidget(self._container)
+
+    # ── Save ───────────────────────────────────────────────────────────
+
+    def _flush(self):
+        if not self._note_mgr or not self._note_id:
+            return
+        text = self._content_edit.toPlainText()
+        # Preserve existing title; only update content
+        note = self._note_mgr.get(self._note_id)
+        if note:
+            self._note_mgr.update(self._note_id, note.title, text)
+            self._title_bar.set_title(note.title)
+
+    # ── Resize (QApplication event filter) ─────────────────────────────
+
+    def _resize_edges_at(self, win_pos: QPoint):
+        x, y, w, h = win_pos.x(), win_pos.y(), self.width(), self.height()
+        B = _RESIZE_BORDER
+        on_l = x < B
+        on_r = x > w - B
+        on_t = y < B
+        on_b = y > h - B
+        if not (on_l or on_r or on_t or on_b):
+            return None
+        edges = Qt.Edge(0)
+        if on_l:
+            edges |= Qt.Edge.LeftEdge
+        if on_r:
+            edges |= Qt.Edge.RightEdge
+        if on_t:
+            edges |= Qt.Edge.TopEdge
+        if on_b:
+            edges |= Qt.Edge.BottomEdge
+        return edges
+
+    @staticmethod
+    def _cursor_for_edges(edges):
+        L, R, T, B = (
+            Qt.Edge.LeftEdge, Qt.Edge.RightEdge,
+            Qt.Edge.TopEdge, Qt.Edge.BottomEdge,
+        )
+        has = lambda e: bool(edges & e)
+        if (has(T) and has(L)) or (has(B) and has(R)):
+            return Qt.CursorShape.SizeFDiagCursor
+        if (has(T) and has(R)) or (has(B) and has(L)):
+            return Qt.CursorShape.SizeBDiagCursor
+        if has(L) or has(R):
+            return Qt.CursorShape.SizeHorCursor
+        return Qt.CursorShape.SizeVerCursor
+
+    def _apply_resize_cursor(self, edges):
+        shape = self._cursor_for_edges(edges)
+        if self._resize_cursor_shape is None:
+            QApplication.setOverrideCursor(shape)
+        elif shape != self._resize_cursor_shape:
+            QApplication.changeOverrideCursor(shape)
+        else:
+            return
+        self._resize_cursor_shape = shape
+
+    def _clear_resize_cursor(self):
+        if self._resize_cursor_shape is not None:
+            QApplication.restoreOverrideCursor()
+            self._resize_cursor_shape = None
+
+    def _do_manual_resize(self, global_pos: QPoint):
+        geo = self._resize_start_geo
+        dx = global_pos.x() - self._resize_start_pos.x()
+        dy = global_pos.y() - self._resize_start_pos.y()
+        x, y, w, h = geo.x(), geo.y(), geo.width(), geo.height()
+        e = self._resize_edges
+        nx, ny, nw, nh = x, y, w, h
+        if bool(e & Qt.Edge.RightEdge):
+            nw = max(_MIN_W, w + dx)
+        if bool(e & Qt.Edge.BottomEdge):
+            nh = max(_MIN_H, h + dy)
+        if bool(e & Qt.Edge.LeftEdge):
+            nw = max(_MIN_W, w - dx)
+            nx = x + w - nw
+        if bool(e & Qt.Edge.TopEdge):
+            nh = max(_MIN_H, h - dy)
+            ny = y + h - nh
+        self.setGeometry(nx, ny, nw, nh)
+
+    def eventFilter(self, obj, event):
+        etype = event.type()
+
+        if etype == QEvent.Type.MouseMove:
+            gpos = event.globalPosition().toPoint()
+            if self._resize_active:
+                if event.buttons() & Qt.MouseButton.LeftButton:
+                    self._do_manual_resize(gpos)
+                else:
+                    self._resize_active = False
+                return True
+            local = self.mapFromGlobal(gpos)
+            edges = (
+                self._resize_edges_at(local)
+                if self.rect().contains(local)
+                else None
+            )
+            if edges is not None:
+                self._apply_resize_cursor(edges)
+            else:
+                self._clear_resize_cursor()
+
+        elif etype == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                gpos = event.globalPosition().toPoint()
+                local = self.mapFromGlobal(gpos)
+                edges = (
+                    self._resize_edges_at(local)
+                    if self.rect().contains(local)
+                    else None
+                )
+                if edges is not None:
+                    self._resize_active = True
+                    self._resize_edges = edges
+                    self._resize_start_geo = self.geometry()
+                    self._resize_start_pos = gpos
+                    self._clear_resize_cursor()
+                    return True
+
+        elif etype == QEvent.Type.MouseButtonRelease:
+            if self._resize_active:
+                self._resize_active = False
+                return True
+
+        return super().eventFilter(obj, event)
+
+    def _install_resize_filter(self):
+        app = QApplication.instance()
+        if app:
+            app.installEventFilter(self)
+
+    # ── Cleanup ────────────────────────────────────────────────────────
+
+    def closeEvent(self, event):
+        self._save_timer.stop()
+        self._flush()
+        self._clear_resize_cursor()
+        app = QApplication.instance()
+        if app:
+            app.removeEventFilter(self)
+        self.closed.emit()
+        super().closeEvent(event)
+
+
+class _NoteContainer(QWidget):
+    """Inner container that paints the rounded, drop-shadowed background."""
+
+    def __init__(self, color: str, parent=None):
+        super().__init__(parent)
+        self._color = color
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = self.rect().adjusted(2, 2, -2, -2)
+
+        # Soft drop shadow
+        shadow_color = QColor(0, 0, 0, 40)
+        for i in range(4, 0, -1):
+            sr = r.adjusted(-i, -i, i, i + 2)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(shadow_color)
+            p.setOpacity(0.06 * i)
+            p.drawRoundedRect(sr, 12, 12)
+
+        p.setOpacity(1.0)
+        p.setBrush(QColor(self._color))
+        p.setPen(QPen(QColor(0, 0, 0, 20), 1))
+        p.drawRoundedRect(r, 10, 10)
+
+
+def _html_to_plain(html: str) -> str:
+    """Strip HTML tags and embedded style/script blocks for plain-text display."""
+    import re
+    if not html or "<" not in html:
+        return html
+    # Remove <style>...</style> and <head>...</head> blocks first
+    text = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<head[^>]*>.*?</head>", "", text, flags=re.IGNORECASE | re.DOTALL)
+    # Replace block-level tags with newlines
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)
+    # Strip all remaining tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Decode common HTML entities
+    text = (text.replace("&amp;", "&").replace("&lt;", "<")
+            .replace("&gt;", ">").replace("&nbsp;", " ").replace("&quot;", '"'))
+    return text.strip()
