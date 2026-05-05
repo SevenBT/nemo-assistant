@@ -1,0 +1,31 @@
+{
+  "name": "web_search",
+  "description": "搜索互联网，返回相关网页列表（标题、链接、摘要）。支持 DuckDuckGo（免费）、Bing、Tavily、Brave 搜索引擎，在设置→工具中配置",
+  "script": "tool.py",
+  "parameters": {
+    "query": {
+      "type": "string",
+      "description": "搜索关键词或问题",
+      "source": "ai",
+      "required": true
+    },
+    "count": {
+      "type": "number",
+      "description": "返回结果数量，默认 5，最多 10",
+      "source": "ai",
+      "required": false
+    },
+    "provider": {
+      "type": "string",
+      "description": "搜索服务商（由配置决定，AI 无需填写）",
+      "source": "config",
+      "required": false
+    },
+    "api_key": {
+      "type": "string",
+      "description": "搜索 API Key（由配置决定，AI 无需填写）",
+      "source": "config",
+      "required": false
+    }
+  }
+}

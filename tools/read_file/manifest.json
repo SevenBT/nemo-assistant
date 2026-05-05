@@ -1,0 +1,19 @@
+{
+  "name": "read_file",
+  "description": "读取本地文本文件内容，支持 txt、md、py、json、csv 等格式",
+  "script": "tool.py",
+  "parameters": {
+    "file_path": {
+      "type": "string",
+      "description": "文件绝对路径，或以 ~/ 开头的路径，如 'C:/Users/xxx/doc.txt' 或 '~/Desktop/notes.md'",
+      "source": "ai",
+      "required": true
+    },
+    "max_chars": {
+      "type": "number",
+      "description": "最大读取字符数，默认 50000",
+      "source": "ai",
+      "required": false
+    }
+  }
+}

@@ -11,7 +11,9 @@ Layout:
   │  page 2: SchedulerPanel                                      │
   └──────────────────────────────────────────────────────────────┘
 """
+import datetime
 import json
+import math
 import time
 
 from PyQt6.QtCore import QEvent, QPoint, Qt, QTimer, pyqtSignal, pyqtSlot
@@ -154,6 +156,53 @@ BUILTIN_TOOLS = [
                     "summary": {"type": "string", "description": "对话内容的总结文本"},
                 },
                 "required": ["title", "summary"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_datetime",
+            "description": "获取当前日期、时间、星期和时区信息",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculator",
+            "description": "计算数学表达式，支持四则运算、幂次、三角函数、对数、常数 pi/e 等",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "要计算的数学表达式，如 '2**10'、'sin(pi/4)'、'log(100, 10)'",
+                    }
+                },
+                "required": ["expression"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clipboard",
+            "description": "读取或写入系统剪贴板。action=get 读取当前内容，action=set 将 content 写入剪贴板",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["get", "set"],
+                        "description": "操作类型：get（读取剪贴板）或 set（写入剪贴板）",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "当 action=set 时，要写入剪贴板的文本内容",
+                    },
+                },
+                "required": ["action"],
             },
         },
     },
@@ -510,6 +559,9 @@ class MainWindow(QWidget):
                 "read_notes": self._handle_read_notes,
                 "create_note": self._handle_create_note,
                 "summarize_session_as_note": self._handle_summarize_as_note,
+                "get_datetime": self._handle_get_datetime,
+                "calculator": self._handle_calculator,
+                "clipboard": self._handle_clipboard,
             },
         )
         self._workers[sid] = worker
@@ -747,6 +799,53 @@ class MainWindow(QWidget):
             )
             self._notes_panel.refresh()
             return {"status": "success", "data": {"id": note.id, "title": note.title}}
+        except Exception as e:
+            return {"status": "error", "data": {"message": str(e)}}
+
+    def _handle_get_datetime(self, _args: dict) -> dict:
+        now = datetime.datetime.now()
+        tz = now.astimezone().tzname()
+        return {
+            "status": "success",
+            "data": {
+                "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "date": now.strftime("%Y-%m-%d"),
+                "time": now.strftime("%H:%M:%S"),
+                "weekday": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()],
+                "timestamp": int(now.timestamp()),
+                "timezone": tz,
+            },
+        }
+
+    _CALC_ALLOWED = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
+    _CALC_ALLOWED.update({"abs": abs, "round": round, "int": int, "float": float,
+                           "pow": pow, "sum": sum, "min": min, "max": max})
+
+    def _handle_calculator(self, args: dict) -> dict:
+        expr = args.get("expression", "").strip()
+        if not expr:
+            return {"status": "error", "data": {"message": "expression is required"}}
+        try:
+            result = eval(expr, {"__builtins__": {}}, self._CALC_ALLOWED)  # noqa: S307
+            if isinstance(result, complex):
+                serialized: object = {"real": result.real, "imag": result.imag, "str": str(result)}
+            else:
+                serialized = result
+            return {"status": "success", "data": {"expression": expr, "result": serialized}}
+        except Exception as e:
+            return {"status": "error", "data": {"message": str(e), "expression": expr}}
+
+    def _handle_clipboard(self, args: dict) -> dict:
+        action = args.get("action", "get")
+        content = args.get("content", "")
+        try:
+            import pyperclip
+            if action == "get":
+                text = pyperclip.paste()
+                return {"status": "success", "data": {"content": text, "length": len(text)}}
+            else:
+                pyperclip.copy(content)
+                return {"status": "success", "data": {"message": f"已复制 {len(content)} 字符到剪贴板"}}
         except Exception as e:
             return {"status": "error", "data": {"message": str(e)}}
 
