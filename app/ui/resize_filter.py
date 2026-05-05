@@ -1,0 +1,136 @@
+"""QApplication-level event filter for frameless window resizing.
+
+Extracted from main_window.py. Installed on QApplication so it can
+intercept mouse events over any child widget (not just the window itself).
+
+See CLAUDE.md §2 for why this approach is required.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from PyQt6.QtCore import QEvent, QObject, Qt
+from PyQt6.QtWidgets import QApplication
+
+if TYPE_CHECKING:
+    from app.ui.main_window import MainWindow
+
+_RESIZE_BORDER = 8  # pixels from window edge that trigger resize
+
+
+class ResizeFilter(QObject):
+    def __init__(self, window: MainWindow):
+        super().__init__(window)
+        self._win = window
+        self._active = False
+        self._edges_active = None
+        self._start_geo = None
+        self._start_pos = None
+        self._cursor_shape = None
+
+    def install(self):
+        QApplication.instance().installEventFilter(self)
+
+    # ── edge detection ────────────────────────────────────────────────
+
+    def _resize_edges(self, win_pos):
+        """Return Qt.Edge flags for window-local position, or None if not on any edge."""
+        x, y = win_pos.x(), win_pos.y()
+        w, h = self._win.width(), self._win.height()
+        B = _RESIZE_BORDER
+        on_l, on_r = x < B, x > w - B
+        on_t, on_b = y < B, y > h - B
+        if not (on_l or on_r or on_t or on_b):
+            return None
+        edges = Qt.Edge(0)
+        if on_l: edges |= Qt.Edge.LeftEdge
+        if on_r: edges |= Qt.Edge.RightEdge
+        if on_t: edges |= Qt.Edge.TopEdge
+        if on_b: edges |= Qt.Edge.BottomEdge
+        return edges
+
+    def _cursor_for_edges(self, edges):
+        L, R, T, B = Qt.Edge.LeftEdge, Qt.Edge.RightEdge, Qt.Edge.TopEdge, Qt.Edge.BottomEdge
+        has = lambda e: bool(edges & e)  # noqa: E731
+        if (has(T) and has(L)) or (has(B) and has(R)): return Qt.CursorShape.SizeFDiagCursor
+        if (has(T) and has(R)) or (has(B) and has(L)): return Qt.CursorShape.SizeBDiagCursor
+        if has(L) or has(R): return Qt.CursorShape.SizeHorCursor
+        return Qt.CursorShape.SizeVerCursor
+
+    # ── cursor management ─────────────────────────────────────────────
+
+    def _apply_cursor(self, edges):
+        shape = self._cursor_for_edges(edges)
+        if self._cursor_shape is None:
+            QApplication.setOverrideCursor(shape)
+        elif shape != self._cursor_shape:
+            QApplication.changeOverrideCursor(shape)
+        else:
+            return
+        self._cursor_shape = shape
+
+    def _clear_cursor(self):
+        if self._cursor_shape is not None:
+            QApplication.restoreOverrideCursor()
+            self._cursor_shape = None
+
+    # ── resize ────────────────────────────────────────────────────────
+
+    def _do_resize(self, global_pos):
+        geo = self._start_geo
+        dx = global_pos.x() - self._start_pos.x()
+        dy = global_pos.y() - self._start_pos.y()
+        x, y, w, h = geo.x(), geo.y(), geo.width(), geo.height()
+        min_w, min_h = self._win.minimumWidth(), self._win.minimumHeight()
+        e = self._edges_active
+        nx, ny, nw, nh = x, y, w, h
+        if bool(e & Qt.Edge.RightEdge):  nw = max(min_w, w + dx)
+        if bool(e & Qt.Edge.BottomEdge): nh = max(min_h, h + dy)
+        if bool(e & Qt.Edge.LeftEdge):   nw = max(min_w, w - dx); nx = x + w - nw
+        if bool(e & Qt.Edge.TopEdge):    nh = max(min_h, h - dy); ny = y + h - nh
+        self._win.setGeometry(nx, ny, nw, nh)
+
+    # ── event filter ──────────────────────────────────────────────────
+
+    def eventFilter(self, obj, event):
+        etype = event.type()
+
+        # Suppress resize while snapped or animating
+        snap = self._win._snap_mgr
+        if snap is not None and (snap.is_snapped or snap.is_animating):
+            return False
+
+        if etype == QEvent.Type.MouseMove:
+            gpos = event.globalPosition().toPoint()
+            if self._active:
+                if event.buttons() & Qt.MouseButton.LeftButton:
+                    self._do_resize(gpos)
+                else:
+                    self._active = False  # button released outside window
+                return True
+            local = self._win.mapFromGlobal(gpos)
+            edges = self._resize_edges(local) if self._win.rect().contains(local) else None
+            if edges is not None:
+                self._apply_cursor(edges)
+            else:
+                self._clear_cursor()
+
+        elif etype == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                gpos = event.globalPosition().toPoint()
+                local = self._win.mapFromGlobal(gpos)
+                edges = self._resize_edges(local) if self._win.rect().contains(local) else None
+                if edges is not None:
+                    self._active = True
+                    self._edges_active = edges
+                    self._start_geo = self._win.geometry()
+                    self._start_pos = gpos
+                    self._clear_cursor()
+                    return True
+
+        elif etype == QEvent.Type.MouseButtonRelease:
+            if self._active:
+                self._active = False
+                return True
+
+        return False
