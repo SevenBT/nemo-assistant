@@ -1,12 +1,10 @@
 Traceback (most recent call last):
-  File "D:\claudecode-projects\assistant\main.py", line 63, in <module>
-    main()
-  File "D:\claudecode-projects\assistant\main.py", line 54, in main
-    window = MainWindow(config, sessions, tools, scheduler, notes)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 276, in __init__
-    self._build_ui()
-  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 352, in _build_ui
-    session_width = wcfg.get("session_panel_width", 180)
-                    ^^^^
-NameError: name 'wcfg' is not defined
+  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 556, in _open_settings
+    dlg = SettingsDialog(self._config, self._hotkey_mgr, self)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\claudecode-projects\assistant\app\ui\settings_dialog.py", line 46, in __init__
+    self._build()
+  File "D:\claudecode-projects\assistant\app\ui\settings_dialog.py", line 139, in _build
+    self._hotkey_widget = HotkeySettingsWidget(config, self._hotkey_mgr)
+                                               ^^^^^^
+NameError: name 'config' is not defined

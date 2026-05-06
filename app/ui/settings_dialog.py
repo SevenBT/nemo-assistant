@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.config import ConfigManager
+from app.ui.hotkey_settings_widget import HotkeySettingsWidget
 from app.ui.style import THEMES
 
 _SEARCH_PROVIDERS = [
@@ -36,9 +37,10 @@ _KEY_HINTS = {
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, config: ConfigManager, parent=None):
+    def __init__(self, config: ConfigManager, hotkey_mgr=None, parent=None):
         super().__init__(parent)
         self._config = config
+        self._hotkey_mgr = hotkey_mgr
         self.setWindowTitle("设置")
         self.setMinimumWidth(420)
         self._build()
@@ -133,6 +135,10 @@ class SettingsDialog(QDialog):
 
         tabs.addTab(tools_w, "工具")
 
+        # ── Hotkeys tab ───────────────────────────────────────────────
+        self._hotkey_widget = HotkeySettingsWidget(self._config, self._hotkey_mgr)
+        tabs.addTab(self._hotkey_widget, "快捷键")
+
         layout.addWidget(tabs)
 
         btns = QDialogButtonBox(
@@ -209,4 +215,5 @@ class SettingsDialog(QDialog):
                 },
             }
         )
+        self._hotkey_widget.save()
         self.accept()

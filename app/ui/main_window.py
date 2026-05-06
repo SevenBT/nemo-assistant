@@ -41,6 +41,7 @@ from app.ui.input_widget import InputWidget
 from app.ui.manual_params_dialog import ManualParamsDialog
 from app.ui.notes_dialog import NotesPanel
 from app.ui.pin_window import PinWindow
+from app.core.hotkey_manager import HotkeyManager
 from app.ui.resize_filter import ResizeFilter
 from app.ui.scheduler_dialog import SchedulerPanel
 from app.ui.screenshot_overlay import ScreenshotOverlay
@@ -97,6 +98,7 @@ class MainWindow(QWidget):
         self._current_ai_msg: Message | None = None
         self._current_ai_text = ""
         self._snap_mgr: EdgeSnapManager | None = None
+        self._sticky_windows: list = []
         self._build_window()
         self._build_ui()
         self._builtin_handler = BuiltinToolHandler(
@@ -111,6 +113,7 @@ class MainWindow(QWidget):
         self._snap_mgr = EdgeSnapManager(self)
         self._snap_mgr.set_enabled(self._config.window_config.get("edge_snap", True))
         self._notify_signal.connect(self._on_notify)
+        self._setup_hotkeys()
 
     # ──────────────────────────────────────────── window setup
     def _build_window(self):
@@ -211,6 +214,48 @@ class MainWindow(QWidget):
         self._tray.screenshot_requested.connect(self._start_screenshot)
         self._tray.quit_requested.connect(self._on_quit)
         self._scheduler.set_result_callback(self._on_scheduler_result)
+
+    # ──────────────────────────────────────────── hotkeys
+    def _setup_hotkeys(self):
+        self._hotkey_mgr = HotkeyManager(self._config, self)
+        self._hotkey_mgr.screenshot_triggered.connect(self._start_screenshot)
+        self._hotkey_mgr.new_note_triggered.connect(self._new_note_via_hotkey)
+        self._hotkey_mgr.toggle_window_triggered.connect(self._toggle_window_visibility)
+        self._hotkey_mgr.quick_ask_triggered.connect(self._quick_ask)
+        self._hotkey_mgr.start()
+
+    def _new_note_via_hotkey(self):
+        from app.ui.sticky_note_window import StickyNoteWindow
+        note = self._notes.create()
+        win = StickyNoteWindow(
+            note_id=note.id,
+            title=note.title,
+            content=note.content,
+            note_mgr=self._notes,
+        )
+        win.show()
+        self._sticky_windows.append(win)
+        win.closed.connect(
+            lambda w=win: self._sticky_windows.remove(w) if w in self._sticky_windows else None
+        )
+
+    def _toggle_window_visibility(self):
+        if self.isVisible():
+            if self._snap_mgr is not None and self._snap_mgr.is_snapped:
+                self._snap_mgr.unsnap_full()
+            else:
+                self.hide()
+        else:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+    def _quick_ask(self):
+        if not self.isVisible():
+            self.show()
+        self.raise_()
+        self.activateWindow()
+        self._input.focus()
 
     # ──────────────────────────────────────────── sessions
     def _init_sessions(self):
@@ -508,7 +553,7 @@ class MainWindow(QWidget):
     # ──────────────────────────────────────────── dialogs / window actions
     def _open_settings(self):
         old_theme = self._config.theme
-        dlg = SettingsDialog(self._config, self)
+        dlg = SettingsDialog(self._config, self._hotkey_mgr, self)
         if dlg.exec():
             wcfg = self._config.window_config
             self.setWindowOpacity(wcfg.get("opacity", 0.97))
@@ -624,6 +669,7 @@ class MainWindow(QWidget):
 
     def cleanup(self):
         """Stop all background workers. Call before app quit."""
+        self._hotkey_mgr.stop()
         for sid in list(self._workers):
             self._cancel_worker(sid)
 

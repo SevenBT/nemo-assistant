@@ -11,6 +11,7 @@ _REQUIRED_PACKAGES = [
     ("openai",      "openai"),
     ("apscheduler", "APScheduler"),
     ("pyperclip",   "pyperclip"),
+    ("keyboard",    "keyboard"),
 ]
 
 def _can_import(name: str) -> bool:

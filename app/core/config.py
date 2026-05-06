@@ -22,6 +22,12 @@ TRASH_DIR = NOTES_DIR / "trash"
 TOOLS_DIR = BASE_DIR / "tools"
 
 DEFAULT_APP_CONFIG: dict = {
+    "hotkeys": {
+        "screenshot":    "ctrl+alt+a",
+        "new_note":      "ctrl+alt+n",
+        "toggle_window": "ctrl+alt+space",
+        "quick_ask":     "ctrl+alt+q",
+    },
     "api": {
         "base_url": "https://api.openai.com/v1",
         "api_key": "",
@@ -146,6 +152,14 @@ class ConfigManager:
     def set_tool_param(self, tool_name: str, param: str, value: Any):
         self._params["tools"].setdefault(tool_name, {})[param] = value
         self._write(CONFIG_DIR / "params_config.json", self._params)
+
+    @property
+    def hotkeys(self) -> dict:
+        return self._app.get("hotkeys", DEFAULT_APP_CONFIG["hotkeys"])
+
+    def update_hotkeys(self, updates: dict):
+        self._app.setdefault("hotkeys", {}).update(updates)
+        self._write(CONFIG_DIR / "app_config.json", self._app)
 
     def update_tools_config(self, updates: dict):
         """Batch-update tool params. updates = {tool_name: {param: value, ...}, ...}"""
