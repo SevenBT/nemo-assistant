@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QTextEdit,
@@ -141,6 +142,8 @@ class StickyNoteWindow(QWidget):
     """A frameless, always-on-top sticky note window with editable content."""
 
     closed = pyqtSignal()
+    # Signal emitted when content changes (note_id, title, content)
+    content_changed = pyqtSignal(int, str, str)
 
     def __init__(self, note_id: str, title: str, content: str,
                  note_mgr=None, parent=None):
@@ -166,6 +169,12 @@ class StickyNoteWindow(QWidget):
         self._save_timer.setInterval(1500)
         self._save_timer.timeout.connect(self._flush)
         self._content_edit.textChanged.connect(self._save_timer.start)
+
+        # Position save timer (500ms debounce for move events)
+        self._pos_timer = QTimer(self)
+        self._pos_timer.setSingleShot(True)
+        self._pos_timer.setInterval(500)
+        self._pos_timer.timeout.connect(self._save_position)
 
     # ── Window setup ───────────────────────────────────────────────────
 
@@ -215,6 +224,9 @@ class StickyNoteWindow(QWidget):
         self._content_edit.setPlaceholderText("在此记录…")
         # Load plain text from HTML content
         self._content_edit.setPlainText(_html_to_plain(content))
+        # Enable context menu
+        self._content_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._content_edit.customContextMenuRequested.connect(self._show_context_menu)
         container_layout.addWidget(self._content_edit, 1)
 
         outer.addWidget(self._container)
@@ -230,6 +242,80 @@ class StickyNoteWindow(QWidget):
         if note:
             self._note_mgr.update(self._note_id, note.title, text)
             self._title_bar.set_title(note.title)
+            # Emit signal for external listeners (notes panel)
+            self.content_changed.emit(self._note_id, note.title, text)
+
+    def _save_position(self):
+        """保存浮窗位置到数据库。"""
+        if not self._note_mgr or not self._note_id:
+            return
+        try:
+            pos = self.pos()
+            self._note_mgr.update_pin_position(self._note_id, pos.x(), pos.y())
+        except Exception as e:
+            print(f"Failed to save position: {e}")
+
+    def update_content(self, title: str, content: str):
+        """外部调用：更新浮窗内容（用于同步笔记面板的编辑）。"""
+        # Block signals to prevent triggering another update
+        self._content_edit.blockSignals(True)
+        self._content_edit.setPlainText(_html_to_plain(content))
+        self._content_edit.blockSignals(False)
+        self._title_bar.set_title(title)
+
+    def _show_context_menu(self, pos):
+        """显示右键菜单。"""
+        menu = QMenu(self)
+
+        # Text editing operations
+        undo_action = menu.addAction("撤销")
+        undo_action.setEnabled(self._content_edit.document().isUndoAvailable())
+
+        redo_action = menu.addAction("重做")
+        redo_action.setEnabled(self._content_edit.document().isRedoAvailable())
+
+        menu.addSeparator()
+
+        has_selection = self._content_edit.textCursor().hasSelection()
+
+        cut_action = menu.addAction("剪切")
+        cut_action.setEnabled(has_selection)
+
+        copy_action = menu.addAction("复制")
+        copy_action.setEnabled(has_selection)
+
+        paste_action = menu.addAction("粘贴")
+        paste_action.setEnabled(self._content_edit.canPaste())
+
+        menu.addSeparator()
+
+        select_all_action = menu.addAction("全选")
+        select_all_action.setEnabled(not self._content_edit.document().isEmpty())
+
+        menu.addSeparator()
+
+        # Window operations
+        close_action = menu.addAction("✕ 关闭")
+
+        global_pos = self._content_edit.mapToGlobal(pos)
+        action = menu.exec(global_pos)
+
+        # Handle text editing actions
+        if action == undo_action:
+            self._content_edit.undo()
+        elif action == redo_action:
+            self._content_edit.redo()
+        elif action == cut_action:
+            self._content_edit.cut()
+        elif action == copy_action:
+            self._content_edit.copy()
+        elif action == paste_action:
+            self._content_edit.paste()
+        elif action == select_all_action:
+            self._content_edit.selectAll()
+        # Handle window actions
+        elif action == close_action:
+            self.close()
 
     # ── Resize (QApplication event filter) ─────────────────────────────
 
@@ -353,11 +439,19 @@ class StickyNoteWindow(QWidget):
         if app:
             app.installEventFilter(self)
 
+    def moveEvent(self, event):
+        """窗口移动时触发位置保存（防抖）。"""
+        super().moveEvent(event)
+        if hasattr(self, '_pos_timer'):
+            self._pos_timer.start()
+
     # ── Cleanup ────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
         self._save_timer.stop()
+        self._pos_timer.stop()
         self._flush()
+        self._save_position()
         self._clear_resize_cursor()
         app = QApplication.instance()
         if app:
