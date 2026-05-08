@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -9,7 +10,9 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -18,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.config import ConfigManager
+from app.core.constants import DEFAULT_USER_PROMPT
 from app.ui.hotkey_settings_widget import HotkeySettingsWidget
 from app.ui.style import THEMES
 
@@ -81,6 +85,36 @@ class SettingsDialog(QDialog):
 
         tabs.addTab(api_w, "API")
 
+        # ── Model tab ─────────────────────────────────────────────────
+        model_w = QWidget()
+        model_layout = QVBoxLayout(model_w)
+
+        # System Prompt 标签
+        prompt_label = QLabel("System Prompt:")
+        model_layout.addWidget(prompt_label)
+
+        # 多行编辑器
+        self._system_prompt_edit = QPlainTextEdit()
+        self._system_prompt_edit.setMinimumHeight(200)
+        self._system_prompt_edit.setPlaceholderText("自定义 AI 行为风格和回复方式…")
+        model_layout.addWidget(self._system_prompt_edit)
+
+        # 恢复默认按钮
+        reset_btn = QPushButton("恢复默认")
+        reset_btn.setFixedWidth(100)
+        reset_btn.clicked.connect(self._reset_system_prompt)
+        model_layout.addWidget(reset_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        # 管理预设角色按钮
+        preset_btn = QPushButton("管理预设角色")
+        preset_btn.setFixedWidth(120)
+        preset_btn.clicked.connect(self._manage_presets)
+        model_layout.addWidget(preset_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        model_layout.addStretch()  # 底部留白
+
+        tabs.addTab(model_w, "模型")
+
         # ── Window tab ────────────────────────────────────────────────
         win_w = QWidget()
         win_form = QFormLayout(win_w)
@@ -96,6 +130,13 @@ class SettingsDialog(QDialog):
 
         self._edge_snap = QCheckBox("顶栏吸附")
         win_form.addRow("", self._edge_snap)
+
+        self._edge_snap_threshold = QDoubleSpinBox()
+        self._edge_snap_threshold.setRange(0.2, 0.8)  # 20% - 80%
+        self._edge_snap_threshold.setSingleStep(0.05)
+        self._edge_snap_threshold.setDecimals(2)
+        self._edge_snap_threshold.setSuffix(" (屏幕宽度比例)")
+        win_form.addRow("吸附宽度阈值:", self._edge_snap_threshold)
 
         self._theme_combo = QComboBox()
         for key, t in THEMES.items():
@@ -161,6 +202,20 @@ class SettingsDialog(QDialog):
         if path:
             self._save_dir.setText(path)
 
+    def _reset_system_prompt(self):
+        """恢复默认 System Prompt"""
+        self._system_prompt_edit.setPlainText(DEFAULT_USER_PROMPT)
+
+    def _manage_presets(self):
+        """打开预设角色管理对话框"""
+        from app.core.preset_manager import PresetManager
+        from app.ui.preset_manager_dialog import PresetManagerDialog
+
+        preset_mgr = PresetManager()
+        dialog = PresetManagerDialog(preset_mgr, self)
+        dialog.exec()
+
+
     # ------------------------------------------------------------------ load / save
     def _load(self):
         api = self._config.app_config["api"]
@@ -170,9 +225,14 @@ class SettingsDialog(QDialog):
         self._model.setText(api.get("model", ""))
         self._max_tokens.setValue(api.get("max_tokens", 4096))
         self._temperature.setValue(api.get("temperature", 0.7))
+
+        # 加载 System Prompt
+        self._system_prompt_edit.setPlainText(self._config.system_prompt)
+
         self._opacity.setValue(win.get("opacity", 0.97))
         self._always_on_top.setChecked(win.get("always_on_top", True))
         self._edge_snap.setChecked(win.get("edge_snap", True))
+        self._edge_snap_threshold.setValue(win.get("edge_snap_width_threshold", 0.4))
         theme = win.get("theme", "classic")
         idx = self._theme_combo.findData(theme)
         if idx >= 0:
@@ -197,12 +257,14 @@ class SettingsDialog(QDialog):
             model=self._model.text().strip(),
             max_tokens=self._max_tokens.value(),
             temperature=self._temperature.value(),
+            system_prompt=self._system_prompt_edit.toPlainText().strip(),
         )
         self._config.update_window_config(
             opacity=self._opacity.value(),
             always_on_top=self._always_on_top.isChecked(),
             theme=self._theme_combo.currentData(),
             edge_snap=self._edge_snap.isChecked(),
+            edge_snap_width_threshold=self._edge_snap_threshold.value(),
         )
         self._config.update_tools_config(
             {

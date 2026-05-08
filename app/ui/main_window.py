@@ -3,7 +3,7 @@ Main floating window.
 
 Layout:
   ┌─ TitleBar ───────────────────────────────────────────────────┐
-  │ [≡] AI Agent ── [聊天] [笔记] [定时] ── [□] [─] [✕]        │
+  │ [≡] AI Agent ── [聊天] [笔记] [定时] ── [截图] [─] [□] [✕]  │
   ├──────────────────────────────────────────────────────────────┤
   │ QStackedWidget                                               │
   │  page 0: SessionPanel | ChatWidget + InputWidget             │
@@ -51,30 +51,15 @@ from app.ui.style import THEMES, generate_stylesheet
 from app.ui.title_bar import TitleBar
 from app.ui.toast import show_toast
 from app.ui.tray_manager import TrayManager
-
-SYSTEM_PROMPT = """你是一个智能AI助手。你可以调用工具来帮助用户完成任务。
-
-【定时任务】
-如果用户想创建定时任务，使用 create_scheduled_task 工具。触发器配置示例：
-- 每天9点: {"trigger_type": "cron", "trigger_config": {"hour": 9, "minute": 0}}
-- 每小时: {"trigger_type": "interval", "trigger_config": {"hours": 1}}
-- 一次性: {"trigger_type": "date", "trigger_config": {"run_date": "2025-12-31 09:00:00"}}
-
-【列出定时任务】使用 list_scheduled_tasks 工具。
-【删除定时任务】使用 delete_scheduled_task 工具，提供 job_id 参数。
-
-【笔记】
-- 使用 read_notes 查看用户的笔记列表和内容预览。
-- 使用 create_note 为用户保存一条新笔记（title + content）。
-- 使用 summarize_session_as_note 将当前对话总结后保存为笔记。
-
-请用中文回复。"""
+from app.core.constants import DEFAULT_USER_PROMPT, BUILTIN_TOOLS_INSTRUCTION
 
 
 # ─────────────────────────────────────────────────────────────────────
 class MainWindow(QWidget):
     # Used to marshal scheduler callbacks from background threads to the main thread
     _notify_signal = pyqtSignal(str, str)  # title, body
+    # Signal for note content updates (note_id, title, content)
+    note_updated = pyqtSignal(int, str, str)
 
     def __init__(
         self,
@@ -97,8 +82,14 @@ class MainWindow(QWidget):
         self._current_ai_bubble: MessageBubble | None = None
         self._current_ai_msg: Message | None = None
         self._current_ai_text = ""
+        self._pending_attachments: list = []  # Temporary storage for dropped files
         self._snap_mgr: EdgeSnapManager | None = None
         self._sticky_windows: list = []
+
+        # 初始化 PresetManager
+        from app.core.preset_manager import PresetManager
+        self._preset_mgr = PresetManager()
+
         self._build_window()
         self._build_ui()
         self._builtin_handler = BuiltinToolHandler(
@@ -114,6 +105,7 @@ class MainWindow(QWidget):
         self._snap_mgr.set_enabled(self._config.window_config.get("edge_snap", True))
         self._notify_signal.connect(self._on_notify)
         self._setup_hotkeys()
+        self._restore_pinned_notes()
 
     # ──────────────────────────────────────────── window setup
     def _build_window(self):
@@ -163,6 +155,7 @@ class MainWindow(QWidget):
         self._session_panel.session_create_requested.connect(self._new_session)
         self._session_panel.session_delete_requested.connect(self._delete_session)
         self._session_panel.session_rename_requested.connect(self._rename_session)
+        self._session_panel.session_settings_requested.connect(self._on_session_settings)
         self._chat_splitter.addWidget(self._session_panel)
 
         chat_col = QVBoxLayout()
@@ -177,6 +170,9 @@ class MainWindow(QWidget):
         self._input = InputWidget()
         self._input.submitted.connect(self._on_submit)
         chat_col.addWidget(self._input)
+
+        # Connect file drop signal
+        self._chat.file_attached.connect(self._on_files_attached)
         chat_area = QFrame()
         chat_area.setObjectName("chatArea")
         chat_area.setLayout(chat_col)
@@ -197,6 +193,7 @@ class MainWindow(QWidget):
 
         # ── page 1: notes panel ───────────────────────────────────────
         self._notes_panel = NotesPanel(self._notes)
+        self._notes_panel.note_updated.connect(self._on_note_updated)
         self._stack.addWidget(self._notes_panel)  # index 1
 
         # ── page 2: scheduler panel ───────────────────────────────────
@@ -227,17 +224,26 @@ class MainWindow(QWidget):
     def _new_note_via_hotkey(self):
         from app.ui.sticky_note_window import StickyNoteWindow
         note = self._notes.create()
+        # Get screen center position
+        sg = QApplication.primaryScreen().availableGeometry()
+        x = (sg.width() - 240) // 2 + sg.x()
+        y = (sg.height() - 200) // 2 + sg.y()
+        # Pin note to desktop at center position
+        self._notes.pin_note(note.id, x, y)
         win = StickyNoteWindow(
             note_id=note.id,
             title=note.title,
             content=note.content,
             note_mgr=self._notes,
         )
+        win.move(x, y)
         win.show()
         self._sticky_windows.append(win)
         win.closed.connect(
-            lambda w=win: self._sticky_windows.remove(w) if w in self._sticky_windows else None
+            lambda w=win: self._on_sticky_closed(w)
         )
+        # Connect content change signal
+        win.content_changed.connect(self._on_note_updated)
 
     def _toggle_window_visibility(self):
         if self.isVisible():
@@ -257,6 +263,55 @@ class MainWindow(QWidget):
         self.activateWindow()
         self._input.focus()
 
+    def _restore_pinned_notes(self):
+        """启动时恢复所有固定笔记浮窗。"""
+        from app.ui.sticky_note_window import StickyNoteWindow
+        pinned = self._notes.get_pinned_notes()
+        for note in pinned:
+            try:
+                win = StickyNoteWindow(
+                    note_id=note.id,
+                    title=note.title,
+                    content=note.content,
+                    note_mgr=self._notes,
+                )
+                # Restore position with boundary check
+                x = note.pin_position_x or 100
+                y = note.pin_position_y or 100
+                sg = QApplication.primaryScreen().availableGeometry()
+                x = max(sg.x(), min(x, sg.x() + sg.width() - 180))
+                y = max(sg.y(), min(y, sg.y() + sg.height() - 120))
+                win.move(x, y)
+                win.show()
+                self._sticky_windows.append(win)
+                win.closed.connect(lambda w=win: self._on_sticky_closed(w))
+                # Connect content change signal
+                win.content_changed.connect(self._on_note_updated)
+            except Exception as e:
+                print(f"Failed to restore pinned note {note.id}: {e}")
+
+    def _on_sticky_closed(self, win):
+        """浮窗关闭时取消固定并从列表移除。"""
+        if win in self._sticky_windows:
+            self._sticky_windows.remove(win)
+        # Unpin note if it has note_id
+        if hasattr(win, '_note_id') and win._note_id:
+            try:
+                self._notes.unpin_note(win._note_id)
+            except Exception as e:
+                print(f"Failed to unpin note: {e}")
+
+    def _on_note_updated(self, note_id: int, title: str, content: str):
+        """笔记内容更新时，通知所有相关浮窗和面板。"""
+        # Update all sticky windows with this note_id
+        for win in self._sticky_windows:
+            if hasattr(win, '_note_id') and win._note_id == note_id:
+                win.update_content(title, content)
+        # Update notes panel if the note is being edited elsewhere
+        self._notes_panel.refresh_note(note_id)
+        # Broadcast to main signal
+        self.note_updated.emit(note_id, title, content)
+
     # ──────────────────────────────────────────── sessions
     def _init_sessions(self):
         sessions = self._sessions.get_sessions()
@@ -267,6 +322,7 @@ class MainWindow(QWidget):
         self._switch_session(sessions[0].id)
 
     def _new_session(self):
+        """新建会话，直接创建默认无角色会话"""
         s = self._sessions.create()
         sessions = self._sessions.get_sessions()
         self._session_panel.load(sessions, s.id)
@@ -284,6 +340,26 @@ class MainWindow(QWidget):
     def _rename_session(self, sid: str, title: str):
         self._sessions.rename(sid, title)
         self._session_panel.update_title(sid, title)
+
+    def _on_session_settings(self, sid: str):
+        """打开会话设置对话框"""
+        from app.ui.session_settings_dialog import SessionSettingsDialog
+
+        session = self._sessions.get(sid)
+        if not session:
+            return
+
+        dialog = SessionSettingsDialog(session, self._preset_mgr, self)
+        if dialog.exec():
+            # 保存会话设置
+            self._sessions.update_system_prompt(
+                sid,
+                session.system_prompt,
+                session.preset_id
+            )
+            # 刷新会话列表（更新 ⚙️ 图标）
+            sessions = self._sessions.get_sessions()
+            self._session_panel.load(sessions, sid)
 
     def _on_session_select(self, sid: str):
         if sid != self._current_session_id:
@@ -335,6 +411,12 @@ class MainWindow(QWidget):
 
         self._input.focus()
 
+    @pyqtSlot(list)
+    def _on_files_attached(self, attachments: list):
+        """Handle files dropped into chat area."""
+        self._pending_attachments.extend(attachments)
+        # TODO: Show visual feedback of attached files in input area
+
     # ──────────────────────────────────────────── chat
     @pyqtSlot(str)
     def _on_submit(self, text: str):
@@ -344,7 +426,14 @@ class MainWindow(QWidget):
         if sid in self._workers:
             return  # already running for this session
 
-        user_msg = Message(role=MessageRole.USER, content=text)
+        # Create user message with attachments
+        user_msg = Message(
+            role=MessageRole.USER,
+            content=text,
+            attachments=self._pending_attachments.copy()
+        )
+        self._pending_attachments.clear()  # Clear after use
+
         self._sessions.add_message(sid, user_msg)
         self._chat.add_message(user_msg)
         self._session_panel.update_title(sid, self._sessions.get(sid).title)
@@ -376,9 +465,42 @@ class MainWindow(QWidget):
         worker.start()
 
     def _build_api_messages(self, messages: list[Message]) -> list[dict]:
-        result = [{"role": "system", "content": SYSTEM_PROMPT}]
-        for m in messages:
-            result.append(m.to_api_dict())
+        """
+        构建 API 消息列表，System Prompt 优先级：
+        1. 会话级 system_prompt（最高优先级）
+        2. 预设角色 preset_id
+        3. 全局配置 config.system_prompt
+        4. 默认值 DEFAULT_USER_PROMPT
+        5. 追加 BUILTIN_TOOLS_INSTRUCTION
+        """
+        session = self._sessions.get(self._current_session_id)
+        user_prompt = ""
+
+        # 优先级 1: 会话级 system_prompt（非空且非纯空白）
+        if session and session.system_prompt and session.system_prompt.strip():
+            user_prompt = session.system_prompt.strip()
+        # 优先级 2: 预设角色 preset_id
+        elif session and session.preset_id:
+            preset = self._preset_mgr.get(session.preset_id)
+            if preset:
+                user_prompt = preset.system_prompt.strip()
+        # 优先级 3: 全局配置 config.system_prompt
+        if not user_prompt:
+            user_prompt = self._config.system_prompt.strip()
+        # 优先级 4: 默认值
+        if not user_prompt:
+            user_prompt = DEFAULT_USER_PROMPT
+
+        # 优先级 5: 追加内置工具说明
+        full_system_prompt = user_prompt + "\n" + BUILTIN_TOOLS_INSTRUCTION
+
+        result = [{"role": "system", "content": full_system_prompt}]
+
+        # Use AIClient.merge_attachments_to_content to handle attachments
+        merged_messages = self._ai.merge_attachments_to_content(messages)
+
+        for i, m in enumerate(messages):
+            result.append(merged_messages[i])
             # Every assistant message with tool_calls MUST be immediately followed
             # by a tool result message for each call_id, otherwise the API returns 400.
             if m.role == MessageRole.ASSISTANT and m.tool_calls:
@@ -572,6 +694,18 @@ class MainWindow(QWidget):
 
     def _minimize(self):
         self.hide()
+
+    def _toggle_maximize(self):
+        """切换窗口最大化/还原状态"""
+        if self.isMaximized():
+            # 当前是最大化，还原到之前的大小
+            self.showNormal()
+        else:
+            # 最大化前先取消边缘吸附
+            if self._snap_mgr is not None and self._snap_mgr.is_snapped:
+                self._snap_mgr.unsnap_full()
+            # 当前是正常窗口，最大化
+            self.showMaximized()
 
     # ──────────────────────────────────────────── screenshot
     def _start_screenshot(self):

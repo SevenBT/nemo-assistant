@@ -4,6 +4,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.models.attachment import Attachment
+
 
 class MessageRole:
     USER = "user"
@@ -48,6 +50,7 @@ class Message:
     timestamp: float = field(default_factory=time.time)
     tool_calls: list = field(default_factory=list)  # list[ToolCall]
     tool_call_id: Optional[str] = None  # for role=tool messages
+    attachments: list = field(default_factory=list)  # list[Attachment]
 
     def to_api_dict(self) -> dict:
         d: dict = {"role": self.role, "content": self.content or ""}
@@ -77,11 +80,13 @@ class Message:
             "timestamp": self.timestamp,
             "tool_calls": [tc.to_dict() for tc in self.tool_calls],
             "tool_call_id": self.tool_call_id,
+            "attachments": [att.to_dict() for att in self.attachments],
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Message":
         tool_calls = [ToolCall.from_dict(tc) for tc in d.get("tool_calls", [])]
+        attachments = [Attachment.from_dict(att) for att in d.get("attachments", [])]
         return cls(
             id=d.get("id", str(uuid.uuid4())),
             role=d["role"],
@@ -89,4 +94,5 @@ class Message:
             timestamp=d.get("timestamp", time.time()),
             tool_calls=tool_calls,
             tool_call_id=d.get("tool_call_id"),
+            attachments=attachments,
         )

@@ -69,6 +69,13 @@ class TitleBar(QWidget):
         min_btn.clicked.connect(self._win._minimize)
         layout.addWidget(min_btn)
 
+        max_btn = QPushButton("⬜")
+        max_btn.setObjectName("iconBtn")
+        max_btn.setFixedSize(32, 28)
+        max_btn.setToolTip("最大化/还原")
+        max_btn.clicked.connect(self._win._toggle_maximize)
+        layout.addWidget(max_btn)
+
         # × hides to tray; real quit is in the tray menu
         close_btn = QPushButton("✕")
         close_btn.setObjectName("closeBtn")
@@ -84,8 +91,27 @@ class TitleBar(QWidget):
 
     def mousePressEvent(self, e: QMouseEvent):
         if e.button() == Qt.MouseButton.LeftButton:
+            # 如果窗口是最大化状态，拖动时先还原
+            if self._win.isMaximized():
+                # 计算还原后鼠标应该在窗口中的相对位置
+                # 保持鼠标在标题栏的相对位置不变
+                global_pos = e.globalPosition().toPoint()
+                # 还原窗口
+                self._win.showNormal()
+                # 调整窗口位置，使鼠标保持在标题栏的相同相对位置
+                local_x = e.position().x()
+                new_x = global_pos.x() - int(local_x)
+                new_y = global_pos.y() - int(e.position().y())
+                self._win.move(new_x, new_y)
+
             if self._win._snap_mgr is not None:
                 self._win._snap_mgr.cancel_animation()
             handle = self._win.windowHandle()
             if handle:
                 handle.startSystemMove()
+
+    def mouseDoubleClickEvent(self, e: QMouseEvent):
+        """双击标题栏切换最大化/还原"""
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._win._toggle_maximize()
+            e.accept()

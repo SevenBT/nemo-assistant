@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 
 from app.models.message import Message, MessageRole
 from app.ui.tool_card import ToolCard
+from app.ui.file_card_widget import FileCardWidget
 
 
 class TypingIndicator(QWidget):
@@ -129,6 +130,20 @@ class MessageBubble(QFrame):
         role_label.setObjectName("userLabel" if self._is_user else "aiLabel")
         layout.addWidget(role_label)
 
+        # Attachments section — user bubbles only
+        if self._is_user and message.attachments:
+            attachments_widget = QWidget()
+            attachments_widget.setObjectName("attachmentsContainer")
+            attachments_layout = QVBoxLayout(attachments_widget)
+            attachments_layout.setContentsMargins(0, 4, 0, 4)
+            attachments_layout.setSpacing(4)
+
+            for attachment in message.attachments:
+                file_card = FileCardWidget(attachment)
+                attachments_layout.addWidget(file_card)
+
+            layout.addWidget(attachments_widget)
+
         # Tool cards section — AI bubbles only
         if not self._is_user:
             self._tools_widget = QWidget()
@@ -186,11 +201,14 @@ class MessageBubble(QFrame):
 
 
 class ChatWidget(QWidget):
-    """Scrollable message list."""
+    """Scrollable message list with drag-and-drop file support."""
+
+    file_attached = pyqtSignal(list)  # Emits list[Attachment]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._bubbles: list[MessageBubble] = []
+        self.setAcceptDrops(True)
         self._build()
 
     def _build(self):
@@ -313,3 +331,45 @@ class ChatWidget(QWidget):
     def stop_typing(self):
         """Hide typing indicator."""
         self._typing.stop()
+
+    # ── drag and drop ───────────────────────────────────────────────────
+
+    def dragEnterEvent(self, event):
+        """Accept drag events with file URLs."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        """Handle dropped files."""
+        from app.core.file_parser import FileParser, FileParseError
+        import logging
+
+        logger = logging.getLogger(__name__)
+        urls = event.mimeData().urls()
+        if not urls:
+            return
+
+        parser = FileParser()
+        attachments = []
+
+        for url in urls:
+            file_path = url.toLocalFile()
+            if not file_path:
+                continue
+
+            try:
+                attachment = parser.parse_file(file_path)
+                attachments.append(attachment)
+                logger.info(f"成功解析文件: {attachment.file_name}")
+            except FileParseError as e:
+                logger.warning(f"解析文件失败: {e}")
+                # TODO: Show error notification to user
+                continue
+
+        if attachments:
+            self.file_attached.emit(attachments)
+            event.acceptProposedAction()
+        else:
+            event.ignore()

@@ -23,6 +23,7 @@ class SessionPanel(QFrame):
     session_create_requested = pyqtSignal()
     session_delete_requested = pyqtSignal(str)
     session_rename_requested = pyqtSignal(str, str)
+    session_settings_requested = pyqtSignal(str)  # 新增：会话设置信号
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -64,7 +65,11 @@ class SessionPanel(QFrame):
         self._list.blockSignals(True)
         self._list.clear()
         for s in sessions:
-            item = QListWidgetItem(self._short(s.title))
+            # 标记有自定义 Prompt 的会话
+            title = self._short(s.title)
+            if s.system_prompt or s.preset_id:
+                title = f"⚙️ {title}"
+            item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, s.id)
             item.setToolTip(s.title)
             self._list.addItem(item)
@@ -104,6 +109,12 @@ class SessionPanel(QFrame):
             return
         sid = item.data(Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
+
+        settings_act = QAction("会话设置", self)
+        settings_act.triggered.connect(lambda: self.session_settings_requested.emit(sid))
+        menu.addAction(settings_act)
+
+        menu.addSeparator()
 
         rename_act = QAction("重命名", self)
         rename_act.triggered.connect(lambda: self._do_rename(sid, item))

@@ -38,8 +38,8 @@ class SessionManager:
     def get(self, session_id: str) -> Optional[Session]:
         return self._sessions.get(session_id)
 
-    def create(self, title: str = "新会话") -> Session:
-        session = Session(title=title)
+    def create(self, title: str = "新会话", preset_id: str = "") -> Session:
+        session = Session(title=title, preset_id=preset_id)
         self._sessions[session.id] = session
         self._save(session)
         return session
@@ -72,3 +72,12 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if session:
             self._save(session)
+
+    def update_system_prompt(self, session_id: str, system_prompt: str, preset_id: str = ""):
+        """更新会话的 System Prompt 和预设角色 ID"""
+        session = self._sessions.get(session_id)
+        if session:
+            session.system_prompt = system_prompt
+            session.preset_id = preset_id
+            self._save(session)
+

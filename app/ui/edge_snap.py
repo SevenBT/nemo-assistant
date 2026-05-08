@@ -68,6 +68,10 @@ class EdgeSnapManager(QObject):
         if not self._enabled or self._snapped or self._animating:
             return
 
+        # 只有窗口足够窄时才触发边缘吸附
+        if not self._is_narrow_enough_to_snap():
+            return
+
         # When sitting at edge after hover-unsnap, block re-snap until
         # the user actually drags the window away from the edge.
         if self._at_edge and not self._has_left_edge():
@@ -125,6 +129,25 @@ class EdgeSnapManager(QObject):
         self._auto_hide_timer.stop()
 
     # ── internals: geometry ─────────────────────────────────────────────
+    def _is_narrow_enough_to_snap(self) -> bool:
+        """检查窗口是否足够窄，可以触发边缘吸附
+
+        只有当窗口宽度小于屏幕宽度的阈值比例时才返回 True。
+        默认阈值为 40%，用户可在设置中自定义。
+        """
+        # 获取配置的阈值（默认 0.4 = 40%）
+        threshold = self._window._config.edge_snap_width_threshold
+
+        window_width = self._window.width()
+        screen = self._window.screen()
+        if screen is None:
+            return True  # 无法获取屏幕信息时，允许吸附
+
+        screen_width = screen.availableGeometry().width()
+        width_ratio = window_width / screen_width
+
+        return width_ratio < threshold
+
     def _is_at_top_edge(self) -> bool:
         geo = self._window.geometry()
         screen = self._window.screen()

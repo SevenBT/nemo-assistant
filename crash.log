@@ -1,10 +1,5 @@
 Traceback (most recent call last):
-  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 556, in _open_settings
-    dlg = SettingsDialog(self._config, self._hotkey_mgr, self)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\claudecode-projects\assistant\app\ui\settings_dialog.py", line 46, in __init__
-    self._build()
-  File "D:\claudecode-projects\assistant\app\ui\settings_dialog.py", line 139, in _build
-    self._hotkey_widget = HotkeySettingsWidget(config, self._hotkey_mgr)
-                                               ^^^^^^
-NameError: name 'config' is not defined
+  File "D:\claudecode-projects\assistant\app\ui\preset_manager_dialog.py", line 266, in _on_save
+    if item.data(Qt.ItemDataRole.UserRole) == self._current_preset.id:
+                                              ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'id'

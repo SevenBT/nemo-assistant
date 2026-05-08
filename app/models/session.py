@@ -12,6 +12,7 @@ class Session:
     updated_at: float = field(default_factory=time.time)
     messages: list = field(default_factory=list)  # list[Message]
     system_prompt: str = ""
+    preset_id: str = ""  # 预设角色 ID
 
     def to_dict(self) -> dict:
         return {
@@ -21,6 +22,7 @@ class Session:
             "updated_at": self.updated_at,
             "messages": [m.to_dict() for m in self.messages],
             "system_prompt": self.system_prompt,
+            "preset_id": self.preset_id,
         }
 
     @classmethod
@@ -35,4 +37,5 @@ class Session:
             updated_at=d.get("updated_at", time.time()),
             messages=messages,
             system_prompt=d.get("system_prompt", ""),
+            preset_id=d.get("preset_id", ""),
         )

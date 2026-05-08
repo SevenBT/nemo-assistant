@@ -31,6 +31,9 @@ class AIClient:
           {"type": "tool_call", "id": str, "name": str, "arguments": dict}
           {"type": "done"}
           {"type": "error",     "message": str}
+
+        Note: messages should already have attachment content merged
+        via _merge_attachments_to_content() before calling this method.
         """
         kwargs: dict = {
             "model": self._config.model,
@@ -94,3 +97,44 @@ class AIClient:
 
         except Exception as e:
             yield {"type": "error", "message": str(e)}
+
+    @staticmethod
+    def merge_attachments_to_content(messages: list) -> list[dict]:
+        """Merge attachment content into message content for API calls.
+
+        For each message with attachments, prepend file content to the
+        original content in the format:
+
+            [文件: filename.txt]
+            <parsed_content>
+
+            <original_content>
+
+        Args:
+            messages: List of Message objects
+
+        Returns:
+            List of API-ready message dicts with merged content
+        """
+        api_messages = []
+        for msg in messages:
+            api_dict = msg.to_api_dict()
+
+            # Only merge attachments for user messages
+            if msg.role == "user" and msg.attachments:
+                attachment_texts = []
+                for att in msg.attachments:
+                    attachment_texts.append(
+                        f"[文件: {att.file_name}]\n{att.parsed_content}"
+                    )
+
+                merged_content = "\n\n".join(attachment_texts)
+                if msg.content:
+                    merged_content += f"\n\n{msg.content}"
+
+                api_dict["content"] = merged_content
+
+            api_messages.append(api_dict)
+
+        return api_messages
+

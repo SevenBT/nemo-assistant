@@ -34,6 +34,7 @@ DEFAULT_APP_CONFIG: dict = {
         "model": "gpt-4o",
         "max_tokens": 4096,
         "temperature": 0.7,
+        "system_prompt": "",  # 新增：默认为空，表示使用硬编码默认值
     },
     "window": {
         "width": 440,
@@ -44,6 +45,7 @@ DEFAULT_APP_CONFIG: dict = {
         "always_on_top": True,
         "theme": "classic",
         "edge_snap": True,
+        "edge_snap_width_threshold": 0.4,  # 边缘吸附宽度阈值（40% 屏幕宽度）
     },
 }
 
@@ -120,12 +122,22 @@ class ConfigManager:
         return self._app["api"]["temperature"]
 
     @property
+    def system_prompt(self) -> str:
+        """返回用户自定义的 System Prompt，如果为空则返回空字符串（由调用方处理默认值）"""
+        return self._app["api"].get("system_prompt", "")
+
+    @property
     def window_config(self) -> dict:
         return self._app["window"]
 
     @property
     def theme(self) -> str:
         return self._app["window"].get("theme", "classic")
+
+    @property
+    def edge_snap_width_threshold(self) -> float:
+        """边缘吸附宽度阈值（相对于屏幕宽度的比例）"""
+        return self._app["window"].get("edge_snap_width_threshold", 0.4)
 
     @property
     def app_config(self) -> dict:

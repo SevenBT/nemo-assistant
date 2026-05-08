@@ -189,6 +189,32 @@ QSplitter::handle:pressed {
     font-family: "Cascadia Code", "Consolas", monospace; font-size: 11px;
 }
 
+/* ── File card ────────────────────────────────────────────────────── */
+#fileCard {
+    background: __SURFACE_RAISED__;
+    border: 1px solid __BORDER__;
+    border-radius: 8px; margin-top: 4px;
+}
+#fileCard:hover {
+    background: __SURFACE__;
+    border-color: __ACCENT__;
+}
+#fileName {
+    font-size: 12px; color: __TEXT__;
+    font-weight: 500;
+}
+#fileSize {
+    font-size: 10px; color: __TEXT_MUTED__;
+}
+#fileIcon {
+    font-size: 24px;
+    background: __SURFACE__;
+    border-radius: 6px;
+}
+#attachmentsContainer {
+    background: transparent;
+}
+
 /* ── Input area ───────────────────────────────────────────────────── */
 #inputWidget {
     background: __SURFACE__;
@@ -373,6 +399,23 @@ QMenu::separator {
 #noteToolBtn:hover  { background: __BORDER__; color: __TEXT__; }
 #noteToolBtn:pressed{ background: __SCROLLBAR__; }
 
+/* ── Toggle list button (removed, now using #toggleBtn) ───────────── */
+
+/* ── Search bar ────────────────────────────────────────────────────── */
+#searchInput {
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: 1px solid __BORDER__; border-radius: 8px;
+    padding: 6px 10px; font-size: 12px;
+}
+#searchInput:focus { border-color: __BORDER_FOCUS__; background: __SURFACE__; }
+#searchClearBtn {
+    background: transparent; color: __TEXT_MUTED__;
+    border: none; border-radius: 4px;
+    font-size: 14px; font-weight: bold;
+}
+#searchClearBtn:hover { background: __SURFACE_RAISED__; color: __TEXT__; }
+#searchClearBtn:pressed { background: __BORDER__; }
+
 /* ── View-switcher buttons ────────────────────────────────────────── */
 #viewBtn {
     background: transparent; color: __TEXT_SECONDARY__;
@@ -385,8 +428,120 @@ QMenu::separator {
 
 #noteStatusLabel { color: __SUCCESS__; font-size: 11px; padding: 0 6px; }
 
+/* ── Tag components ───────────────────────────────────────────────── */
+#tagButton {
+    background: __ACCENT__; color: __TEXT_ACCENT__;
+    border: none; border-radius: 12px;
+    padding: 4px 10px; font-size: 11px; font-weight: 500;
+}
+#tagButton:hover { background: __ACCENT_HOVER__; }
+#tagButton:pressed { background: __ACCENT_PRESSED__; }
+
+#tagInputLabel {
+    color: __TEXT_SECONDARY__; font-size: 12px; font-weight: 500;
+}
+#tagInputEdit {
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: 1px solid __BORDER__; border-radius: 8px;
+    padding: 6px 10px; font-size: 12px;
+}
+#tagInputEdit:focus { border-color: __BORDER_FOCUS__; background: __SURFACE__; }
+
+#tagFilterTitle {
+    color: __TEXT_MUTED__; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1px;
+    padding: 4px 0;
+}
+#tagFilterList {
+    background: transparent; border: none; outline: none;
+}
+
+/* ── Todo components ──────────────────────────────────────────────── */
+#todoCheckbox {
+    spacing: 8px;
+}
+#todoTitleLabel {
+    color: __TEXT__; font-size: 13px;
+}
+#todoTitleEdit {
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: 1px solid __BORDER__; border-radius: 8px;
+    padding: 8px 12px; font-size: 13px;
+}
+#todoTitleEdit:focus { border-color: __BORDER_FOCUS__; background: __SURFACE__; }
+#todoContentEdit {
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: 1px solid __BORDER__; border-radius: 8px;
+    padding: 8px 12px; font-size: 13px;
+}
+#todoContentEdit:focus { border-color: __BORDER_FOCUS__; background: __SURFACE__; }
+#todoPriorityLabel {
+    font-size: 11px; font-weight: bold;
+}
+#todoDueLabel {
+    color: __TEXT_SECONDARY__; font-size: 11px;
+}
+#todoPriorityCombo, #todoRecurrenceCombo {
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: 1px solid __BORDER__; border-radius: 6px;
+    padding: 4px 8px; font-size: 12px;
+}
+#todoDueEdit {
+    background: __SURFACE_RAISED__; color: __TEXT__;
+    border: 1px solid __BORDER__; border-radius: 6px;
+    padding: 4px 8px; font-size: 12px;
+}
+#todoClearDueBtn {
+    background: __SURFACE_RAISED__; color: __TEXT_SECONDARY__;
+    border: none; border-radius: 6px;
+    padding: 4px 10px; font-size: 11px;
+}
+#todoClearDueBtn:hover { background: __BORDER__; color: __TEXT__; }
+#todoClearDueBtn:pressed { background: __SCROLLBAR__; }
+
+#tagFilterList::item {
+    padding: 6px 8px; border-radius: 6px;
+    color: __TEXT_SECONDARY__; font-size: 12px;
+}
+#tagFilterList::item:selected { background: __SELECTED__; color: __TEXT__; }
+#tagFilterList::item:hover:!selected { background: __SURFACE_RAISED__; }
+
 /* ── Size grip (unused) ───────────────────────────────────────────── */
 #sizeGrip { background: transparent; width: 14px; height: 14px; }
+
+/* ── Checklist editor ─────────────────────────────────────────────── */
+#checklistScroll {
+    background: transparent; border: none;
+}
+#checklistScroll QScrollBar:vertical {
+    width: 6px; background: transparent;
+}
+#checklistScroll QScrollBar::handle:vertical {
+    background: __SCROLLBAR__; border-radius: 3px; min-height: 20px;
+}
+#checkItemEdit {
+    background: transparent; color: __TEXT__;
+    border: none; border-bottom: 1px solid transparent;
+    padding: 2px 4px; font-size: 13px;
+}
+#checkItemEdit:focus {
+    border-bottom-color: __BORDER_FOCUS__;
+    background: __SURFACE_RAISED__;
+    border-radius: 4px;
+}
+#checkItemEdit:disabled { color: __TEXT_MUTED__; }
+#checkItemDelBtn {
+    background: transparent; color: __TEXT_MUTED__;
+    border: none; border-radius: 4px;
+    font-size: 14px; padding: 0;
+}
+#checkItemDelBtn:hover { background: __BORDER__; color: __TEXT__; }
+#checklistAddBtn {
+    background: transparent; color: __TEXT_MUTED__;
+    border: 1px dashed __BORDER__; border-radius: 6px;
+    padding: 4px 12px; font-size: 12px; text-align: left;
+}
+#checklistAddBtn:hover { background: __SURFACE_RAISED__; color: __TEXT__; }
 """
 
 
