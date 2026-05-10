@@ -4,6 +4,22 @@
 包含 System Prompt 相关常量，避免循环导入。
 """
 
+import datetime
+
+
+def get_current_datetime_info() -> str:
+    """获取当前日期时间信息，用于 system prompt"""
+    now = datetime.datetime.now()
+    weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()]
+    tz = now.astimezone().tzname()
+    return f"""
+【当前时间信息】
+日期时间: {now.strftime("%Y-%m-%d %H:%M:%S")}
+星期: {weekday}
+时区: {tz}
+"""
+
+
 # 默认的用户可编辑部分（当配置为空时使用）
 DEFAULT_USER_PROMPT = """你是一个智能AI助手。你可以调用工具来帮助用户完成任务。
 

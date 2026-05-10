@@ -12,6 +12,12 @@ def main():
     provider = params.get("provider", "ddg").lower().strip()
     api_key = params.get("api_key", "").strip()
 
+    # 博查特有参数
+    summary = params.get("summary", False)
+    freshness = params.get("freshness", "noLimit")
+    include = params.get("include", "").strip()
+    exclude = params.get("exclude", "").strip()
+
     if not query:
         print(json.dumps({"status": "error", "data": {"message": "query is required"}}))
         return
@@ -23,6 +29,8 @@ def main():
             results = _search_tavily(query, count, api_key)
         elif provider == "brave" and api_key:
             results = _search_brave(query, count, api_key)
+        elif provider == "bocha" and api_key:
+            results = _search_bocha(query, count, api_key, summary, freshness, include, exclude)
         else:
             results = _search_ddg(query, count)
             provider = "ddg"
@@ -93,6 +101,88 @@ def _search_brave(query: str, count: int, api_key: str) -> list[dict]:
         {"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("description", "")}
         for item in data.get("web", {}).get("results", [])[:count]
     ]
+
+
+def _search_bocha(
+    query: str,
+    count: int,
+    api_key: str,
+    summary: bool = False,
+    freshness: str = "noLimit",
+    include: str = "",
+    exclude: str = "",
+) -> list[dict]:
+    """
+    博查 AI 搜索引擎
+    文档: https://api.bocha.cn/v1/web-search
+    """
+    import httpx
+
+    # 博查 API 最大结果数限制
+    BOCHA_MAX_RESULTS = 50
+
+    # 构建请求参数
+    payload = {"query": query, "count": min(count, BOCHA_MAX_RESULTS)}
+    if summary:
+        payload["summary"] = True
+    if freshness != "noLimit":
+        payload["freshness"] = freshness
+    if include:
+        payload["include"] = include
+    if exclude:
+        payload["exclude"] = exclude
+
+    try:
+        resp = httpx.post(
+            "https://api.bocha.cn/v1/web-search",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=20,
+        )
+
+        # 处理特定 HTTP 错误码（必须在 raise_for_status 之前）
+        if resp.status_code == 403:
+            raise Exception("博查余额不足，请前往 https://open.bocha.cn 充值")
+        elif resp.status_code == 401:
+            raise Exception("博查 API Key 无效，请检查配置")
+        elif resp.status_code == 429:
+            raise Exception("请求频率达到限制，请稍后重试")
+        elif resp.status_code == 400:
+            raise Exception(f"请求参数错误: {resp.text}")
+        elif not resp.is_success:
+            # 处理其他 HTTP 错误
+            raise Exception(f"博查 API HTTP 错误 {resp.status_code}: {resp.text}")
+
+        # 解析 JSON 响应
+        try:
+            data = resp.json()
+        except Exception as e:
+            raise Exception(f"博查 API 响应解析失败: {str(e)}")
+
+        # 检查 API 返回的业务状态码
+        if data.get("code") != 200:
+            raise Exception(f"博查 API 错误: {data.get('msg', '未知错误')} (log_id: {data.get('log_id', 'N/A')})")
+
+        # 解析响应数据
+        web_pages = data.get("data", {}).get("webPages", {}).get("value", [])
+
+        return [
+            {
+                "title": page.get("name", ""),
+                "url": page.get("url", ""),
+                "snippet": page.get("snippet", ""),
+                "summary": page.get("summary", ""),  # 当 summary=true 时返回
+                "site_name": page.get("siteName", ""),
+                "site_icon": page.get("siteIcon", ""),
+                "date_published": page.get("datePublished", ""),
+            }
+            for page in web_pages[:count]
+        ]
+
+    except httpx.TimeoutException:
+        raise Exception("博查搜索请求超时，请检查网络连接")
+    except httpx.HTTPError as e:
+        raise Exception(f"博查搜索网络错误: {str(e)}")
 
 
 def _search_ddg(query: str, count: int) -> list[dict]:

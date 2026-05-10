@@ -4,7 +4,7 @@ from typing import Iterator, Optional
 import httpx
 from openai import OpenAI
 
-from app.core.config import ConfigManager
+from app.core.config import ConfigManager, SHANGDAO_MODELS
 
 _TIMEOUT = httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0)
 
@@ -13,7 +13,7 @@ class AIClient:
     def __init__(self, config: ConfigManager):
         self._config = config
 
-    def _client(self) -> OpenAI:
+    def _openai_client(self) -> OpenAI:
         return OpenAI(
             api_key=self._config.api_key or "sk-placeholder",
             base_url=self._config.api_base_url,
@@ -33,8 +33,18 @@ class AIClient:
           {"type": "error",     "message": str}
 
         Note: messages should already have attachment content merged
-        via _merge_attachments_to_content() before calling this method.
+        via merge_attachments_to_content() before calling this method.
         """
+        if self._config.api_type == "shangdao":
+            yield from self._chat_stream_shangdao(messages, tools)
+        else:
+            yield from self._chat_stream_openai(messages, tools)
+
+    def _chat_stream_openai(
+        self,
+        messages: list[dict],
+        tools: Optional[list[dict]] = None,
+    ) -> Iterator[dict]:
         kwargs: dict = {
             "model": self._config.model,
             "messages": messages,
@@ -47,7 +57,7 @@ class AIClient:
             kwargs["tool_choice"] = "auto"
 
         try:
-            stream = self._client().chat.completions.create(**kwargs)
+            stream = self._openai_client().chat.completions.create(**kwargs)
             tc_buf: dict[int, dict] = {}  # index -> {id, name, args_str}
             reasoning_buf = ""
 
@@ -57,7 +67,6 @@ class AIClient:
                 choice = chunk.choices[0]
                 delta = choice.delta
 
-                # Some models (e.g. DeepSeek-R1) emit reasoning_content alongside content
                 rc = getattr(delta, "reasoning_content", None)
                 if rc:
                     reasoning_buf += rc
@@ -95,6 +104,84 @@ class AIClient:
 
             yield {"type": "done", "reasoning_content": reasoning_buf or None}
 
+        except Exception as e:
+            yield {"type": "error", "message": str(e)}
+
+    def _chat_stream_shangdao(
+        self,
+        messages: list[dict],
+        tools: Optional[list[dict]] = None,
+    ) -> Iterator[dict]:
+        model_name = self._config.shangdao_model
+        model_meta = SHANGDAO_MODELS.get(model_name)
+        if not model_meta:
+            yield {"type": "error", "message": f"未知的商道模型: {model_name}"}
+            return
+
+        api_key = self._config.get_shangdao_api_key()
+        if not api_key:
+            yield {"type": "error", "message": "商道 API Key 未配置"}
+            return
+
+        base_url = self._config.shangdao_base_url.rstrip("/")
+        path_prefix = model_meta["path_prefix"]
+        url = f"{base_url}/{path_prefix}/v1/chat/completions"
+
+        sd_config = self._config.shangdao_config
+        body: dict = {
+            model_meta["body_model_field"]: model_meta["body_model_value"],
+            "messages": messages,
+            "stream": True,
+            "max_tokens": sd_config.get("max_tokens", 2048),
+            "temperature": sd_config.get("temperature", 0.7),
+        }
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+
+        headers = {
+            "x-api-key": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            with httpx.Client(timeout=_TIMEOUT) as client:
+                with client.stream("POST", url, json=body, headers=headers) as resp:
+                    resp.raise_for_status()
+                    reasoning_buf = ""
+                    for line in resp.iter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data_str = line[len("data:"):].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+
+                        choices = chunk.get("choices", [])
+                        if not choices:
+                            continue
+                        choice = choices[0]
+                        delta = choice.get("message") or choice.get("delta", {})
+
+                        rc = delta.get("reasoning_content")
+                        if rc:
+                            reasoning_buf += rc
+
+                        content = delta.get("content")
+                        if content:
+                            yield {"type": "text", "delta": content}
+
+                        finish = choice.get("finish_reason")
+                        if finish == "stop":
+                            break
+
+                    yield {"type": "done", "reasoning_content": reasoning_buf or None}
+
+        except httpx.HTTPStatusError as e:
+            yield {"type": "error", "message": f"商道 API 请求失败 ({e.response.status_code}): {e.response.text}"}
         except Exception as e:
             yield {"type": "error", "message": str(e)}
 
@@ -137,4 +224,3 @@ class AIClient:
             api_messages.append(api_dict)
 
         return api_messages
-

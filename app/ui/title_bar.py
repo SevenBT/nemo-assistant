@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QButtonGroup, QHBoxLayout, QPushButton, QWidget
+from PyQt6.QtWidgets import QButtonGroup, QHBoxLayout, QMenu, QPushButton, QWidget
 
 if TYPE_CHECKING:
     from app.ui.main_window import MainWindow
@@ -90,6 +90,10 @@ class TitleBar(QWidget):
         self._toggle_btn.setVisible(index == 0)
 
     def mousePressEvent(self, e: QMouseEvent):
+        if e.button() == Qt.MouseButton.RightButton:
+            self._show_context_menu(e.globalPosition().toPoint())
+            e.accept()
+            return
         if e.button() == Qt.MouseButton.LeftButton:
             # 如果窗口是最大化状态，拖动时先还原
             if self._win.isMaximized():
@@ -109,6 +113,40 @@ class TitleBar(QWidget):
             handle = self._win.windowHandle()
             if handle:
                 handle.startSystemMove()
+
+    def _show_context_menu(self, global_pos):
+        from PyQt6.QtCore import QPoint
+        menu = QMenu(self)
+
+        screenshot_act = menu.addAction("截图")
+        settings_act = menu.addAction("设置")
+        menu.addSeparator()
+
+        is_top = bool(self._win.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+        top_act = menu.addAction("始终置顶")
+        top_act.setCheckable(True)
+        top_act.setChecked(is_top)
+
+        minimize_act = menu.addAction("最小化到托盘")
+        menu.addSeparator()
+        quit_act = menu.addAction("退出")
+
+        action = menu.exec(global_pos)
+        if action == screenshot_act:
+            self._win._start_screenshot()
+        elif action == settings_act:
+            self._win._open_settings()
+        elif action == top_act:
+            flags = self._win.windowFlags()
+            if is_top:
+                self._win.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
+            else:
+                self._win.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+            self._win.show()
+        elif action == minimize_act:
+            self._win._minimize()
+        elif action == quit_act:
+            self._win._on_quit()
 
     def mouseDoubleClickEvent(self, e: QMouseEvent):
         """双击标题栏切换最大化/还原"""

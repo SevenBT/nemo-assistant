@@ -13,6 +13,8 @@ class Session:
     messages: list = field(default_factory=list)  # list[Message]
     system_prompt: str = ""
     preset_id: str = ""  # 预设角色 ID
+    pinned: bool = False  # 是否置顶
+    sort_order: int = 0   # 自定义排序序号（越小越靠前）
 
     def to_dict(self) -> dict:
         return {
@@ -23,6 +25,8 @@ class Session:
             "messages": [m.to_dict() for m in self.messages],
             "system_prompt": self.system_prompt,
             "preset_id": self.preset_id,
+            "pinned": self.pinned,
+            "sort_order": self.sort_order,
         }
 
     @classmethod
@@ -38,4 +42,6 @@ class Session:
             messages=messages,
             system_prompt=d.get("system_prompt", ""),
             preset_id=d.get("preset_id", ""),
+            pinned=d.get("pinned", False),
+            sort_order=d.get("sort_order", 0),
         )

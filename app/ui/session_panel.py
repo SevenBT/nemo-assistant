@@ -1,6 +1,7 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -23,12 +24,15 @@ class SessionPanel(QFrame):
     session_create_requested = pyqtSignal()
     session_delete_requested = pyqtSignal(str)
     session_rename_requested = pyqtSignal(str, str)
-    session_settings_requested = pyqtSignal(str)  # 新增：会话设置信号
+    session_settings_requested = pyqtSignal(str)
+    session_pin_requested = pyqtSignal(str, bool)   # sid, pinned
+    session_reorder_requested = pyqtSignal(list)    # ordered list[str] of pinned ids
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("sessionPanel")
-        self.setMinimumWidth(120)  # Minimum width, but can be resized by splitter
+        self.setMinimumWidth(120)
+        self._sessions: list[Session] = []
         self._build()
 
     def _build(self):
@@ -50,7 +54,7 @@ class SessionPanel(QFrame):
         header.addWidget(new_btn)
         layout.addLayout(header)
 
-        # list
+        # list – internal drag-drop for reordering
         self._list = QListWidget()
         self._list.setObjectName("sessionList")
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -58,30 +62,42 @@ class SessionPanel(QFrame):
         self._list.currentItemChanged.connect(self._on_change)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._context_menu)
+        self._list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self._list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._list.model().rowsMoved.connect(self._on_rows_moved)
         layout.addWidget(self._list)
 
     # ------------------------------------------------------------------ data
     def load(self, sessions: list[Session], selected_id: str = ""):
+        self._sessions = sessions
         self._list.blockSignals(True)
         self._list.clear()
         for s in sessions:
-            # 标记有自定义 Prompt 的会话
-            title = self._short(s.title)
-            if s.system_prompt or s.preset_id:
-                title = f"⚙️ {title}"
-            item = QListWidgetItem(title)
-            item.setData(Qt.ItemDataRole.UserRole, s.id)
-            item.setToolTip(s.title)
+            item = self._make_item(s)
             self._list.addItem(item)
             if s.id == selected_id:
                 self._list.setCurrentItem(item)
         self._list.blockSignals(False)
 
+    def _make_item(self, s: Session) -> QListWidgetItem:
+        title = self._short(s.title)
+        if s.pinned:
+            title = f"📌 {title}"
+        item = QListWidgetItem(title)
+        item.setData(Qt.ItemDataRole.UserRole, s.id)
+        item.setData(Qt.ItemDataRole.UserRole + 1, s.pinned)
+        item.setToolTip(s.title)
+        return item
+
     def update_title(self, session_id: str, title: str):
         for i in range(self._list.count()):
             item = self._list.item(i)
             if item.data(Qt.ItemDataRole.UserRole) == session_id:
-                item.setText(self._short(title))
+                pinned = item.data(Qt.ItemDataRole.UserRole + 1)
+                display = self._short(title)
+                if pinned:
+                    display = f"📌 {display}"
+                item.setText(display)
                 item.setToolTip(title)
                 break
 
@@ -103,12 +119,29 @@ class SessionPanel(QFrame):
         if current:
             self.session_selected.emit(current.data(Qt.ItemDataRole.UserRole))
 
+    def _on_rows_moved(self, *_):
+        """Emit new order of all sessions after drag-drop reorder."""
+        ordered_ids = []
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            sid = item.data(Qt.ItemDataRole.UserRole)
+            pinned = item.data(Qt.ItemDataRole.UserRole + 1)
+            if pinned:
+                ordered_ids.append(sid)
+        if ordered_ids:
+            self.session_reorder_requested.emit(ordered_ids)
+
     def _context_menu(self, pos):
         item = self._list.itemAt(pos)
         if not item:
             return
         sid = item.data(Qt.ItemDataRole.UserRole)
+        pinned = item.data(Qt.ItemDataRole.UserRole + 1)
         menu = QMenu(self)
+
+        pin_act = QAction("取消置顶" if pinned else "置顶", self)
+        pin_act.triggered.connect(lambda: self.session_pin_requested.emit(sid, not pinned))
+        menu.addAction(pin_act)
 
         settings_act = QAction("会话设置", self)
         settings_act.triggered.connect(lambda: self.session_settings_requested.emit(sid))

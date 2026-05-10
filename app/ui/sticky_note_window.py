@@ -63,6 +63,9 @@ class _TitleBar(QWidget):
 
     close_requested = pyqtSignal()
     double_clicked = pyqtSignal()
+    hide_requested = pyqtSignal()
+    delete_requested = pyqtSignal()
+    toggle_top_requested = pyqtSignal()
 
     def __init__(self, color: str, parent=None):
         super().__init__(parent)
@@ -119,9 +122,36 @@ class _TitleBar(QWidget):
         p.fillPath(path, base)
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.RightButton:
+            self._show_title_menu(event.globalPosition().toPoint())
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_started = False
             self._press_pos = event.globalPosition().toPoint()
+
+    def _show_title_menu(self, global_pos: QPoint):
+        win: StickyNoteWindow = self.window()
+        is_top = bool(win.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+
+        menu = QMenu(self)
+        top_act = menu.addAction("取消置顶" if is_top else "置顶")
+        hide_act = menu.addAction("隐藏")
+        menu.addSeparator()
+        copy_act = menu.addAction("复制内容")
+        menu.addSeparator()
+        del_act = menu.addAction("删除便签")
+
+        action = menu.exec(global_pos)
+        if action == top_act:
+            self.toggle_top_requested.emit()
+        elif action == hide_act:
+            self.hide_requested.emit()
+        elif action == copy_act:
+            text = win._content_edit.toPlainText()
+            QApplication.clipboard().setText(text)
+        elif action == del_act:
+            self.delete_requested.emit()
 
     def mouseMoveEvent(self, event):
         if event.buttons() & Qt.MouseButton.LeftButton:
@@ -144,6 +174,8 @@ class StickyNoteWindow(QWidget):
     closed = pyqtSignal()
     # Signal emitted when content changes (note_id, title, content)
     content_changed = pyqtSignal(int, str, str)
+    # Signal emitted when user requests deletion from title bar menu
+    delete_requested = pyqtSignal(int)
 
     def __init__(self, note_id: str, title: str, content: str,
                  note_mgr=None, parent=None):
@@ -212,6 +244,9 @@ class StickyNoteWindow(QWidget):
         self._title_bar.set_title(title)
         self._title_bar.close_requested.connect(self.close)
         self._title_bar.double_clicked.connect(self.close)
+        self._title_bar.hide_requested.connect(self.hide)
+        self._title_bar.toggle_top_requested.connect(self._toggle_always_on_top)
+        self._title_bar.delete_requested.connect(self._on_delete_requested)
         container_layout.addWidget(self._title_bar)
 
         # Content editor
@@ -262,6 +297,22 @@ class StickyNoteWindow(QWidget):
         self._content_edit.setPlainText(_html_to_plain(content))
         self._content_edit.blockSignals(False)
         self._title_bar.set_title(title)
+
+    def _toggle_always_on_top(self):
+        """切换窗口置顶状态。"""
+        flags = self.windowFlags()
+        if flags & Qt.WindowType.WindowStaysOnTopHint:
+            self.setWindowFlags(flags & ~Qt.WindowType.WindowStaysOnTopHint)
+        else:
+            self.setWindowFlags(flags | Qt.WindowType.WindowStaysOnTopHint)
+        self.show()  # setWindowFlags hides the window, must re-show
+
+    def _on_delete_requested(self):
+        """用户从标题栏菜单请求删除便签。"""
+        if self._note_mgr and self._note_id:
+            self._note_mgr.delete(self._note_id)
+        self.delete_requested.emit(self._note_id)
+        self.close()
 
     def _show_context_menu(self, pos):
         """显示右键菜单。"""

@@ -33,7 +33,38 @@ class SessionManager:
 
     # ------------------------------------------------------------------ crud
     def get_sessions(self) -> list[Session]:
-        return sorted(self._sessions.values(), key=lambda s: s.updated_at, reverse=True)
+        """返回会话列表：置顶的在前（按 sort_order），其余按 updated_at 降序。"""
+        pinned = sorted(
+            [s for s in self._sessions.values() if s.pinned],
+            key=lambda s: s.sort_order,
+        )
+        unpinned = sorted(
+            [s for s in self._sessions.values() if not s.pinned],
+            key=lambda s: s.updated_at,
+            reverse=True,
+        )
+        return pinned + unpinned
+
+    def pin_session(self, session_id: str, pinned: bool):
+        """设置/取消置顶。"""
+        session = self._sessions.get(session_id)
+        if session:
+            session.pinned = pinned
+            if pinned:
+                max_order = max(
+                    (s.sort_order for s in self._sessions.values() if s.pinned),
+                    default=-1,
+                )
+                session.sort_order = max_order + 1
+            self._save(session)
+
+    def reorder_sessions(self, ordered_ids: list[str]):
+        """按给定 ID 顺序更新 sort_order（仅影响置顶会话）。"""
+        for i, sid in enumerate(ordered_ids):
+            session = self._sessions.get(sid)
+            if session and session.pinned:
+                session.sort_order = i
+                self._save(session)
 
     def get(self, session_id: str) -> Optional[Session]:
         return self._sessions.get(session_id)

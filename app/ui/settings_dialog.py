@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -20,7 +21,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import ConfigManager
+from app.core.config import ConfigManager, SHANGDAO_MODELS
 from app.core.constants import DEFAULT_USER_PROMPT
 from app.ui.hotkey_settings_widget import HotkeySettingsWidget
 from app.ui.style import THEMES
@@ -30,6 +31,7 @@ _SEARCH_PROVIDERS = [
     ("bing", "Bing Search"),
     ("tavily", "Tavily"),
     ("brave", "Brave Search"),
+    ("bocha", "博查 AI 搜索"),
 ]
 
 _KEY_HINTS = {
@@ -37,6 +39,7 @@ _KEY_HINTS = {
     "bing": "Azure Bing Search API Key（portal.azure.com）",
     "tavily": "Tavily API Key（tavily.com）",
     "brave": "Brave Search API Key（api.search.brave.com）",
+    "bocha": "博查 API Key（bocha.ai）",
 }
 
 
@@ -82,6 +85,63 @@ class SettingsDialog(QDialog):
         self._temperature.setSingleStep(0.1)
         self._temperature.setDecimals(1)
         api_form.addRow("Temperature:", self._temperature)
+
+        # ── 商道 API 分组（可折叠）────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        api_form.addRow(sep)
+
+        # 折叠标题行：启用开关 + 展开/收起按钮
+        sd_header = QWidget()
+        sd_header_layout = QHBoxLayout(sd_header)
+        sd_header_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._sd_enabled = QCheckBox("启用商道 API")
+        self._sd_enabled.toggled.connect(self._on_sd_toggled)
+        sd_header_layout.addWidget(self._sd_enabled)
+        sd_header_layout.addStretch()
+
+        self._sd_toggle_btn = QPushButton("▶ 展开配置")
+        self._sd_toggle_btn.setFixedWidth(90)
+        self._sd_toggle_btn.setFlat(True)
+        self._sd_toggle_btn.clicked.connect(self._on_sd_expand)
+        sd_header_layout.addWidget(self._sd_toggle_btn)
+
+        api_form.addRow(sd_header)
+
+        # 折叠内容容器
+        self._sd_detail = QWidget()
+        sd_detail_form = QFormLayout(self._sd_detail)
+        sd_detail_form.setContentsMargins(0, 0, 0, 0)
+
+        self._sd_base_url = QLineEdit()
+        self._sd_base_url.setPlaceholderText("https://api.example.com")
+        sd_detail_form.addRow("API 地址:", self._sd_base_url)
+
+        self._sd_api_key = QLineEdit()
+        self._sd_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._sd_api_key.setPlaceholderText("API Key")
+        sd_detail_form.addRow("API Key:", self._sd_api_key)
+
+        self._sd_model = QComboBox()
+        for name in SHANGDAO_MODELS:
+            self._sd_model.addItem(name, name)
+        sd_detail_form.addRow("模型:", self._sd_model)
+
+        self._sd_max_tokens = QSpinBox()
+        self._sd_max_tokens.setRange(256, 65536)
+        self._sd_max_tokens.setSingleStep(256)
+        sd_detail_form.addRow("最大 Token:", self._sd_max_tokens)
+
+        self._sd_temperature = QDoubleSpinBox()
+        self._sd_temperature.setRange(0.0, 2.0)
+        self._sd_temperature.setSingleStep(0.1)
+        self._sd_temperature.setDecimals(1)
+        sd_detail_form.addRow("Temperature:", self._sd_temperature)
+
+        self._sd_detail.setVisible(False)  # 默认折叠
+        api_form.addRow(self._sd_detail)
 
         tabs.addTab(api_w, "API")
 
@@ -190,6 +250,17 @@ class SettingsDialog(QDialog):
         layout.addWidget(btns)
 
     # ------------------------------------------------------------------ helpers
+    def _on_sd_expand(self):
+        visible = not self._sd_detail.isVisible()
+        self._sd_detail.setVisible(visible)
+        self._sd_toggle_btn.setText("▼ 收起配置" if visible else "▶ 展开配置")
+
+    def _on_sd_toggled(self, enabled: bool):
+        """启用/禁用商道时同步普通 API 字段的启用状态。"""
+        for w in (self._base_url, self._api_key, self._model,
+                  self._max_tokens, self._temperature):
+            w.setEnabled(not enabled)
+
     def _on_provider_changed(self, _index: int):
         provider = self._search_provider.currentData()
         is_free = provider == "ddg"
@@ -250,7 +321,21 @@ class SettingsDialog(QDialog):
         sf = self._config.get_tool_params("save_file")
         self._save_dir.setText(sf.get("save_dir", ""))
 
+        # 商道配置
+        sd = self._config.shangdao_config
+        self._sd_enabled.setChecked(sd.get("enabled", False))
+        self._sd_base_url.setText(sd.get("base_url", "https://api.example.com"))
+        sd_model = sd.get("model", "Qwen3_235B")
+        midx = self._sd_model.findData(sd_model)
+        if midx >= 0:
+            self._sd_model.setCurrentIndex(midx)
+        self._sd_api_key.setText(self._config.get_shangdao_api_key())
+        self._sd_max_tokens.setValue(sd.get("max_tokens", 2048))
+        self._sd_temperature.setValue(sd.get("temperature", 0.7))
+        self._on_sd_toggled(sd.get("enabled", False))
+
     def _save(self):
+        enabled = self._sd_enabled.isChecked()
         self._config.update_api_config(
             base_url=self._base_url.text().strip(),
             api_key=self._api_key.text().strip(),
@@ -258,6 +343,7 @@ class SettingsDialog(QDialog):
             max_tokens=self._max_tokens.value(),
             temperature=self._temperature.value(),
             system_prompt=self._system_prompt_edit.toPlainText().strip(),
+            api_type="shangdao" if enabled else "openai",
         )
         self._config.update_window_config(
             opacity=self._opacity.value(),
@@ -276,6 +362,15 @@ class SettingsDialog(QDialog):
                     "save_dir": self._save_dir.text().strip(),
                 },
             }
+        )
+        # 商道配置
+        self._config.update_shangdao_config(
+            api_key=self._sd_api_key.text().strip(),
+            enabled=enabled,
+            base_url=self._sd_base_url.text().strip(),
+            model=self._sd_model.currentData(),
+            max_tokens=self._sd_max_tokens.value(),
+            temperature=self._sd_temperature.value(),
         )
         self._hotkey_widget.save()
         self.accept()

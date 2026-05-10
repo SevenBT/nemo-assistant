@@ -7,6 +7,26 @@ import keyring
 
 _SERVICE_NAME = "ai-agent-desktop"
 _ACCOUNT_API_KEY = "api_key"
+_ACCOUNT_SHANGDAO_KEY = "shangdao_api_key"
+
+# 商道模型元数据：URL 路径前缀、请求体中模型字段名及值
+SHANGDAO_MODELS: dict[str, dict] = {
+    "Qwen3_235B": {
+        "path_prefix": "CMHK-LMMP-PRD_Qwen3_235B_Ins/CMHK-LMMP-PRD",
+        "body_model_field": "mode1",
+        "body_model_value": "Qwen3_235B",
+    },
+    "Qwen2.5-72B": {
+        "path_prefix": "CMHK-LMMP-PRD_Qwen2_5_72B/CMHK-LMMP-PRD",
+        "body_model_field": "mode1",
+        "body_model_value": "Qwen2.5-72B",
+    },
+    "DeepSeek-V3": {
+        "path_prefix": "CMHK-LMMP-PRD_DeepSeek_R1/CMHK-LMMP-PRD",
+        "body_model_field": "model",
+        "body_model_value": "DeepSeek-V3-1-maas",
+    },
+}
 
 # PyInstaller 打包后 __file__ 指向临时目录，需要用 exe 所在目录作为根目录
 if getattr(sys, "frozen", False):
@@ -35,6 +55,14 @@ DEFAULT_APP_CONFIG: dict = {
         "max_tokens": 4096,
         "temperature": 0.7,
         "system_prompt": "",  # 新增：默认为空，表示使用硬编码默认值
+        "api_type": "openai",  # "openai" | "shangdao"
+    },
+    "shangdao": {
+        "enabled": False,
+        "base_url": "https://api.example.com",
+        "model": "Qwen3_235B",
+        "max_tokens": 2048,
+        "temperature": 0.7,
     },
     "window": {
         "width": 440,
@@ -66,7 +94,6 @@ class ConfigManager:
             keyring.set_password(_SERVICE_NAME, _ACCOUNT_API_KEY, json_key)
             self._app["api"]["api_key"] = ""
             self._write(CONFIG_DIR / "app_config.json", self._app)
-
     # ------------------------------------------------------------------ dirs
     def _ensure_dirs(self):
         for d in [CONFIG_DIR, DATA_DIR, SESSIONS_DIR, NOTES_DIR, NOTES_IMAGES_DIR, TRASH_DIR, TOOLS_DIR]:
@@ -140,6 +167,34 @@ class ConfigManager:
         return self._app["window"].get("edge_snap_width_threshold", 0.4)
 
     @property
+    def api_type(self) -> str:
+        """当前使用的 API 类型：'openai' 或 'shangdao'"""
+        return self._app["api"].get("api_type", "openai")
+
+    # ------------------------------------------------------------------ shangdao props
+    @property
+    def shangdao_config(self) -> dict:
+        return self._app.get("shangdao", {})
+
+    @property
+    def shangdao_enabled(self) -> bool:
+        return self._app.get("shangdao", {}).get("enabled", False)
+
+    @property
+    def shangdao_base_url(self) -> str:
+        return self._app.get("shangdao", {}).get("base_url", "https://api.example.com")
+
+    @property
+    def shangdao_model(self) -> str:
+        return self._app.get("shangdao", {}).get("model", "Qwen3_235B")
+
+    def get_shangdao_api_key(self) -> str:
+        return keyring.get_password(_SERVICE_NAME, _ACCOUNT_SHANGDAO_KEY) or ""
+
+    def set_shangdao_api_key(self, key: str):
+        keyring.set_password(_SERVICE_NAME, _ACCOUNT_SHANGDAO_KEY, key)
+
+    @property
     def app_config(self) -> dict:
         return self._app
 
@@ -152,6 +207,13 @@ class ConfigManager:
         if "api_key" in kwargs:
             keyring.set_password(_SERVICE_NAME, _ACCOUNT_API_KEY, kwargs.pop("api_key"))
         self._app["api"].update(kwargs)
+        self._write(CONFIG_DIR / "app_config.json", self._app)
+
+    def update_shangdao_config(self, api_key: str | None = None, **kwargs):
+        """更新商道配置。api_key 存入 keyring。"""
+        self._app.setdefault("shangdao", {}).update(kwargs)
+        if api_key is not None:
+            self.set_shangdao_api_key(api_key)
         self._write(CONFIG_DIR / "app_config.json", self._app)
 
     def update_window_config(self, **kwargs):

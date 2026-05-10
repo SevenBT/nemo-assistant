@@ -633,7 +633,11 @@ class NotesPanel(QWidget):
         elif action == export_action:
             self._export_note_txt(note_id)
         elif action == delete_action:
-            self._on_delete_by_id(note_id)
+            # 如果多选了多条，走批量删除；否则单条删除
+            if len(self._list.selectedItems()) > 1:
+                self._on_delete()
+            else:
+                self._on_delete_by_id(note_id)
 
     def _copy_note_content(self, note_id: str):
         """复制笔记纯文本内容到剪贴板。"""

@@ -51,7 +51,7 @@ from app.ui.style import THEMES, generate_stylesheet
 from app.ui.title_bar import TitleBar
 from app.ui.toast import show_toast
 from app.ui.tray_manager import TrayManager
-from app.core.constants import DEFAULT_USER_PROMPT, BUILTIN_TOOLS_INSTRUCTION
+from app.core.constants import DEFAULT_USER_PROMPT, BUILTIN_TOOLS_INSTRUCTION, get_current_datetime_info
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -60,6 +60,8 @@ class MainWindow(QWidget):
     _notify_signal = pyqtSignal(str, str)  # title, body
     # Signal for note content updates (note_id, title, content)
     note_updated = pyqtSignal(int, str, str)
+    # Marshals note-created callback from worker thread to main thread
+    _note_created_signal = pyqtSignal()
 
     def __init__(
         self,
@@ -95,8 +97,9 @@ class MainWindow(QWidget):
         self._builtin_handler = BuiltinToolHandler(
             scheduler=scheduler,
             note_mgr=note_mgr,
-            on_note_created=lambda: self._notes_panel.refresh(),
+            on_note_created=self._note_created_signal.emit,
         )
+        self._note_created_signal.connect(self._notes_panel.refresh)
         self._setup_tray()
         self._init_sessions()
         self._resize_filter = ResizeFilter(self)
@@ -156,6 +159,8 @@ class MainWindow(QWidget):
         self._session_panel.session_delete_requested.connect(self._delete_session)
         self._session_panel.session_rename_requested.connect(self._rename_session)
         self._session_panel.session_settings_requested.connect(self._on_session_settings)
+        self._session_panel.session_pin_requested.connect(self._on_session_pin)
+        self._session_panel.session_reorder_requested.connect(self._on_session_reorder)
         self._chat_splitter.addWidget(self._session_panel)
 
         chat_col = QVBoxLayout()
@@ -244,6 +249,7 @@ class MainWindow(QWidget):
         )
         # Connect content change signal
         win.content_changed.connect(self._on_note_updated)
+        win.delete_requested.connect(lambda _: self._notes_panel.refresh())
 
     def _toggle_window_visibility(self):
         if self.isVisible():
@@ -287,6 +293,7 @@ class MainWindow(QWidget):
                 win.closed.connect(lambda w=win: self._on_sticky_closed(w))
                 # Connect content change signal
                 win.content_changed.connect(self._on_note_updated)
+                win.delete_requested.connect(lambda _: self._notes_panel.refresh())
             except Exception as e:
                 print(f"Failed to restore pinned note {note.id}: {e}")
 
@@ -361,6 +368,16 @@ class MainWindow(QWidget):
             sessions = self._sessions.get_sessions()
             self._session_panel.load(sessions, sid)
 
+    def _on_session_pin(self, sid: str, pinned: bool):
+        """置顶/取消置顶会话。"""
+        self._sessions.pin_session(sid, pinned)
+        sessions = self._sessions.get_sessions()
+        self._session_panel.load(sessions, sid)
+
+    def _on_session_reorder(self, ordered_ids: list):
+        """拖拽排序后更新置顶会话顺序。"""
+        self._sessions.reorder_sessions(ordered_ids)
+
     def _on_session_select(self, sid: str):
         if sid != self._current_session_id:
             self._switch_session(sid)
@@ -394,6 +411,13 @@ class MainWindow(QWidget):
         if session:
             self._chat.load_session(session.messages)
 
+        # Show role greeting when session has a preset/role but no messages yet
+        if session and not session.messages:
+            greeting = self._get_role_greeting(session)
+            if greeting:
+                greeting_msg = Message(role=MessageRole.ASSISTANT, content=greeting)
+                self._chat.add_message(greeting_msg)
+
         live = self._session_live.get(sid)
         if live:
             self._current_ai_msg = live["ai_msg"]
@@ -410,6 +434,26 @@ class MainWindow(QWidget):
             self._input.set_enabled(True)
 
         self._input.focus()
+
+    def _get_role_greeting(self, session) -> str:
+        """返回会话角色的打招呼语句，无角色时返回空字符串。"""
+        preset = None
+        if session.preset_id:
+            preset = self._preset_mgr.get(session.preset_id)
+        if preset:
+            return f"你好！我是{preset.icon} {preset.name}，{self._greeting_for_preset(preset.id)}有什么可以帮你的？"
+        if session.system_prompt and session.system_prompt.strip():
+            return "你好！我已按照自定义角色设置就绪，有什么可以帮你的？"
+        return ""
+
+    def _greeting_for_preset(self, preset_id: str) -> str:
+        greetings = {
+            "translator": "擅长中英互译，",
+            "coder": "擅长代码生成与调试，",
+            "writer": "擅长文案创作与润色，",
+            "summarizer": "擅长提炼内容摘要，",
+        }
+        return greetings.get(preset_id, "")
 
     @pyqtSlot(list)
     def _on_files_attached(self, attachments: list):
@@ -491,8 +535,8 @@ class MainWindow(QWidget):
         if not user_prompt:
             user_prompt = DEFAULT_USER_PROMPT
 
-        # 优先级 5: 追加内置工具说明
-        full_system_prompt = user_prompt + "\n" + BUILTIN_TOOLS_INSTRUCTION
+        # 优先级 5: 追加当前时间信息和内置工具说明
+        full_system_prompt = user_prompt + "\n" + get_current_datetime_info() + "\n" + BUILTIN_TOOLS_INSTRUCTION
 
         result = [{"role": "system", "content": full_system_prompt}]
 

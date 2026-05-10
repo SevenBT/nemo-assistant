@@ -1,6 +1,6 @@
 {
   "name": "web_search",
-  "description": "搜索互联网，返回相关网页列表（标题、链接、摘要）。支持 DuckDuckGo（免费）、Bing、Tavily、Brave 搜索引擎，在设置→工具中配置",
+  "description": "搜索互联网，返回相关网页列表（标题、链接、摘要）。支持 DuckDuckGo（免费）、Bing、Tavily、Brave、博查 AI 搜索引擎，在设置→工具中配置",
   "script": "tool.py",
   "parameters": {
     "query": {
@@ -25,6 +25,30 @@
       "type": "string",
       "description": "搜索 API Key（由配置决定，AI 无需填写）",
       "source": "config",
+      "required": false
+    },
+    "summary": {
+      "type": "boolean",
+      "description": "是否返回 AI 生成的文本摘要（默认 false）。仅当用户明确说'总结'、'摘要'、'详细内容'时设为 true。注意：会增加 API 成本（仅博查支持）",
+      "source": "ai",
+      "required": false
+    },
+    "freshness": {
+      "type": "string",
+      "description": "搜索时间范围（默认 noLimit）。仅当用户明确提到时间词时设置：'今天/最近一天'→oneDay，'本周/最近一周'→oneWeek，'本月/最近一个月'→oneMonth，'今年/最近一年'→oneYear。其他情况使用默认值 noLimit（仅博查支持）",
+      "source": "ai",
+      "required": false
+    },
+    "include": {
+      "type": "string",
+      "description": "仅搜索指定网站，多个网站用|或,分隔，例如 'github.com|stackoverflow.com' 或 'github.com,stackoverflow.com'。仅当用户明确说'只在某网站搜索'、'限定某网站'时才设置（仅博查支持）",
+      "source": "ai",
+      "required": false
+    },
+    "exclude": {
+      "type": "string",
+      "description": "排除指定网站，多个网站用|或,分隔，例如 'baidu.com|csdn.net' 或 'baidu.com,csdn.net'。仅当用户明确说'排除某网站'、'不要某网站'时才设置（仅博查支持）",
+      "source": "ai",
       "required": false
     }
   }

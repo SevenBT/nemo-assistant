@@ -3,7 +3,6 @@
 Extracted from main_window.py to keep UI code focused on UI.
 BuiltinToolHandler is instantiated in MainWindow and passed to ChatWorker.
 """
-import datetime
 import math
 from typing import Callable
 
@@ -100,14 +99,6 @@ BUILTIN_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_datetime",
-            "description": "获取当前日期、时间、星期和时区信息",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "calculator",
             "description": "计算数学表达式，支持四则运算、幂次、三角函数、对数、常数 pi/e 等",
             "parameters": {
@@ -177,7 +168,6 @@ class BuiltinToolHandler:
             "read_notes": self._handle_read_notes,
             "create_note": self._handle_create_note,
             "summarize_session_as_note": self._handle_summarize_as_note,
-            "get_datetime": self._handle_get_datetime,
             "calculator": self._handle_calculator,
             "clipboard": self._handle_clipboard,
         }
@@ -244,21 +234,6 @@ class BuiltinToolHandler:
             return {"status": "error", "data": {"message": str(e)}}
 
     # ── utility tools ─────────────────────────────────────────────────
-
-    def _handle_get_datetime(self, _args: dict) -> dict:
-        now = datetime.datetime.now()
-        tz = now.astimezone().tzname()
-        return {
-            "status": "success",
-            "data": {
-                "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
-                "date": now.strftime("%Y-%m-%d"),
-                "time": now.strftime("%H:%M:%S"),
-                "weekday": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()],
-                "timestamp": int(now.timestamp()),
-                "timezone": tz,
-            },
-        }
 
     def _handle_calculator(self, args: dict) -> dict:
         expr = args.get("expression", "").strip()

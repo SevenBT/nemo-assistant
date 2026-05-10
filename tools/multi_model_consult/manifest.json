@@ -1,0 +1,31 @@
+{
+  "name": "multi_model_consult",
+  "description": "并行咨询多个 AI 模型（Claude、GPT-4、DeepSeek 等），从不同视角分析问题。适用于方案设计、技术选型、架构评审等需要多方意见的场景",
+  "script": "tool.py",
+  "parameters": {
+    "query": {
+      "type": "string",
+      "description": "咨询问题（例如：设计用户认证系统、选择数据库方案、评审代码架构等）",
+      "source": "ai",
+      "required": true
+    },
+    "perspectives": {
+      "type": "array",
+      "description": "咨询视角列表，可选：architect（架构师）、security（安全专家）、performance（性能专家）、cost（成本优化）、maintainability（可维护性）。默认使用 architect、security、performance",
+      "source": "ai",
+      "required": false
+    },
+    "context": {
+      "type": "string",
+      "description": "可选的上下文信息（代码片段、需求文档、技术栈等），帮助模型更好地理解问题",
+      "source": "ai",
+      "required": false
+    },
+    "timeout": {
+      "type": "number",
+      "description": "超时时间（秒），默认 30 秒",
+      "source": "config",
+      "required": false
+    }
+  }
+}

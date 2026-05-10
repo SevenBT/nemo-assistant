@@ -1,5 +1,14 @@
 Traceback (most recent call last):
-  File "D:\claudecode-projects\assistant\app\ui\preset_manager_dialog.py", line 266, in _on_save
-    if item.data(Qt.ItemDataRole.UserRole) == self._current_preset.id:
-                                              ^^^^^^^^^^^^^^^^^^^^^^^
-AttributeError: 'NoneType' object has no attribute 'id'
+  File "D:\claudecode-projects\assistant\app\ui\title_bar.py", line 94, in mousePressEvent
+    self._show_context_menu(e.globalPosition().toPoint())
+  File "D:\claudecode-projects\assistant\app\ui\title_bar.py", line 138, in _show_context_menu
+    self._win._open_settings()
+  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 722, in _open_settings
+    dlg = SettingsDialog(self._config, self._hotkey_mgr, self)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\claudecode-projects\assistant\app\ui\settings_dialog.py", line 51, in __init__
+    self._build()
+  File "D:\claudecode-projects\assistant\app\ui\settings_dialog.py", line 197, in _build
+    self._search_provider.currentIndexChanged.connect(self._on_provider_changed)
+                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'SettingsDialog' object has no attribute '_on_provider_changed'. Did you mean: '_on_sd_model_changed'?
