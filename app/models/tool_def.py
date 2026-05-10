@@ -11,11 +11,14 @@ class ParameterDef:
     required: bool = True
     default: Optional[str] = None
     enum: list = field(default_factory=list)
+    items: Optional[dict] = None  # For array type
 
     def to_schema_dict(self) -> dict:
         d: dict = {"type": self.type, "description": self.description}
         if self.enum:
             d["enum"] = self.enum
+        if self.type == "array" and self.items:
+            d["items"] = self.items
         return d
 
 

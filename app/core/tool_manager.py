@@ -56,6 +56,7 @@ class ToolManager:
                 required=pdata.get("required", True),
                 default=pdata.get("default"),
                 enum=pdata.get("enum", []),
+                items=pdata.get("items"),
             )
 
         tool = ToolDefinition(
