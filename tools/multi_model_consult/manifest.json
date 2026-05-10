@@ -12,6 +12,9 @@
     "perspectives": {
       "type": "array",
       "description": "咨询视角列表，可选：architect（架构师）、security（安全专家）、performance（性能专家）、cost（成本优化）、maintainability（可维护性）。默认使用 architect、security、performance",
+      "items": {
+        "type": "string"
+      },
       "source": "ai",
       "required": false
     },

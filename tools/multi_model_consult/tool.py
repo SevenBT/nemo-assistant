@@ -1,7 +1,8 @@
 """
-多模型咨询工具 - 简化版实现
+多模型咨询工具 - 异步并行版本
 并行调用多个 AI 模型，从不同视角分析问题
 """
+import asyncio
 import json
 import logging
 import sys
@@ -12,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.core.config import ConfigManager
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -47,7 +48,7 @@ PERSPECTIVES = {
 }
 
 
-def call_openai_model(
+async def call_openai_model_async(
     config: ConfigManager,
     model: str,
     system_prompt: str,
@@ -55,14 +56,14 @@ def call_openai_model(
     context: str,
     timeout: float = 30.0
 ) -> str:
-    """调用 OpenAI 模型"""
+    """异步调用 OpenAI 模型"""
     # 验证 API Key
     if not config.api_key or config.api_key.strip() == "":
         raise ValueError("OpenAI API Key 未配置，请在设置中配置 API Key")
     
-    logger.info(f"调用 OpenAI 模型: {model}, timeout={timeout}s")
+    logger.info(f"异步调用 OpenAI 模型: {model}, timeout={timeout}s")
     
-    client = OpenAI(
+    client = AsyncOpenAI(
         api_key=config.api_key,
         base_url=config.api_base_url,
         timeout=timeout,
@@ -74,7 +75,7 @@ def call_openai_model(
     ]
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model,
             messages=messages,
             max_tokens=config.max_tokens,
@@ -90,24 +91,99 @@ def call_openai_model(
         raise
 
 
-def call_model(
+async def call_litellm_model_async(
+    config: ConfigManager,
+    model_id: str,
+    model_name: str,
+    provider: str,
+    system_prompt: str,
+    query: str,
+    context: str,
+    timeout: float = 30.0
+) -> dict:
+    """异步调用 LiteLLM 模型"""
+    try:
+        import litellm
+    except ImportError:
+        return {
+            "model_id": model_id,
+            "model_name": model_name,
+            "provider": provider,
+            "status": "error",
+            "error": "LiteLLM 未安装",
+        }
+    
+    api_key = config.get_litellm_provider_api_key(provider)
+    if not api_key:
+        return {
+            "model_id": model_id,
+            "model_name": model_name,
+            "provider": provider,
+            "status": "error",
+            "error": f"{provider} API Key 未配置",
+        }
+    
+    logger.info(f"异步调用 LiteLLM 模型: {model_id} ({provider}), timeout={timeout}s")
+    
+    litellm_model = f"{provider}/{model_id}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"问题：{query}\n\n上下文：{context}" if context else f"问题：{query}"}
+    ]
+    
+    try:
+        response = await litellm.acompletion(
+            model=litellm_model,
+            messages=messages,
+            max_tokens=config.max_tokens,
+            temperature=config.temperature,
+            api_key=api_key,
+            timeout=timeout,
+        )
+        
+        content = response.choices[0].message.content
+        logger.info(f"模型 {model_id} 调用成功，返回内容长度: {len(content)}")
+        
+        return {
+            "model_id": model_id,
+            "model_name": model_name,
+            "provider": provider,
+            "status": "success",
+            "content": content,
+        }
+    
+    except Exception as e:
+        logger.error(f"调用 LiteLLM 模型 {model_id} 失败: {str(e)}")
+        return {
+            "model_id": model_id,
+            "model_name": model_name,
+            "provider": provider,
+            "status": "error",
+            "error": str(e),
+        }
+
+async def call_model_async(
     config: ConfigManager,
     perspective_id: str,
     query: str,
     context: str,
     timeout: float = 30.0
 ) -> dict:
-    """调用单个模型"""
+    """异步调用单个模型，带超时控制"""
     perspective = PERSPECTIVES[perspective_id]
 
     try:
-        content = call_openai_model(
-            config,
-            perspective["model"],
-            perspective["system_prompt"],
-            query,
-            context,
-            timeout
+        # 使用 asyncio.wait_for 为每个任务设置超时
+        content = await asyncio.wait_for(
+            call_openai_model_async(
+                config,
+                perspective["model"],
+                perspective["system_prompt"],
+                query,
+                context,
+                timeout
+            ),
+            timeout=timeout
         )
 
         return {
@@ -120,6 +196,17 @@ def call_model(
             "timestamp": datetime.now().isoformat(),
         }
 
+    except asyncio.TimeoutError:
+        logger.error(f"视角 {perspective['name']} 调用超时 ({timeout}s)")
+        return {
+            "perspective_id": perspective_id,
+            "perspective_name": perspective["name"],
+            "model": perspective["model"],
+            "provider": perspective["provider"],
+            "status": "error",
+            "error": f"调用超时 ({timeout}s)",
+            "timestamp": datetime.now().isoformat(),
+        }
     except Exception as e:
         logger.error(f"视角 {perspective['name']} 调用失败: {str(e)}")
         return {
@@ -133,13 +220,13 @@ def call_model(
         }
 
 
-def multi_model_consult(
+async def multi_model_consult_async(
     query: str,
     perspectives: list,
     context: str = "",
     timeout: float = 30.0
 ) -> str:
-    """串行调用多个模型（简化版，不使用异步）"""
+    """并行调用多个模型（异步版本）"""
     config = ConfigManager()
 
     # 验证视角
@@ -147,13 +234,33 @@ def multi_model_consult(
     if not valid_perspectives:
         valid_perspectives = ["architect", "security", "performance"]
 
-    logger.info(f"开始多模型咨询，视角: {valid_perspectives}, timeout={timeout}s")
+    logger.info(f"开始多模型并行咨询，视角: {valid_perspectives}, timeout={timeout}s")
 
-    # 串行调用（简化实现）
-    results = []
-    for p in valid_perspectives:
-        result = call_model(config, p, query, context, timeout)
-        results.append(result)
+    # 并行调用所有模型，使用 return_exceptions=True 确保某个模型失败不影响其他模型
+    tasks = [
+        call_model_async(config, p, query, context, timeout)
+        for p in valid_perspectives
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # 处理异常结果
+    processed_results = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            perspective_id = valid_perspectives[i]
+            perspective = PERSPECTIVES[perspective_id]
+            logger.error(f"视角 {perspective['name']} 返回异常: {str(result)}")
+            processed_results.append({
+                "perspective_id": perspective_id,
+                "perspective_name": perspective["name"],
+                "model": perspective["model"],
+                "provider": perspective["provider"],
+                "status": "error",
+                "error": str(result),
+                "timestamp": datetime.now().isoformat(),
+            })
+        else:
+            processed_results.append(result)
 
     # 格式化输出（Markdown）
     output = f"# 多模型咨询结果\n\n"
@@ -165,7 +272,7 @@ def multi_model_consult(
 
     # 成功的结果
     success_count = 0
-    for r in results:
+    for r in processed_results:
         if r["status"] == "success":
             success_count += 1
             output += f"## {r['perspective_name']} ({r['model']})\n\n"
@@ -173,7 +280,7 @@ def multi_model_consult(
             output += "---\n\n"
 
     # 失败的结果
-    failed = [r for r in results if r["status"] != "success"]
+    failed = [r for r in processed_results if r["status"] != "success"]
     if failed:
         output += "## 调用失败的模型\n\n"
         for r in failed:
@@ -181,9 +288,9 @@ def multi_model_consult(
         output += "\n"
 
     # 统计信息
-    output += f"\n**统计**: 成功 {success_count}/{len(results)} 个模型\n"
+    output += f"\n**统计**: 成功 {success_count}/{len(processed_results)} 个模型（并行调用）\n"
     
-    logger.info(f"多模型咨询完成，成功 {success_count}/{len(results)} 个模型")
+    logger.info(f"多模型并行咨询完成，成功 {success_count}/{len(processed_results)} 个模型")
 
     return output
 
@@ -208,7 +315,8 @@ def main():
         return
 
     try:
-        result = multi_model_consult(query, perspectives, context, timeout)
+        # 使用 asyncio.run() 运行异步函数
+        result = asyncio.run(multi_model_consult_async(query, perspectives, context, timeout))
 
         print(
             json.dumps(
