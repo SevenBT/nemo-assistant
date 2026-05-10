@@ -8,6 +8,7 @@ import keyring
 _SERVICE_NAME = "ai-agent-desktop"
 _ACCOUNT_API_KEY = "api_key"
 _ACCOUNT_SHANGDAO_KEY = "shangdao_api_key"
+_ACCOUNT_LITELLM_KEY = "litellm_api_key"
 
 # 商道模型元数据：URL 路径前缀、请求体中模型字段名及值
 SHANGDAO_MODELS: dict[str, dict] = {
@@ -26,6 +27,31 @@ SHANGDAO_MODELS: dict[str, dict] = {
         "body_model_field": "model",
         "body_model_value": "DeepSeek-V3-1-maas",
     },
+}
+
+# LiteLLM 模型模板
+MODEL_TEMPLATES: dict[str, list[dict]] = {
+    "openai": [
+        {"id": "gpt-4o", "name": "GPT-4o"},
+        {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+        {"id": "o1", "name": "O1"},
+        {"id": "o1-mini", "name": "O1 Mini"},
+        {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
+    ],
+    "anthropic": [
+        {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet"},
+        {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku"},
+        {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus"},
+    ],
+    "google": [
+        {"id": "gemini-2.0-flash-exp", "name": "Gemini 2.0 Flash"},
+        {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
+        {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
+    ],
+    "deepseek": [
+        {"id": "deepseek-chat", "name": "DeepSeek Chat"},
+        {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner"},
+    ],
 }
 
 # PyInstaller 打包后 __file__ 指向临时目录，需要用 exe 所在目录作为根目录
@@ -55,7 +81,7 @@ DEFAULT_APP_CONFIG: dict = {
         "max_tokens": 4096,
         "temperature": 0.7,
         "system_prompt": "",  # 新增：默认为空，表示使用硬编码默认值
-        "api_type": "openai",  # "openai" | "shangdao"
+        "api_type": "openai",  # "openai" | "shangdao" | "litellm"
     },
     "shangdao": {
         "enabled": False,
@@ -63,6 +89,36 @@ DEFAULT_APP_CONFIG: dict = {
         "model": "Qwen3_235B",
         "max_tokens": 2048,
         "temperature": 0.7,
+    },
+    "litellm": {
+        "enabled": False,
+        "default_model": "gpt-4o",
+        "models": [
+            {
+                "id": "gpt-4o",
+                "name": "GPT-4o",
+                "provider": "openai",
+                "enabled": True,
+            },
+            {
+                "id": "claude-3-5-sonnet-20241022",
+                "name": "Claude 3.5 Sonnet",
+                "provider": "anthropic",
+                "enabled": True,
+            },
+            {
+                "id": "gemini-2.0-flash-exp",
+                "name": "Gemini 2.0 Flash",
+                "provider": "google",
+                "enabled": False,
+            },
+            {
+                "id": "deepseek-chat",
+                "name": "DeepSeek Chat",
+                "provider": "deepseek",
+                "enabled": False,
+            },
+        ],
     },
     "window": {
         "width": 440,
@@ -194,6 +250,70 @@ class ConfigManager:
     def set_shangdao_api_key(self, key: str):
         keyring.set_password(_SERVICE_NAME, _ACCOUNT_SHANGDAO_KEY, key)
 
+    # ------------------------------------------------------------------ litellm props
+    @property
+    def litellm_config(self) -> dict:
+        """返回完整的 LiteLLM 配置"""
+        return self._app.get("litellm", {})
+
+    @property
+    def litellm_enabled(self) -> bool:
+        """LiteLLM 是否启用"""
+        return self._app.get("litellm", {}).get("enabled", False)
+
+    def get_litellm_provider_api_key(self, provider: str) -> str:
+        """获取指定 provider 的 API Key"""
+        return keyring.get_password(_SERVICE_NAME, f"litellm_{provider}_api_key") or ""
+
+    def set_litellm_provider_api_key(self, provider: str, key: str):
+        """设置指定 provider 的 API Key"""
+        keyring.set_password(_SERVICE_NAME, f"litellm_{provider}_api_key", key)
+
+    @property
+    def litellm_providers(self) -> list[str]:
+        """返回所有 provider 列表（去重）"""
+        return list(set(m["provider"] for m in self.litellm_models))
+
+    @property
+    def litellm_default_model(self) -> str:
+        """正常聊天使用的默认模型"""
+        return self._app.get("litellm", {}).get("default_model", "gpt-4o")
+
+    @property
+    def litellm_models(self) -> list[dict]:
+        """返回所有可用模型列表"""
+        return self._app.get("litellm", {}).get("models", [])
+
+    @property
+    def litellm_enabled_models(self) -> list[dict]:
+        """返回启用的模型列表（用于多模型调用）"""
+        return [m for m in self.litellm_models if m.get("enabled", False)]
+
+    def get_litellm_model_by_id(self, model_id: str) -> dict | None:
+        """根据 model_id 查找模型配置"""
+        for model in self.litellm_models:
+            if model.get("id") == model_id:
+                return model
+        return None
+
+    def update_litellm_config(self, **kwargs):
+        """更新 LiteLLM 配置（不包括 API Key）"""
+        self._app.setdefault("litellm", {}).update(kwargs)
+        self._write(CONFIG_DIR / "app_config.json", self._app)
+
+    def update_litellm_model_enabled(self, model_id: str, enabled: bool):
+        """更新指定模型的启用状态"""
+        for model in self._app.get("litellm", {}).get("models", []):
+            if model.get("id") == model_id:
+                model["enabled"] = enabled
+                self._write(CONFIG_DIR / "app_config.json", self._app)
+                return
+        raise ValueError(f"Model {model_id} not found in litellm.models")
+
+    def set_litellm_models(self, models: list[dict]):
+        """批量设置 LiteLLM 模型列表"""
+        self._app.setdefault("litellm", {})["models"] = models
+        self._write(CONFIG_DIR / "app_config.json", self._app)
     @property
     def app_config(self) -> dict:
         return self._app
@@ -240,3 +360,59 @@ class ConfigManager:
         for tool_name, params in updates.items():
             self._params["tools"].setdefault(tool_name, {}).update(params)
         self._write(CONFIG_DIR / "params_config.json", self._params)
+
+    # ------------------------------------------------------------------ litellm model management
+    def add_litellm_model(self, model_id: str, name: str, provider: str, enabled: bool = False):
+        """添加模型（去重）"""
+        models = self._app.setdefault("litellm", {}).setdefault("models", [])
+
+        # 检查是否已存在
+        if any(m["id"] == model_id for m in models):
+            raise ValueError(f"模型 {model_id} 已存在")
+
+        models.append({
+            "id": model_id,
+            "name": name,
+            "provider": provider,
+            "enabled": enabled,
+        })
+        self._write(CONFIG_DIR / "app_config.json", self._app)
+
+    def remove_litellm_model(self, model_id: str):
+        """删除模型"""
+        models = self._app.get("litellm", {}).get("models", [])
+        original_len = len(models)
+
+        self._app["litellm"]["models"] = [m for m in models if m["id"] != model_id]
+
+        if len(self._app["litellm"]["models"]) == original_len:
+            raise ValueError(f"模型 {model_id} 不存在")
+
+        # 如果删除的是默认模型，重置为第一个模型
+        if self.litellm_default_model == model_id:
+            remaining = self._app["litellm"]["models"]
+            if remaining:
+                self._app["litellm"]["default_model"] = remaining[0]["id"]
+
+        self._write(CONFIG_DIR / "app_config.json", self._app)
+
+    def update_litellm_model(self, model_id: str, **kwargs):
+        """更新模型信息（name, enabled）"""
+        models = self._app.get("litellm", {}).get("models", [])
+
+        for model in models:
+            if model["id"] == model_id:
+                # 只允许更新 name 和 enabled
+                if "name" in kwargs:
+                    model["name"] = kwargs["name"]
+                if "enabled" in kwargs:
+                    model["enabled"] = kwargs["enabled"]
+                self._write(CONFIG_DIR / "app_config.json", self._app)
+                return
+
+        raise ValueError(f"模型 {model_id} 不存在")
+
+    @staticmethod
+    def get_model_templates() -> dict[str, list[dict]]:
+        """获取模型模板（硬编码）"""
+        return MODEL_TEMPLATES

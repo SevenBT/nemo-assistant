@@ -10,11 +10,14 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -60,7 +63,15 @@ class SettingsDialog(QDialog):
 
         # ── API tab ───────────────────────────────────────────────────
         api_w = QWidget()
-        api_form = QFormLayout(api_w)
+        api_layout = QVBoxLayout(api_w)
+
+        # 使用 QScrollArea 包裹整个 API 配置区域
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        scroll_content = QWidget()
+        api_form = QFormLayout(scroll_content)
 
         self._base_url = QLineEdit()
         self._base_url.setPlaceholderText("https://api.openai.com/v1")
@@ -142,6 +153,84 @@ class SettingsDialog(QDialog):
 
         self._sd_detail.setVisible(False)  # 默认折叠
         api_form.addRow(self._sd_detail)
+
+        # ── LiteLLM API 分组（可折叠）─────────────────────────────────
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setFrameShadow(QFrame.Shadow.Sunken)
+        api_form.addRow(sep2)
+
+        # 折叠标题行：启用开关 + 展开/收起按钮
+        ll_header = QWidget()
+        ll_header_layout = QHBoxLayout(ll_header)
+        ll_header_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._ll_enabled = QCheckBox("启用 LiteLLM")
+        self._ll_enabled.toggled.connect(self._on_ll_toggled)
+        ll_header_layout.addWidget(self._ll_enabled)
+        ll_header_layout.addStretch()
+
+        self._ll_toggle_btn = QPushButton("▶ 展开配置")
+        self._ll_toggle_btn.setFixedWidth(90)
+        self._ll_toggle_btn.setFlat(True)
+        self._ll_toggle_btn.clicked.connect(self._on_ll_expand)
+        ll_header_layout.addWidget(self._ll_toggle_btn)
+
+        api_form.addRow(ll_header)
+
+        # 折叠内容容器
+        self._ll_detail = QWidget()
+        ll_detail_form = QFormLayout(self._ll_detail)
+        ll_detail_form.setContentsMargins(0, 0, 0, 0)
+
+        self._ll_default_model = QComboBox()
+        ll_detail_form.addRow("默认模型:", self._ll_default_model)
+
+        # API Key 配置
+        ll_key_group = QGroupBox("API Key 配置")
+        ll_key_layout = QFormLayout(ll_key_group)
+        ll_key_layout.setContentsMargins(8, 8, 8, 8)
+
+        # 动态生成每个 provider 的输入框
+        self._ll_provider_keys: dict[str, QLineEdit] = {}
+        for provider in self._config.litellm_providers:
+            key_input = QLineEdit()
+            key_input.setEchoMode(QLineEdit.EchoMode.Password)
+            key_input.setPlaceholderText(f"输入 {provider.capitalize()} API Key")
+            self._ll_provider_keys[provider] = key_input
+            ll_key_layout.addRow(f"{provider.capitalize()}:", key_input)
+
+        ll_key_group.setLayout(ll_key_layout)
+        ll_detail_form.addRow(ll_key_group)
+
+        # 多模型调用配置
+        ll_multi_group = QGroupBox("多模型调用")
+        ll_multi_layout = QVBoxLayout(ll_multi_group)
+        ll_multi_layout.setContentsMargins(8, 8, 8, 8)
+        self._ll_model_rows: dict[str, tuple[QCheckBox, QWidget]] = {}  # model_id -> (checkbox, row_widget)
+        self._ll_multi_container = ll_multi_layout  # 保存引用以便动态添加
+
+        # 底部添加按钮
+        add_layout = QHBoxLayout()
+
+        template_btn = QPushButton("从模板添加")
+        template_btn.clicked.connect(self._add_from_template)
+        add_layout.addWidget(template_btn)
+
+        custom_btn = QPushButton("自定义添加")
+        custom_btn.clicked.connect(self._add_custom_model)
+        add_layout.addWidget(custom_btn)
+
+        add_layout.addStretch()
+        ll_multi_layout.addLayout(add_layout)
+
+        ll_detail_form.addRow(ll_multi_group)
+
+        self._ll_detail.setVisible(False)  # 默认折叠
+        api_form.addRow(self._ll_detail)
+
+        scroll.setWidget(scroll_content)
+        api_layout.addWidget(scroll)
 
         tabs.addTab(api_w, "API")
 
@@ -250,6 +339,20 @@ class SettingsDialog(QDialog):
         layout.addWidget(btns)
 
     # ------------------------------------------------------------------ helpers
+    def _on_ll_expand(self):
+        """展开/收起 LiteLLM 配置"""
+        visible = not self._ll_detail.isVisible()
+        self._ll_detail.setVisible(visible)
+        self._ll_toggle_btn.setText("▼ 收起配置" if visible else "▶ 展开配置")
+
+    def _on_ll_toggled(self, enabled: bool):
+        """启用/禁用 LiteLLM 时同步其他 API 字段的启用状态"""
+        # LiteLLM 启用时，禁用 OpenAI 和商道配置
+        for w in (self._base_url, self._api_key, self._model,
+                  self._max_tokens, self._temperature):
+            w.setEnabled(not enabled)
+        self._sd_enabled.setEnabled(not enabled)
+
     def _on_sd_expand(self):
         visible = not self._sd_detail.isVisible()
         self._sd_detail.setVisible(visible)
@@ -260,6 +363,7 @@ class SettingsDialog(QDialog):
         for w in (self._base_url, self._api_key, self._model,
                   self._max_tokens, self._temperature):
             w.setEnabled(not enabled)
+        self._ll_enabled.setEnabled(not enabled)
 
     def _on_provider_changed(self, _index: int):
         provider = self._search_provider.currentData()
@@ -334,8 +438,53 @@ class SettingsDialog(QDialog):
         self._sd_temperature.setValue(sd.get("temperature", 0.7))
         self._on_sd_toggled(sd.get("enabled", False))
 
+        # LiteLLM 配置
+        ll = self._config.litellm_config
+        self._ll_enabled.setChecked(ll.get("enabled", False))
+
+        # 填充默认模型下拉框
+        self._ll_default_model.clear()
+        for model in ll.get("models", []):
+            self._ll_default_model.addItem(
+                f"{model['name']} ({model['provider']})",
+                model["id"]
+            )
+        # 设置当前默认模型
+        default_model = ll.get("default_model", "gpt-4o")
+        didx = self._ll_default_model.findData(default_model)
+        if didx >= 0:
+            self._ll_default_model.setCurrentIndex(didx)
+
+        # 加载每个 provider 的 API Key
+        for provider, key_input in self._ll_provider_keys.items():
+            api_key = self._config.get_litellm_provider_api_key(provider)
+            key_input.setText(api_key)
+
+        # 动态生成多模型调用的 QCheckBox 列表
+        self._ll_model_rows.clear()
+        # 清空之前的控件（保留底部的添加按钮布局）
+        # 从后往前删除，保留最后一个（添加按钮布局）
+        while self._ll_multi_container.count() > 1:
+            item = self._ll_multi_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for model in ll.get("models", []):
+            row_widget = self._create_model_row(model)
+            # 插入到添加按钮布局之前
+            self._ll_multi_container.insertWidget(self._ll_multi_container.count() - 1, row_widget)
+
+        self._on_ll_toggled(ll.get("enabled", False))
+
     def _save(self):
-        enabled = self._sd_enabled.isChecked()
+        # 判断启用的 API 类型
+        if self._ll_enabled.isChecked():
+            api_type = "litellm"
+        elif self._sd_enabled.isChecked():
+            api_type = "shangdao"
+        else:
+            api_type = "openai"
+
         self._config.update_api_config(
             base_url=self._base_url.text().strip(),
             api_key=self._api_key.text().strip(),
@@ -343,7 +492,7 @@ class SettingsDialog(QDialog):
             max_tokens=self._max_tokens.value(),
             temperature=self._temperature.value(),
             system_prompt=self._system_prompt_edit.toPlainText().strip(),
-            api_type="shangdao" if enabled else "openai",
+            api_type=api_type,
         )
         self._config.update_window_config(
             opacity=self._opacity.value(),
@@ -366,11 +515,108 @@ class SettingsDialog(QDialog):
         # 商道配置
         self._config.update_shangdao_config(
             api_key=self._sd_api_key.text().strip(),
-            enabled=enabled,
+            enabled=self._sd_enabled.isChecked(),
             base_url=self._sd_base_url.text().strip(),
             model=self._sd_model.currentData(),
             max_tokens=self._sd_max_tokens.value(),
             temperature=self._sd_temperature.value(),
         )
+
+        # LiteLLM 配置
+        ll_enabled = self._ll_enabled.isChecked()
+        ll_default_model = self._ll_default_model.currentData()
+
+        # 保存每个 provider 的 API Key
+        for provider, key_input in self._ll_provider_keys.items():
+            api_key = key_input.text().strip()
+            if api_key:
+                self._config.set_litellm_provider_api_key(provider, api_key)
+
+        # 更新模型的 enabled 状态
+        updated_models = []
+        for model in self._config.litellm_models:
+            model_id = model["id"]
+            if model_id in self._ll_model_rows:
+                checkbox, _ = self._ll_model_rows[model_id]
+                model["enabled"] = checkbox.isChecked()
+            updated_models.append(model)
+
+        self._config.update_litellm_config(
+            enabled=ll_enabled,
+            default_model=ll_default_model,
+        )
+        self._config.set_litellm_models(updated_models)
+
         self._hotkey_widget.save()
         self.accept()
+
+    # ------------------------------------------------------------------ litellm model management
+    def _create_model_row(self, model: dict) -> QWidget:
+        """创建一行模型配置（复选框 + 编辑 + 删除按钮）"""
+        row_widget = QWidget()
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 复选框
+        checkbox = QCheckBox(f"{model['name']} ({model['provider']})")
+        checkbox.setChecked(model.get("enabled", False))
+        row_layout.addWidget(checkbox)
+
+        row_layout.addStretch()
+
+        # 编辑按钮
+        edit_btn = QPushButton("编辑")
+        edit_btn.setFixedWidth(50)
+        edit_btn.clicked.connect(lambda: self._edit_model(model["id"]))
+        row_layout.addWidget(edit_btn)
+
+        # 删除按钮
+        delete_btn = QPushButton("删除")
+        delete_btn.setFixedWidth(50)
+        delete_btn.clicked.connect(lambda: self._delete_model(model["id"]))
+        row_layout.addWidget(delete_btn)
+
+        # 保存引用
+        self._ll_model_rows[model["id"]] = (checkbox, row_widget)
+
+        return row_widget
+
+    def _add_from_template(self):
+        """从模板添加模型"""
+        from app.ui.litellm_template_dialog import LiteLLMTemplateDialog
+
+        dialog = LiteLLMTemplateDialog(self._config, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._load()  # 重新加载配置
+
+    def _add_custom_model(self):
+        """添加自定义模型"""
+        from app.ui.litellm_model_edit_dialog import LiteLLMModelEditDialog
+
+        dialog = LiteLLMModelEditDialog(self._config, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._load()
+
+    def _edit_model(self, model_id: str):
+        """编辑模型"""
+        from app.ui.litellm_model_edit_dialog import LiteLLMModelEditDialog
+
+        dialog = LiteLLMModelEditDialog(self._config, model_id=model_id, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._load()
+
+    def _delete_model(self, model_id: str):
+        """删除模型"""
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定要删除模型 {model_id} 吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self._config.remove_litellm_model(model_id)
+                self._load()
+            except ValueError as e:
+                QMessageBox.warning(self, "删除失败", str(e))
