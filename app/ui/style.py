@@ -134,12 +134,16 @@ QStackedWidget, QScrollArea > QWidget > QWidget {
 /* ── Chat scroll area ─────────────────────────────────────────────── */
 #chatScroll { border: none; background: __BG__; }
 #chatScroll QScrollBar:vertical {
-    width: 4px; background: transparent;
+    width: 8px; background: transparent; margin: 2px 1px;
 }
 #chatScroll QScrollBar::handle:vertical {
-    background: __SCROLLBAR__; border-radius: 2px; min-height: 20px;
+    background: __SCROLLBAR__; border-radius: 4px; min-height: 30px;
 }
 #chatScroll QScrollBar::handle:vertical:hover { background: __SCROLLBAR_HOVER__; }
+#chatScroll QScrollBar::add-line:vertical,
+#chatScroll QScrollBar::sub-line:vertical { height: 0; }
+#chatScroll QScrollBar::add-page:vertical,
+#chatScroll QScrollBar::sub-page:vertical { background: transparent; }
 
 /* ── Splitter ─────────────────────────────────────────────────────── */
 QSplitter {

@@ -95,24 +95,14 @@ class TitleBar(QWidget):
             e.accept()
             return
         if e.button() == Qt.MouseButton.LeftButton:
-            # 如果窗口是最大化状态，拖动时先还原
-            if self._win.isMaximized():
-                # 计算还原后鼠标应该在窗口中的相对位置
-                # 保持鼠标在标题栏的相对位置不变
-                global_pos = e.globalPosition().toPoint()
-                # 还原窗口
-                self._win.showNormal()
-                # 调整窗口位置，使鼠标保持在标题栏的相同相对位置
-                local_x = e.position().x()
-                new_x = global_pos.x() - int(local_x)
-                new_y = global_pos.y() - int(e.position().y())
-                self._win.move(new_x, new_y)
-
-            if self._win._snap_mgr is not None:
-                self._win._snap_mgr.cancel_animation()
-            handle = self._win.windowHandle()
-            if handle:
-                handle.startSystemMove()
+            # 最大化状态下不在单击时还原，避免双击最大化后单击立即缩小
+            # 还原操作统一由双击 mouseDoubleClickEvent 触发
+            if not self._win.isMaximized():
+                if self._win._snap_mgr is not None:
+                    self._win._snap_mgr.cancel_animation()
+                handle = self._win.windowHandle()
+                if handle:
+                    handle.startSystemMove()
 
     def _show_context_menu(self, global_pos):
         from PyQt6.QtCore import QPoint

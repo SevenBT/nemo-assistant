@@ -11,13 +11,15 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import (
     QEasingCurve,
+    QEvent,
     QObject,
     QPropertyAnimation,
     QRect,
+    Qt,
     QTimer,
 )
 from PyQt6.QtGui import QCursor
-from PyQt6.QtWidgets import QFrame
+from PyQt6.QtWidgets import QApplication, QFrame
 
 if TYPE_CHECKING:
     from app.ui.main_window import MainWindow
@@ -41,10 +43,13 @@ class EdgeSnapManager(QObject):
         self._anim: QPropertyAnimation | None = None
         self._indicator: QFrame | None = None
         self._enabled = True
+        self._pending_snap_check = False  # deferred check until mouse button released
 
         self._auto_hide_timer = QTimer(self)
         self._auto_hide_timer.setSingleShot(True)
         self._auto_hide_timer.timeout.connect(self._on_auto_hide)
+
+        QApplication.instance().installEventFilter(self)
 
     # ── public properties ───────────────────────────────────────────────
     @property
@@ -66,6 +71,18 @@ class EdgeSnapManager(QObject):
     def check_position(self):
         """Call from ``MainWindow.moveEvent``."""
         if not self._enabled or self._snapped or self._animating:
+            return
+
+        # Don't snap while the user is actively resizing the window
+        resize_filter = getattr(self._window, '_resize_filter', None)
+        if resize_filter is not None and resize_filter.is_resizing:
+            return
+
+        # Don't snap while the left mouse button is held (native drag in progress).
+        # Defer the check until the button is released to avoid conflicting with
+        # startSystemMove() — the released event will retry via the event filter.
+        if QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
+            self._pending_snap_check = True
             return
 
         # 只有窗口足够窄时才触发边缘吸附
@@ -127,6 +144,17 @@ class EdgeSnapManager(QObject):
         self._at_edge = False
         self._unsnapped_geo = None
         self._auto_hide_timer.stop()
+
+    # ── app-level event filter ──────────────────────────────────────────
+    def eventFilter(self, obj, event):
+        """Catch global mouse release to retry a deferred snap check."""
+        if (event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton
+                and self._pending_snap_check):
+            self._pending_snap_check = False
+            # Small delay so the native move operation fully ends first
+            QTimer.singleShot(50, self.check_position)
+        return False
 
     # ── internals: geometry ─────────────────────────────────────────────
     def _is_narrow_enough_to_snap(self) -> bool:

@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QEvent, QObject, Qt
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QScrollBar
 
 if TYPE_CHECKING:
     from app.ui.main_window import MainWindow
@@ -27,6 +27,10 @@ class ResizeFilter(QObject):
         self._start_geo = None
         self._start_pos = None
         self._cursor_shape = None
+
+    @property
+    def is_resizing(self) -> bool:
+        return self._active
 
     def install(self):
         QApplication.instance().installEventFilter(self)
@@ -111,7 +115,12 @@ class ResizeFilter(QObject):
             local = self._win.mapFromGlobal(gpos)
             edges = self._resize_edges(local) if self._win.rect().contains(local) else None
             if edges is not None:
-                self._apply_cursor(edges)
+                # Don't show resize cursor when hovering over a scrollbar
+                widget_under = QApplication.widgetAt(gpos)
+                if widget_under is not None and isinstance(widget_under, QScrollBar):
+                    self._clear_cursor()
+                else:
+                    self._apply_cursor(edges)
             else:
                 self._clear_cursor()
 
@@ -121,6 +130,10 @@ class ResizeFilter(QObject):
                 local = self._win.mapFromGlobal(gpos)
                 edges = self._resize_edges(local) if self._win.rect().contains(local) else None
                 if edges is not None:
+                    # Don't intercept clicks on scrollbars
+                    widget_under = QApplication.widgetAt(gpos)
+                    if widget_under is not None and isinstance(widget_under, QScrollBar):
+                        return False
                     self._active = True
                     self._edges_active = edges
                     self._start_geo = self._win.geometry()
