@@ -41,6 +41,7 @@ OVERLAY_ALPHA = 80
 BORDER_COLOR = QColor("#4A9EFF")
 BORDER_WIDTH = 2
 TOOLBAR_BG = QColor("#2D2D2D")
+RESIZE_MARGIN = 8  # pixels from edge that trigger resize cursor
 
 TOOLBAR_STYLE = f"""
     #snipToolbar, #ocrPanel {{
@@ -106,12 +107,16 @@ class ScreenshotOverlay(QWidget):
         super().__init__(parent)
         self._start = QPoint()
         self._end = QPoint()
-        self._state = "IDLE"  # IDLE | DRAGGING | SELECTED | OCR_EDIT
+        self._state = "IDLE"  # IDLE | DRAGGING | SELECTED | RESIZING | OCR_EDIT
         self._toolbar: QFrame | None = None
         self._ocr_panel: QFrame | None = None
         self._ocr_edit: QTextEdit | None = None
         self._dragging_panel = False
         self._panel_drag_offset = QPoint()
+        # Resize state
+        self._resize_edge: str = ""  # "N","S","E","W","NW","NE","SW","SE"
+        self._resize_start_mouse = QPoint()
+        self._resize_start_rect = QRect()
 
         self._setup_window()
         self._ocr_done.connect(self._on_ocr_ready)
@@ -154,6 +159,41 @@ class ScreenshotOverlay(QWidget):
 
     def _has_selection(self) -> bool:
         return self._normalized_rect().isValid()
+
+    def _edge_at(self, pos: QPoint) -> str:
+        """Return which resize edge/corner *pos* (local coords) is near, or ''."""
+        r = self._normalized_rect_local()
+        if not r.isValid():
+            return ""
+        m = RESIZE_MARGIN
+        x, y = pos.x(), pos.y()
+        on_left   = abs(x - r.left())   <= m
+        on_right  = abs(x - r.right())  <= m
+        on_top    = abs(y - r.top())    <= m
+        on_bottom = abs(y - r.bottom()) <= m
+        in_x = r.left() - m <= x <= r.right()  + m
+        in_y = r.top()  - m <= y <= r.bottom() + m
+
+        if on_top    and on_left:  return "NW"
+        if on_top    and on_right: return "NE"
+        if on_bottom and on_left:  return "SW"
+        if on_bottom and on_right: return "SE"
+        if on_top    and in_x:     return "N"
+        if on_bottom and in_x:     return "S"
+        if on_left   and in_y:     return "W"
+        if on_right  and in_y:     return "E"
+        return ""
+
+    _EDGE_CURSORS = {
+        "N":  Qt.CursorShape.SizeVerCursor,
+        "S":  Qt.CursorShape.SizeVerCursor,
+        "W":  Qt.CursorShape.SizeHorCursor,
+        "E":  Qt.CursorShape.SizeHorCursor,
+        "NW": Qt.CursorShape.SizeFDiagCursor,
+        "SE": Qt.CursorShape.SizeFDiagCursor,
+        "NE": Qt.CursorShape.SizeBDiagCursor,
+        "SW": Qt.CursorShape.SizeBDiagCursor,
+    }
 
     # ── Screen capture ─────────────────────────────────────────────────
 
@@ -574,6 +614,21 @@ class ScreenshotOverlay(QWidget):
                 return
             if self._state == "OCR_EDIT":
                 return  # Block new selection during OCR editing
+
+            # Check for resize handle in SELECTED state
+            if self._state == "SELECTED":
+                edge = self._edge_at(pos)
+                if edge:
+                    self._resize_edge = edge
+                    self._resize_start_mouse = gpos
+                    self._resize_start_rect = self._normalized_rect()
+                    self._state = "RESIZING"
+                    QApplication.setOverrideCursor(self._EDGE_CURSORS[edge])
+                    return
+                # Click inside selection → start new selection
+                if self._normalized_rect_local().contains(pos):
+                    pass  # fall through to start new selection
+
             self._hide_toolbar()
             self._hide_ocr_panel()
             self._start = event.globalPosition().toPoint()
@@ -597,14 +652,65 @@ class ScreenshotOverlay(QWidget):
             y = max(0, min(new_pos.y(), self.height() - ph))
             self._ocr_panel.move(x, y)
             return
+
+        if self._state == "RESIZING":
+            self._do_resize(event.globalPosition().toPoint())
+            return
+
         if self._state == "DRAGGING":
             self._end = event.globalPosition().toPoint()
             self.update()
+            return
+
+        # SELECTED: update cursor based on proximity to edges
+        if self._state == "SELECTED":
+            pos = event.position().toPoint()
+            if not self._is_on_panel(pos):
+                edge = self._edge_at(pos)
+                if edge:
+                    QApplication.setOverrideCursor(self._EDGE_CURSORS[edge])
+                else:
+                    QApplication.restoreOverrideCursor()
+            else:
+                QApplication.restoreOverrideCursor()
+
+    def _do_resize(self, gpos: QPoint):
+        """Update _start/_end based on the active resize edge."""
+        dx = gpos.x() - self._resize_start_mouse.x()
+        dy = gpos.y() - self._resize_start_mouse.y()
+        r = self._resize_start_rect
+
+        # Work with the four sides of the original rect
+        left   = r.left()
+        top    = r.top()
+        right  = r.right()
+        bottom = r.bottom()
+
+        edge = self._resize_edge
+        if "W" in edge: left   = min(left + dx, right - 4)
+        if "E" in edge: right  = max(right + dx, left + 4)
+        if "N" in edge: top    = min(top + dy, bottom - 4)
+        if "S" in edge: bottom = max(bottom + dy, top + 4)
+
+        # Store as global coords (same coordinate space as _start/_end)
+        self._start = QPoint(left, top)
+        self._end   = QPoint(right, bottom)
+        self.update()
+        # Reposition toolbar without recreating it
+        QTimer.singleShot(0, self._position_toolbar)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
             if self._dragging_panel:
                 self._dragging_panel = False
+                return
+            if self._state == "RESIZING":
+                QApplication.restoreOverrideCursor()
+                self._state = "SELECTED"
+                self._resize_edge = ""
+                self.update()
+                # Reposition toolbar after resize
+                QTimer.singleShot(0, self._position_toolbar)
                 return
             if self._state == "DRAGGING":
                 self._end = event.globalPosition().toPoint()
@@ -617,7 +723,12 @@ class ScreenshotOverlay(QWidget):
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key.Key_Escape:
+            QApplication.restoreOverrideCursor()
             self.captured.emit(QPixmap(), "cancel", "", QPoint())
             self.close()
             return
         super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        QApplication.restoreOverrideCursor()
+        super().closeEvent(event)
