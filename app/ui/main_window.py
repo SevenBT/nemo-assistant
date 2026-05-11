@@ -3,12 +3,12 @@ Main floating window.
 
 Layout:
   ┌─ TitleBar ───────────────────────────────────────────────────┐
-  │ [≡] AI Agent ── [聊天] [笔记] [定时] ── [截图] [─] [□] [✕]  │
+  │ [≡] AI Agent ── [聊天] [笔记] [工坊] ── [截图] [─] [□] [✕]  │
   ├──────────────────────────────────────────────────────────────┤
   │ QStackedWidget                                               │
   │  page 0: SessionPanel | ChatWidget + InputWidget             │
   │  page 1: NotesPanel                                          │
-  │  page 2: SchedulerPanel                                      │
+  │  page 2: ToolboxPanel                                         │
   └──────────────────────────────────────────────────────────────┘
 """
 import json
@@ -43,7 +43,7 @@ from app.ui.notes_dialog import NotesPanel
 from app.ui.pin_window import PinWindow
 from app.core.hotkey_manager import HotkeyManager
 from app.ui.resize_filter import ResizeFilter
-from app.ui.scheduler_dialog import SchedulerPanel
+from app.ui.toolbox_panel import ToolboxPanel
 from app.ui.screenshot_overlay import ScreenshotOverlay
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_dialog import SettingsDialog
@@ -139,7 +139,7 @@ class MainWindow(QWidget):
         self._title_bar = TitleBar(self)
         root.addWidget(self._title_bar)
 
-        # stacked body: page 0=chat, page 1=notes, page 2=scheduler
+        # stacked body: page 0=chat, page 1=notes, page 2=toolbox
         self._stack = QStackedWidget()
 
         # ── page 0: chat view ─────────────────────────────────────────
@@ -201,9 +201,9 @@ class MainWindow(QWidget):
         self._notes_panel.note_updated.connect(self._on_note_updated)
         self._stack.addWidget(self._notes_panel)  # index 1
 
-        # ── page 2: scheduler panel ───────────────────────────────────
-        self._scheduler_panel = SchedulerPanel(self._scheduler)
-        self._stack.addWidget(self._scheduler_panel)  # index 2
+        # ── page 2: toolbox panel ────────────────────────────────────
+        self._toolbox_panel = ToolboxPanel(self._tools, self._config)
+        self._stack.addWidget(self._toolbox_panel)  # index 2
 
         root.addWidget(self._stack, 1)
         self.setMinimumSize(320, 420)

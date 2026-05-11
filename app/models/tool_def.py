@@ -29,6 +29,11 @@ class ToolDefinition:
     script_path: str
     parameters: dict = field(default_factory=dict)  # param_name -> ParameterDef
     tool_dir: str = ""
+    enabled: bool = True
+    dependencies: list = field(default_factory=list)  # e.g. ["requests>=2.28", "beautifulsoup4"]
+    version: str = ""
+    author: str = ""
+    is_builtin: bool = False  # True for built-in tools (read-only in UI)
 
     def to_openai_function(self) -> dict:
         properties = {}

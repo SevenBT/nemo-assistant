@@ -1,13 +1,13 @@
-import io
+"""Tool discovery, parameter resolution, and subprocess-based execution."""
 import json
-import runpy
+import os
+import subprocess
 import sys
-import threading
-from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Optional
 
-from app.core.config import TOOLS_DIR, ConfigManager
+from app.core.config import TOOLS_DIR, USER_TOOLS_DIR, ConfigManager
+from app.core.tool_deps import ToolDependencyManager
 from app.models.tool_def import ParameterDef, ToolDefinition
 
 _TOOL_TIMEOUT = 60  # seconds
@@ -17,27 +17,31 @@ class ToolManager:
     def __init__(self, config: ConfigManager):
         self._config = config
         self._tools: dict[str, ToolDefinition] = {}
-        # Serializes sys.stdin/stdout redirection across concurrent tool executions
-        # (e.g. a scheduler-triggered tool running while a chat tool is in progress).
-        self._exec_lock = threading.Lock()
+        self._deps = ToolDependencyManager()
         self._discover()
 
     # ------------------------------------------------------------------ discovery
     def _discover(self):
-        if not TOOLS_DIR.exists():
+        # Builtin tools: tools/ (read-only, always enabled)
+        self._discover_dir(TOOLS_DIR, is_builtin=True)
+        # User tools: data/user_tools/ (editable, can be toggled)
+        self._discover_dir(USER_TOOLS_DIR, is_builtin=False)
+
+    def _discover_dir(self, base: Path, is_builtin: bool):
+        if not base.exists():
             return
-        for tool_dir in TOOLS_DIR.iterdir():
+        for tool_dir in base.iterdir():
             if not tool_dir.is_dir():
                 continue
             manifest_path = tool_dir / "manifest.json"
             if not manifest_path.exists():
                 continue
             try:
-                self._load_tool(tool_dir, manifest_path)
+                self._load_tool(tool_dir, manifest_path, is_builtin=is_builtin)
             except Exception as e:
                 print(f"[ToolManager] Skip {tool_dir.name}: {e}")
 
-    def _load_tool(self, tool_dir: Path, manifest_path: Path):
+    def _load_tool(self, tool_dir: Path, manifest_path: Path, is_builtin: bool = False):
         with open(manifest_path, encoding="utf-8") as f:
             manifest = json.load(f)
 
@@ -59,15 +63,23 @@ class ToolManager:
                 items=pdata.get("items"),
             )
 
+        # Builtin tools are always enabled; user tools respect saved state
+        enabled = True if is_builtin else self._config.get_tool_enabled(manifest["name"])
+
         tool = ToolDefinition(
             name=manifest["name"],
             description=manifest["description"],
             script_path=str(script_path),
             parameters=params,
             tool_dir=str(tool_dir),
+            enabled=enabled,
+            dependencies=manifest.get("dependencies", []),
+            version=manifest.get("version", ""),
+            author=manifest.get("author", ""),
+            is_builtin=is_builtin,
         )
         self._tools[tool.name] = tool
-        print(f"[ToolManager] Loaded: {tool.name}")
+        print(f"[ToolManager] Loaded: {tool.name} (enabled={enabled})")
 
     def reload(self):
         self._tools.clear()
@@ -81,7 +93,7 @@ class ToolManager:
         return self._tools.get(name)
 
     def get_openai_functions(self) -> list[dict]:
-        return [t.to_openai_function() for t in self._tools.values()]
+        return [t.to_openai_function() for t in self._tools.values() if t.enabled]
 
     def get_manual_params(self, tool_name: str) -> list[str]:
         """Return parameter names that require manual user input."""
@@ -89,6 +101,21 @@ class ToolManager:
         if not tool:
             return []
         return [n for n, p in tool.parameters.items() if p.source == "manual"]
+
+    def set_tool_enabled(self, tool_name: str, enabled: bool):
+        """Toggle tool enabled state and persist."""
+        tool = self._tools.get(tool_name)
+        if tool:
+            tool.enabled = enabled
+        self._config.set_tool_enabled(tool_name, enabled)
+
+    def get_config_params(self, tool_name: str) -> dict:
+        """Return config-source parameter values for the given tool."""
+        return self._config.get_tool_params(tool_name)
+
+    @property
+    def deps_manager(self) -> ToolDependencyManager:
+        return self._deps
 
     # ------------------------------------------------------------------ param resolution
     def resolve_params(
@@ -117,77 +144,84 @@ class ToolManager:
 
     # ------------------------------------------------------------------ execution
     def execute(self, tool_name: str, params: dict) -> dict:
-        """Run the tool script in-process using the bundled Python interpreter.
+        """Run the tool script in a subprocess for isolation.
 
-        The script is executed via runpy inside a daemon thread so the calling
-        thread can enforce a timeout.  stdin/stdout are redirected per-call so
-        the existing script API (read JSON from stdin, print JSON to stdout) is
-        preserved without any subprocess overhead.
+        The script receives JSON on stdin and must print a JSON result as its
+        last stdout line.  Same protocol as before — existing tools need no changes.
         """
         tool = self._tools.get(tool_name)
         if not tool:
             return {"status": "error", "data": {"message": f"Tool not found: {tool_name}"}}
 
-        result_holder: list[dict] = []
+        # Ensure dependencies are installed
+        if tool.dependencies:
+            ok, err = self._deps.ensure_deps(tool.dependencies)
+            if not ok:
+                return {"status": "error", "data": {"message": f"依赖安装失败: {err}"}}
 
-        def _run():
-            result_holder.append(self._exec_script(tool, params))
+        return self._exec_subprocess(tool, params)
 
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
-        t.join(timeout=_TOOL_TIMEOUT)
-
-        if t.is_alive():
-            return {
-                "status": "error",
-                "data": {"message": f"Execution timed out ({_TOOL_TIMEOUT}s)"},
-            }
-        if result_holder:
-            return result_holder[0]
-        return {"status": "success", "data": {}}
-
-    def _exec_script(self, tool: ToolDefinition, params: dict) -> dict:
-        """Execute *tool.script_path* in-process and return its JSON result."""
+    def _exec_subprocess(self, tool: ToolDefinition, params: dict) -> dict:
+        """Execute tool script in an isolated subprocess."""
         stdin_payload = json.dumps(
             {"params": params, "context": {}}, ensure_ascii=False
         )
-        stdout_buf = io.StringIO()
-        stdin_buf = io.StringIO(stdin_payload)
 
-        # The lock serializes sys.stdin/stdout/path mutations so a scheduler-
-        # triggered tool and a chat tool can't clobber each other's streams.
-        with self._exec_lock:
-            script_dir = str(Path(tool.script_path).parent)
-            path_inserted = script_dir not in sys.path
-            if path_inserted:
-                sys.path.insert(0, script_dir)
+        env = os.environ.copy()
+        # Build PYTHONPATH: isolated site-packages + tool's own directory
+        extra_paths = [
+            str(self._deps.site_packages_path),
+            tool.tool_dir,
+        ]
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join(
+            extra_paths + ([existing] if existing else [])
+        )
 
-            old_stdin = sys.stdin
-            sys.stdin = stdin_buf
-            try:
-                with redirect_stdout(stdout_buf):
-                    runpy.run_path(tool.script_path, run_name="__main__")
-            except SystemExit:
-                pass  # scripts may call sys.exit(0) to signal clean completion
-            except Exception as e:
-                return {"status": "error", "data": {"message": str(e)}}
-            finally:
-                sys.stdin = old_stdin
-                if path_inserted:
-                    try:
-                        sys.path.remove(script_dir)
-                    except ValueError:
-                        pass
+        try:
+            result = subprocess.run(
+                [sys.executable, tool.script_path],
+                input=stdin_payload,
+                capture_output=True,
+                text=True,
+                timeout=_TOOL_TIMEOUT,
+                env=env,
+                cwd=tool.tool_dir,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "status": "error",
+                "data": {"message": f"执行超时 ({_TOOL_TIMEOUT}s)"},
+            }
+        except Exception as e:
+            return {"status": "error", "data": {"message": str(e)}}
 
-        output = stdout_buf.getvalue().strip()
-        if not output:
+        stdout = result.stdout.strip()
+        stderr = result.stderr.strip()
+
+        # Non-zero exit with no stdout — report stderr
+        if result.returncode != 0 and not stdout:
+            return {
+                "status": "error",
+                "data": {"message": stderr or f"Exit code {result.returncode}"},
+            }
+
+        if not stdout:
             return {"status": "success", "data": {}}
 
-        last_line = output.splitlines()[-1]
+        last_line = stdout.splitlines()[-1]
         try:
-            return json.loads(last_line)
+            parsed = json.loads(last_line)
+            # Attach stderr as debug info if present
+            if stderr and isinstance(parsed.get("data"), dict):
+                parsed["data"].setdefault("_stderr", stderr)
+            return parsed
         except json.JSONDecodeError as e:
             return {
                 "status": "error",
-                "data": {"message": f"Invalid JSON output: {e}", "raw": output},
+                "data": {
+                    "message": f"Invalid JSON output: {e}",
+                    "raw": stdout[-500:],
+                    "_stderr": stderr[-500:] if stderr else "",
+                },
             }

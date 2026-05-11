@@ -43,7 +43,7 @@ class TitleBar(QWidget):
         for i, (text, tip) in enumerate([
             ("聊天", "AI 对话"),
             ("笔记", "笔记管理"),
-            ("定时", "定时任务"),
+            ("工坊", "工具工坊"),
         ]):
             btn = QPushButton(text)
             btn.setObjectName("viewBtn")

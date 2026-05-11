@@ -510,6 +510,14 @@ QMenu::separator {
 #tagFilterList::item:selected { background: __SELECTED__; color: __TEXT__; }
 #tagFilterList::item:hover:!selected { background: __SURFACE_RAISED__; }
 
+/* ── Toolbox panel ───────────────────────────────────────────────── */
+#toolCardName { color: __TEXT__; }
+#toolCardDesc { color: __TEXT_MUTED__; }
+#toolToggleBtn {
+    border: none; border-radius: 12px;
+    font-size: 10px; font-weight: 600;
+}
+
 /* ── Size grip (unused) ───────────────────────────────────────────── */
 #sizeGrip { background: transparent; width: 14px; height: 14px; }
 

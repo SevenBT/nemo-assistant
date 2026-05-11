@@ -66,6 +66,9 @@ NOTES_DIR = DATA_DIR / "notes"
 NOTES_IMAGES_DIR = NOTES_DIR / "images"
 TRASH_DIR = NOTES_DIR / "trash"
 TOOLS_DIR = BASE_DIR / "tools"
+USER_TOOLS_DIR = DATA_DIR / "user_tools"
+TOOL_RUNTIME_DIR = DATA_DIR / "tool_runtime"
+TOOL_SITE_PACKAGES = TOOL_RUNTIME_DIR / "site-packages"
 
 DEFAULT_APP_CONFIG: dict = {
     "hotkeys": {
@@ -152,7 +155,7 @@ class ConfigManager:
             self._write(CONFIG_DIR / "app_config.json", self._app)
     # ------------------------------------------------------------------ dirs
     def _ensure_dirs(self):
-        for d in [CONFIG_DIR, DATA_DIR, SESSIONS_DIR, NOTES_DIR, NOTES_IMAGES_DIR, TRASH_DIR, TOOLS_DIR]:
+        for d in [CONFIG_DIR, DATA_DIR, SESSIONS_DIR, NOTES_DIR, NOTES_IMAGES_DIR, TRASH_DIR, TOOLS_DIR, USER_TOOLS_DIR, TOOL_RUNTIME_DIR, TOOL_SITE_PACKAGES]:
             d.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ io
@@ -353,6 +356,14 @@ class ConfigManager:
 
     def update_hotkeys(self, updates: dict):
         self._app.setdefault("hotkeys", {}).update(updates)
+        self._write(CONFIG_DIR / "app_config.json", self._app)
+
+    # ------------------------------------------------------------------ tool states
+    def get_tool_enabled(self, tool_name: str) -> bool:
+        return self._app.get("tool_states", {}).get(tool_name, True)
+
+    def set_tool_enabled(self, tool_name: str, enabled: bool):
+        self._app.setdefault("tool_states", {})[tool_name] = enabled
         self._write(CONFIG_DIR / "app_config.json", self._app)
 
     def update_tools_config(self, updates: dict):
