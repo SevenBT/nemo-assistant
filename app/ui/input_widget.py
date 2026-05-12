@@ -1,6 +1,7 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QTextEdit, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QTextEdit, QWidget
+from qfluentwidgets import PrimaryPushButton, FluentIcon
 
 
 class InputWidget(QWidget):
@@ -13,11 +14,10 @@ class InputWidget(QWidget):
 
     def _build(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 8)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(8)
 
         self._edit = _TextEdit(self)
-        self._edit.setObjectName("inputEdit")
         self._edit.setPlaceholderText("输入消息… (Enter 发送，Shift+Enter 换行)")
         self._edit.setMinimumHeight(40)
         self._edit.setMaximumHeight(120)
@@ -25,9 +25,9 @@ class InputWidget(QWidget):
         self._edit.submitted.connect(self._submit)
         layout.addWidget(self._edit)
 
-        self._btn = QPushButton("发送")
-        self._btn.setObjectName("sendBtn")
-        self._btn.setFixedWidth(64)
+        self._btn = PrimaryPushButton(FluentIcon.SEND, "发送")
+        self._btn.setFixedWidth(80)
+        self._btn.setFixedHeight(36)
         self._btn.clicked.connect(self._submit)
         layout.addWidget(self._btn)
 

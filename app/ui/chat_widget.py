@@ -1,14 +1,16 @@
+import markdown as _md
+
 from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QScrollArea,
     QSizePolicy,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import IndeterminateProgressBar, SmoothScrollArea
 
 from app.models.message import Message, MessageRole
 from app.ui.tool_card import ToolCard
@@ -16,55 +18,25 @@ from app.ui.file_card_widget import FileCardWidget
 
 
 class TypingIndicator(QWidget):
-    """Three pulsing dots animation indicating AI is thinking."""
+    """Fluent-style progress bar indicating AI is thinking."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("typingIndicator")
-        self.setFixedHeight(36)
-        self._build()
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._animate)
-        self._step = 0
+        self.setFixedHeight(24)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 4, 16, 4)
 
-    def _build(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 10, 16, 10)
-        layout.setSpacing(5)
-        layout.addStretch()
-
-        self._dots: list[QWidget] = []
-        for i in range(3):
-            dot = QWidget()
-            dot.setFixedSize(8, 8)
-            dot.setObjectName("typingDot")
-            layout.addWidget(dot)
-            self._dots.append(dot)
-        layout.addStretch()
+        self._bar = IndeterminateProgressBar()
+        self._bar.setFixedHeight(3)
+        layout.addWidget(self._bar)
 
     def start(self):
-        self._step = 0
-        self._timer.start(120)
+        self._bar.start()
         self.show()
 
     def stop(self):
-        self._timer.stop()
+        self._bar.stop()
         self.hide()
-
-    def _animate(self):
-        """Pulse each dot sequentially."""
-        for i, dot in enumerate(self._dots):
-            phase = (self._step - i) % 3
-            if phase == 0:
-                opacity = 1.0
-            elif phase == 1:
-                opacity = 0.4
-            else:
-                opacity = 0.2
-            dot.setStyleSheet(
-                f"background: rgba(120, 120, 140, {opacity}); border-radius: 4px;"
-            )
-        self._step += 1
 
 
 class _MessageText(QTextBrowser):
@@ -82,7 +54,14 @@ class _MessageText(QTextBrowser):
         self.document().setDocumentMargin(2)
 
     def set_text(self, text: str):
-        self.setPlainText(text)
+        if text:
+            html = _md.markdown(
+                text,
+                extensions=["fenced_code", "tables", "nl2br"],
+            )
+            self.setHtml(html)
+        else:
+            self.setPlainText("")
         self._fit()
 
     def _fit(self):
@@ -106,8 +85,8 @@ class MessageBubble(QFrame):
 
     AI bubbles support inline tool cards (ChatGPT-style):
       [AI label]
-      [ToolCard …]  ← collapsed by default, one per tool call
-      [answer text] ← only the final response text
+      [ToolCard ...]  <- collapsed by default, one per tool call
+      [answer text]   <- only the final response text
     """
 
     def __init__(self, message: Message, parent=None):
@@ -123,14 +102,15 @@ class MessageBubble(QFrame):
 
     def _build(self, message: Message):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
 
         role_label = QLabel("你" if self._is_user else "AI")
         role_label.setObjectName("userLabel" if self._is_user else "aiLabel")
-        layout.addWidget(role_label)
+        role_label.setFixedHeight(20)
+        layout.addWidget(role_label, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        # Attachments section — user bubbles only
+        # Attachments section -- user bubbles only
         if self._is_user and message.attachments:
             attachments_widget = QWidget()
             attachments_widget.setObjectName("attachmentsContainer")
@@ -144,13 +124,13 @@ class MessageBubble(QFrame):
 
             layout.addWidget(attachments_widget)
 
-        # Tool cards section — AI bubbles only
+        # Tool cards section -- AI bubbles only
         if not self._is_user:
             self._tools_widget = QWidget()
             self._tools_widget.setObjectName("toolsContainer")
             self._tools_layout = QVBoxLayout(self._tools_widget)
             self._tools_layout.setContentsMargins(0, 0, 0, 0)
-            self._tools_layout.setSpacing(3)
+            self._tools_layout.setSpacing(4)
             layout.addWidget(self._tools_widget)
             # Populate existing tool calls (used by load_session)
             for tc in message.tool_calls:
@@ -164,14 +144,14 @@ class MessageBubble(QFrame):
             self._content.hide()
         layout.addWidget(self._content)
 
-    # ── internal ────────────────────────────────────────────────────────
+    # -- internal --------------------------------------------------------
 
     def _insert_tool_card(self, call_id: str, name: str, params: dict, result=None):
         card = ToolCard(name, params, result)
         self._tool_cards[call_id] = card
         self._tools_layout.addWidget(card)
 
-    # ── public API ───────────────────────────────────────────────────────
+    # -- public API -------------------------------------------------------
 
     def add_tool_card(self, call_id: str, name: str, params: dict):
         """Append a pending tool card during live streaming."""
@@ -215,16 +195,17 @@ class ChatWidget(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
 
-        self._scroll = QScrollArea()
+        self._scroll = SmoothScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setObjectName("chatScroll")
+        self._scroll.viewport().setStyleSheet("background: transparent;")
 
         self._inner = QWidget()
         self._layout = QVBoxLayout(self._inner)
         self._layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._layout.setSpacing(8)
-        self._layout.setContentsMargins(10, 10, 10, 10)
+        self._layout.setSpacing(10)
+        self._layout.setContentsMargins(12, 12, 12, 12)
 
         self._scroll.setWidget(self._inner)
         root.addWidget(self._scroll)
@@ -234,7 +215,7 @@ class ChatWidget(QWidget):
         root.addWidget(self._typing)
         self._typing.hide()
 
-    # ── public ──────────────────────────────────────────────────────────
+    # -- public ----------------------------------------------------------
 
     def add_message(self, message: Message) -> MessageBubble:
         bubble = MessageBubble(message)
@@ -263,8 +244,8 @@ class ChatWidget(QWidget):
 
         Consecutive assistant messages (produced by multi-turn tool loops) are
         merged into ONE bubble:
-          - Tool calls from every message in the chain → tool cards
-          - Content of the LAST message with text → answer text
+          - Tool calls from every message in the chain -> tool cards
+          - Content of the LAST message with text -> answer text
         This prevents intermediate "thinking" text and empty tool-call
         placeholders from appearing as separate reply boxes.
         """
@@ -332,7 +313,7 @@ class ChatWidget(QWidget):
         """Hide typing indicator."""
         self._typing.stop()
 
-    # ── drag and drop ───────────────────────────────────────────────────
+    # -- drag and drop ---------------------------------------------------
 
     def dragEnterEvent(self, event):
         """Accept drag events with file URLs."""
@@ -365,7 +346,6 @@ class ChatWidget(QWidget):
                 logger.info(f"成功解析文件: {attachment.file_name}")
             except FileParseError as e:
                 logger.warning(f"解析文件失败: {e}")
-                # TODO: Show error notification to user
                 continue
 
         if attachments:

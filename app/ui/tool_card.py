@@ -5,10 +5,14 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QTextEdit,
     QVBoxLayout,
     QWidget,
+)
+from qfluentwidgets import (
+    CaptionLabel,
+    FluentIcon,
+    TransparentPushButton,
 )
 
 
@@ -36,13 +40,13 @@ class ToolCard(QFrame):
 
         self._status_label = QLabel()
         self._status_label.setTextFormat(Qt.TextFormat.RichText)
+        self._status_label.setObjectName("detailLabel")
         self._refresh_status()
         header.addWidget(self._status_label)
         header.addStretch()
 
-        self._toggle_btn = QPushButton("展开")
-        self._toggle_btn.setObjectName("toggleBtn")
-        self._toggle_btn.setFixedSize(54, 22)
+        self._toggle_btn = TransparentPushButton("展开")
+        self._toggle_btn.setFixedSize(60, 24)
         self._toggle_btn.clicked.connect(self._toggle)
         header.addWidget(self._toggle_btn)
         root.addLayout(header)
@@ -53,7 +57,7 @@ class ToolCard(QFrame):
         detail_layout.setContentsMargins(0, 4, 0, 0)
         detail_layout.setSpacing(4)
 
-        params_label = QLabel("参数:")
+        params_label = CaptionLabel("参数:")
         params_label.setObjectName("detailLabel")
         detail_layout.addWidget(params_label)
 
@@ -64,7 +68,7 @@ class ToolCard(QFrame):
         params_view.setObjectName("detailText")
         detail_layout.addWidget(params_view)
 
-        self._result_label = QLabel("返回:")
+        self._result_label = CaptionLabel("返回:")
         self._result_label.setObjectName("detailLabel")
         detail_layout.addWidget(self._result_label)
 

@@ -47,7 +47,8 @@ from app.ui.toolbox_panel import ToolboxPanel
 from app.ui.screenshot_overlay import ScreenshotOverlay
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_dialog import SettingsDialog
-from app.ui.style import THEMES, generate_stylesheet
+from app.ui.style import THEMES, apply_theme, enable_mica
+from qfluentwidgets import Theme
 from app.ui.title_bar import TitleBar
 from app.ui.toast import show_toast
 from app.ui.tray_manager import TrayManager
@@ -104,11 +105,22 @@ class MainWindow(QWidget):
         self._init_sessions()
         self._resize_filter = ResizeFilter(self)
         self._resize_filter.install()
+        self._apply_mica_effect()
         self._snap_mgr = EdgeSnapManager(self)
         self._snap_mgr.set_enabled(self._config.window_config.get("edge_snap", True))
         self._notify_signal.connect(self._on_notify)
         self._setup_hotkeys()
         self._restore_pinned_notes()
+
+    # ──────────────────────────────────────────── Mica / Acrylic
+    def _apply_mica_effect(self):
+        """Enable Windows 11 Mica backdrop on the native window."""
+        handle = self.windowHandle()
+        if handle is not None:
+            hwnd = int(handle.winId())
+            theme = THEMES.get(self._config.theme, THEMES["classic"])
+            dark = theme["mode"] == Theme.DARK
+            enable_mica(hwnd, dark=dark)
 
     # ──────────────────────────────────────────── window setup
     def _build_window(self):
@@ -713,8 +725,8 @@ class MainWindow(QWidget):
 
     @pyqtSlot(str, str)
     def _on_notify(self, title: str, body: str):
-        colors = THEMES.get(self._config.theme, THEMES["classic"])
-        show_toast(title, body, accent=colors["accent"])
+        theme = THEMES.get(self._config.theme, THEMES["classic"])
+        show_toast(title, body, accent=theme["accent"])
 
     # ──────────────────────────────────────────── dialogs / window actions
     def _open_settings(self):
@@ -722,14 +734,19 @@ class MainWindow(QWidget):
         dlg = SettingsDialog(self._config, self._hotkey_mgr, self)
         if dlg.exec():
             wcfg = self._config.window_config
-            self.setWindowOpacity(wcfg.get("opacity", 0.97))
+            new_opacity = wcfg.get("opacity", 0.97)
+            self.setWindowOpacity(new_opacity)
             flag = Qt.WindowType.WindowStaysOnTopHint
             self.setWindowFlag(flag, wcfg.get("always_on_top", True))
             if self._snap_mgr is not None:
                 self._snap_mgr.set_enabled(wcfg.get("edge_snap", True))
             new_theme = self._config.theme
             if new_theme != old_theme:
-                QApplication.instance().setStyleSheet(generate_stylesheet(new_theme))
+                custom_qss = apply_theme(new_theme, new_opacity)
+            else:
+                custom_qss = apply_theme(new_theme, new_opacity)
+            QApplication.instance().setStyleSheet(custom_qss)
+            self._apply_mica_effect()
             self.show()
 
     def _switch_view(self, index: int):

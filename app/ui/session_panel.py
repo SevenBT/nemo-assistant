@@ -1,24 +1,31 @@
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
-    QLabel,
-    QListWidget,
     QListWidgetItem,
-    QMenu,
-    QPushButton,
     QVBoxLayout,
     QWidget,
+)
+from qfluentwidgets import (
+    Action,
+    CaptionLabel,
+    FluentIcon,
+    LineEdit,
+    ListWidget,
+    PrimaryPushButton,
+    RoundMenu,
+    TransparentToolButton,
+    ToolTipFilter,
+    ToolTipPosition,
+    MessageBox,
 )
 
 from app.models.session import Session
 
 
 class SessionPanel(QFrame):
-    """Left sidebar – inherits QFrame so QSS background renders correctly."""
+    """Left sidebar – session list with Fluent Design components."""
 
     session_selected = pyqtSignal(str)
     session_create_requested = pyqtSignal()
@@ -37,28 +44,32 @@ class SessionPanel(QFrame):
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(8, 10, 8, 8)
+        layout.setSpacing(8)
 
         # header row
         header = QHBoxLayout()
-        title = QLabel("会话")
+        header.setSpacing(6)
+        title = CaptionLabel("会话")
         title.setObjectName("panelTitle")
         header.addWidget(title)
         header.addStretch()
-        new_btn = QPushButton("＋ 新建")
-        new_btn.setObjectName("newSessionBtn")
-        new_btn.setFixedHeight(26)
+
+        new_btn = TransparentToolButton(FluentIcon.ADD)
+        new_btn.setFixedSize(30, 30)
         new_btn.setToolTip("新建会话")
+        new_btn.installEventFilter(
+            ToolTipFilter(new_btn, showDelay=400, position=ToolTipPosition.BOTTOM)
+        )
         new_btn.clicked.connect(self.session_create_requested)
         header.addWidget(new_btn)
         layout.addLayout(header)
 
-        # list – internal drag-drop for reordering
-        self._list = QListWidget()
+        # list – Fluent ListWidget with drag-drop for reordering
+        self._list = ListWidget()
         self._list.setObjectName("sessionList")
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._list.currentItemChanged.connect(self._on_change)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._context_menu)
@@ -137,29 +148,43 @@ class SessionPanel(QFrame):
             return
         sid = item.data(Qt.ItemDataRole.UserRole)
         pinned = item.data(Qt.ItemDataRole.UserRole + 1)
-        menu = QMenu(self)
 
-        pin_act = QAction("取消置顶" if pinned else "置顶", self)
-        pin_act.triggered.connect(lambda: self.session_pin_requested.emit(sid, not pinned))
-        menu.addAction(pin_act)
+        menu = RoundMenu(parent=self)
 
-        settings_act = QAction("会话设置", self)
-        settings_act.triggered.connect(lambda: self.session_settings_requested.emit(sid))
-        menu.addAction(settings_act)
+        pin_icon = FluentIcon.UNPIN if pinned else FluentIcon.PIN
+        pin_text = "取消置顶" if pinned else "置顶"
+        menu.addAction(Action(pin_icon, pin_text,
+                              triggered=lambda: self.session_pin_requested.emit(sid, not pinned)))
 
+        menu.addAction(Action(FluentIcon.SETTING, "会话设置",
+                              triggered=lambda: self.session_settings_requested.emit(sid)))
         menu.addSeparator()
 
-        rename_act = QAction("重命名", self)
-        rename_act.triggered.connect(lambda: self._do_rename(sid, item))
-        menu.addAction(rename_act)
+        menu.addAction(Action(FluentIcon.EDIT, "重命名",
+                              triggered=lambda: self._do_rename(sid, item)))
 
-        del_act = QAction("删除", self)
-        del_act.triggered.connect(lambda: self.session_delete_requested.emit(sid))
-        menu.addAction(del_act)
+        menu.addAction(Action(FluentIcon.DELETE, "删除",
+                              triggered=lambda: self.session_delete_requested.emit(sid)))
 
         menu.exec(self._list.mapToGlobal(pos))
 
     def _do_rename(self, sid: str, item: QListWidgetItem):
-        text, ok = QInputDialog.getText(self, "重命名", "新名称:", text=item.toolTip())
-        if ok and text.strip():
-            self.session_rename_requested.emit(sid, text.strip())
+        from qfluentwidgets import MessageBoxBase, SubtitleLabel, LineEdit
+
+        class RenameBox(MessageBoxBase):
+            def __init__(self, title: str, parent=None):
+                super().__init__(parent)
+                self.titleLabel = SubtitleLabel("重命名会话")
+                self.viewLayout.addWidget(self.titleLabel)
+                self.lineEdit = LineEdit()
+                self.lineEdit.setText(title)
+                self.lineEdit.selectAll()
+                self.viewLayout.addWidget(self.lineEdit)
+                self.yesButton.setText("确定")
+                self.cancelButton.setText("取消")
+
+        box = RenameBox(item.toolTip(), self.window())
+        if box.exec():
+            text = box.lineEdit.text().strip()
+            if text:
+                self.session_rename_requested.emit(sid, text)

@@ -1,5 +1,5 @@
 """
-待办 Checklist 编辑器。
+待办 Checklist 编辑器 - Fluent Design 风格。
 
 每行是一个可勾选的任务项，内容以纯文本存储：
   [ ] 未完成任务
@@ -8,13 +8,17 @@
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QScrollArea,
     QHBoxLayout,
-    QCheckBox,
-    QLineEdit,
-    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+from qfluentwidgets import (
+    CheckBox,
+    LineEdit,
+    PushButton,
+    SmoothScrollArea,
+    TransparentToolButton,
+    FluentIcon,
 )
 
 
@@ -23,7 +27,7 @@ class _CheckItem(QWidget):
 
     changed = pyqtSignal()
     delete_requested = pyqtSignal(object)  # self
-    enter_pressed = pyqtSignal(object)     # self，按 Enter 时在下方插入新行
+    enter_pressed = pyqtSignal(object)     # self
 
     def __init__(self, text: str = "", checked: bool = False, parent=None):
         super().__init__(parent)
@@ -31,20 +35,19 @@ class _CheckItem(QWidget):
         layout.setContentsMargins(0, 2, 0, 2)
         layout.setSpacing(6)
 
-        self._checkbox = QCheckBox()
+        self._checkbox = CheckBox()
         self._checkbox.setChecked(checked)
         self._checkbox.stateChanged.connect(self._on_state_changed)
         layout.addWidget(self._checkbox)
 
-        self._edit = QLineEdit(text)
-        self._edit.setObjectName("checkItemEdit")
-        self._edit.textChanged.connect(self.changed)
+        self._edit = LineEdit()
+        self._edit.setText(text)
+        self._edit.textChanged.connect(lambda _: self.changed.emit())
         self._edit.returnPressed.connect(lambda: self.enter_pressed.emit(self))
         layout.addWidget(self._edit, 1)
 
-        self._del_btn = QPushButton("×")
-        self._del_btn.setObjectName("checkItemDelBtn")
-        self._del_btn.setFixedSize(20, 20)
+        self._del_btn = TransparentToolButton(FluentIcon.DELETE)
+        self._del_btn.setFixedSize(24, 24)
         self._del_btn.clicked.connect(lambda: self.delete_requested.emit(self))
         layout.addWidget(self._del_btn)
 
@@ -56,9 +59,7 @@ class _CheckItem(QWidget):
 
     def _update_style(self):
         if self._checkbox.isChecked():
-            self._edit.setStyleSheet(
-                "color: #9CA3AF; text-decoration: line-through;"
-            )
+            self._edit.setStyleSheet("color: #9CA3AF; text-decoration: line-through;")
         else:
             self._edit.setStyleSheet("")
 
@@ -79,13 +80,7 @@ class _CheckItem(QWidget):
 
 
 class ChecklistEditor(QWidget):
-    """
-    Checklist 编辑器。
-
-    内容格式（纯文本，每行一项）：
-      [ ] 未完成
-      [x] 已完成
-    """
+    """Checklist 编辑器 - Fluent Design 风格。"""
 
     content_changed = pyqtSignal()
 
@@ -99,11 +94,9 @@ class ChecklistEditor(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(4)
 
-        # 滚动区域
-        scroll = QScrollArea()
+        scroll = SmoothScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setObjectName("checklistScroll")
 
         self._container = QWidget()
         self._layout = QVBoxLayout(self._container)
@@ -114,9 +107,7 @@ class ChecklistEditor(QWidget):
         scroll.setWidget(self._container)
         outer.addWidget(scroll, 1)
 
-        # 底部"添加项目"按钮
-        self._add_btn = QPushButton("+ 添加项目")
-        self._add_btn.setObjectName("checklistAddBtn")
+        self._add_btn = PushButton(FluentIcon.ADD, "添加项目")
         self._add_btn.clicked.connect(lambda: self._add_item("", False, focus=True))
         outer.addWidget(self._add_btn)
 
@@ -126,7 +117,6 @@ class ChecklistEditor(QWidget):
         item.delete_requested.connect(self._remove_item)
         item.enter_pressed.connect(self._on_enter_pressed)
 
-        # stretch 始终在最后，所以插入位置是 count-1
         stretch_index = self._layout.count() - 1
 
         if after is not None:
@@ -153,10 +143,9 @@ class ChecklistEditor(QWidget):
     def _on_enter_pressed(self, item: _CheckItem):
         self._add_item("", False, focus=True, after=item)
 
-    # ── 公开接口 ──────────────────────────────────────────────────────────
+    # -- public API -------------------------------------------------------
 
     def get_content(self) -> str:
-        """返回纯文本格式内容。"""
         lines = []
         for item in self._items:
             prefix = "[x]" if item.is_checked() else "[ ]"
@@ -164,8 +153,6 @@ class ChecklistEditor(QWidget):
         return "\n".join(lines)
 
     def set_content(self, content: str):
-        """从纯文本格式加载内容。"""
-        # 清空现有项
         for item in self._items[:]:
             self._layout.removeWidget(item)
             item.deleteLater()
@@ -178,18 +165,15 @@ class ChecklistEditor(QWidget):
             elif line.startswith("[ ] "):
                 self._add_item(line[4:], False)
             elif line:
-                # 兼容旧格式（无前缀的行）
                 self._add_item(line, False)
 
     def clear(self):
-        """清空所有项。"""
         for item in self._items[:]:
             self._layout.removeWidget(item)
             item.deleteLater()
         self._items.clear()
 
     def set_enabled_editing(self, enabled: bool):
-        """启用/禁用编辑。"""
         self._add_btn.setVisible(enabled)
         for item in self._items:
             item.set_enabled_editing(enabled)

@@ -64,7 +64,7 @@ from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
 from app.core.tool_manager import ToolManager
 from app.ui.main_window import MainWindow
-from app.ui.style import generate_stylesheet
+from app.ui.style import apply_theme
 
 
 def main():
@@ -73,7 +73,9 @@ def main():
     app.setQuitOnLastWindowClosed(False)  # keep alive in tray
 
     config = ConfigManager()
-    app.setStyleSheet(generate_stylesheet(config.theme))
+    initial_opacity = config.window_config.get("opacity", 0.97)
+    custom_qss = apply_theme(config.theme, initial_opacity)
+    app.setStyleSheet(custom_qss)
     sessions = SessionManager()
     tools = ToolManager(config)
     notes = NoteManager()

@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -23,6 +22,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import MessageBox as FluentMessageBox
 
 from app.core.config import ConfigManager, SHANGDAO_MODELS
 from app.core.constants import DEFAULT_USER_PROMPT
@@ -69,6 +69,8 @@ class SettingsDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        scroll.viewport().setStyleSheet("background: transparent;")
 
         scroll_content = QWidget()
         api_form = QFormLayout(scroll_content)
@@ -607,16 +609,10 @@ class SettingsDialog(QDialog):
 
     def _delete_model(self, model_id: str):
         """删除模型"""
-        reply = QMessageBox.question(
-            self,
-            "确认删除",
-            f"确定要删除模型 {model_id} 吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
+        w = FluentMessageBox("确认删除", f"确定要删除模型 {model_id} 吗？", self)
+        if w.exec():
             try:
                 self._config.remove_litellm_model(model_id)
                 self._load()
             except ValueError as e:
-                QMessageBox.warning(self, "删除失败", str(e))
+                FluentMessageBox("删除失败", str(e), self).exec()
