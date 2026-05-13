@@ -115,12 +115,16 @@ _PALETTE = {
 # ── Public API ────────────────────────────────────────────────────────
 
 def apply_theme(theme_name: str, opacity: float = 1.0) -> str:
-    """Apply Fluent theme globally and return custom QSS for app-specific elements."""
+    """Apply Fluent theme globally and return custom QSS for app-specific elements.
+
+    The ``opacity`` parameter is kept for backward compatibility but ignored —
+    FluentWindow manages its own background; solid colors are always used.
+    """
     theme = THEMES.get(theme_name, THEMES["classic"])
     setTheme(theme["mode"])
     setThemeColor(QColor(theme["accent"]))
     _apply_palette(theme)
-    return _build_custom_qss(theme, opacity)
+    return _build_custom_qss(theme)
 
 
 def _apply_palette(theme: dict) -> None:
@@ -169,7 +173,7 @@ def enable_mica(hwnd: int, dark: bool = False) -> bool:
 
 # ── Internal ──────────────────────────────────────────────────────────
 
-def _build_custom_qss(theme: dict, opacity: float = 1.0) -> str:
+def _build_custom_qss(theme: dict) -> str:
     p = _PALETTE[theme["mode"]]
     dark = theme["mode"] == Theme.DARK
     accent = theme["accent"]
@@ -178,10 +182,9 @@ def _build_custom_qss(theme: dict, opacity: float = 1.0) -> str:
     user_bg = theme["user_bubble"]
     user_border = theme["user_bubble_border"]
 
-    # When opacity is at max (>=0.99), use solid backgrounds so nothing shows through
-    opaque = opacity >= 0.99
-    bg = p["bg_solid"] if opaque else p["bg"]
-    surface = p["surface_solid"] if opaque else p["surface"]
+    # Always use solid backgrounds — FluentWindow manages the window chrome
+    bg = p["bg_solid"]
+    surface = p["surface_solid"]
 
     # Derived tokens
     accent_text = "#FFFFFF" if dark else "#FFFFFF"
@@ -189,13 +192,8 @@ def _build_custom_qss(theme: dict, opacity: float = 1.0) -> str:
 
     return f"""
 /* ═══════════════════════════════════════════════════════════════════
-   Main Container
+   Chat Area
    ═══════════════════════════════════════════════════════════════════ */
-#mainWindow {{
-    background: {bg};
-    border: 1px solid {p["border"]};
-    border-radius: 10px;
-}}
 #chatArea {{
     background: transparent;
 }}
@@ -205,8 +203,6 @@ def _build_custom_qss(theme: dict, opacity: float = 1.0) -> str:
    ═══════════════════════════════════════════════════════════════════ */
 #titleBar {{
     background: {surface};
-    border-top-left-radius: 10px;
-    border-top-right-radius: 10px;
     border-bottom: 2px solid {accent};
 }}
 
@@ -357,8 +353,6 @@ QSplitter::handle:hover {{ background: {accent}; }}
 #inputWidget {{
     background: transparent;
     border-top: 1px solid {p["border"]};
-    border-bottom-left-radius: 10px;
-    border-bottom-right-radius: 10px;
     padding: 2px 0;
 }}
 #inputWidget QTextEdit {{
@@ -613,4 +607,4 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: tran
 # ── Legacy compatibility ─────────────────────────────────────────────
 def generate_stylesheet(theme_name: str) -> str:
     """Legacy wrapper; prefer ``apply_theme`` for new code."""
-    return apply_theme(theme_name, opacity=1.0)
+    return apply_theme(theme_name)

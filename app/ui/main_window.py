@@ -5,7 +5,7 @@ Layout:
   ┌─ TitleBar ───────────────────────────────────────────────────┐
   │ [≡] AI Agent ── [聊天] [笔记] [工坊] ── [截图] [─] [□] [✕]  │
   ├──────────────────────────────────────────────────────────────┤
-  │ QStackedWidget                                               │
+  │ FluentWindow stackedWidget                                   │
   │  page 0: SessionPanel | ChatWidget + InputWidget             │
   │  page 1: NotesPanel                                          │
   │  page 2: ToolboxPanel                                         │
@@ -21,7 +21,6 @@ from PyQt6.QtWidgets import (
     QFrame,
     QLabel,
     QSplitter,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -47,16 +46,16 @@ from app.ui.toolbox_panel import ToolboxPanel
 from app.ui.screenshot_overlay import ScreenshotOverlay
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_dialog import SettingsDialog
-from app.ui.style import THEMES, apply_theme, enable_mica
-from qfluentwidgets import Theme
+from app.ui.style import THEMES, apply_theme
 from app.ui.title_bar import TitleBar
 from app.ui.toast import show_toast
 from app.ui.tray_manager import TrayManager
 from app.core.constants import DEFAULT_USER_PROMPT, BUILTIN_TOOLS_INSTRUCTION, get_current_datetime_info
+from qfluentwidgets import FluentWindow, FluentIcon
 
 
 # ─────────────────────────────────────────────────────────────────────
-class MainWindow(QWidget):
+class MainWindow(FluentWindow):
     # Used to marshal scheduler callbacks from background threads to the main thread
     _notify_signal = pyqtSignal(str, str)  # title, body
     # Signal for note content updates (note_id, title, content)
@@ -73,6 +72,24 @@ class MainWindow(QWidget):
         note_mgr: NoteManager,
     ):
         super().__init__()
+        # Replace FluentWindow's default FluentTitleBar immediately.
+        # Disconnect the signal that would re-raise the old titleBar, then
+        # forcibly hide any lingering children before our titleBar takes over.
+        old_title_bar = self.titleBar
+        self.navigationInterface.displayModeChanged.disconnect()
+        self._title_bar = TitleBar(self)
+        self.setTitleBar(self._title_bar)
+        # setTitleBar calls deleteLater (async) — force-hide now so it never shows
+        old_title_bar.hide()
+        for child in old_title_bar.findChildren(QWidget):
+            child.hide()
+        # Kill any lingering TitleBarButton from qframelesswindow (e.g. red CloseButton)
+        from qframelesswindow import TitleBarButton
+        for btn in self.findChildren(TitleBarButton):
+            btn.setFixedSize(0, 0)
+            btn.hide()
+            btn.deleteLater()
+
         self._config = config
         self._sessions = session_mgr
         self._tools = tool_mgr
@@ -105,62 +122,40 @@ class MainWindow(QWidget):
         self._init_sessions()
         self._resize_filter = ResizeFilter(self)
         self._resize_filter.install()
-        self._apply_mica_effect()
         self._snap_mgr = EdgeSnapManager(self)
         self._snap_mgr.set_enabled(self._config.window_config.get("edge_snap", True))
         self._notify_signal.connect(self._on_notify)
         self._setup_hotkeys()
         self._restore_pinned_notes()
 
-    # ──────────────────────────────────────────── Mica / Acrylic
-    def _apply_mica_effect(self):
-        """Enable Windows 11 Mica backdrop on the native window."""
-        handle = self.windowHandle()
-        if handle is not None:
-            hwnd = int(handle.winId())
-            theme = THEMES.get(self._config.theme, THEMES["classic"])
-            dark = theme["mode"] == Theme.DARK
-            enable_mica(hwnd, dark=dark)
-
+    # ──────────────────────────────────────────── window setup
     # ──────────────────────────────────────────── window setup
     def _build_window(self):
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         wcfg = self._config.window_config
-        self.resize(wcfg.get("width", 420), wcfg.get("height", 700))
+        self.resize(wcfg.get("width", 440), wcfg.get("height", 700))
         self.move(wcfg.get("x", 100), wcfg.get("y", 80))
-        self.setWindowOpacity(wcfg.get("opacity", 0.97))
+        # Qt >= 6.10: qframelesswindow uses NoTitleBarBackgroundHint which still
+        # renders system close button.  Force FramelessWindowHint to suppress it.
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        # Re-apply Tool flag (hide from taskbar) after FluentWindow resets flags
+        self.setWindowFlag(Qt.WindowType.Tool, True)
         if wcfg.get("always_on_top", True):
             self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
 
     def _build_ui(self):
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-
-        self._container = QFrame()
-        self._container.setObjectName("mainWindow")
-        outer.addWidget(self._container)
-
-        root = QVBoxLayout(self._container)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        # title bar
-        self._title_bar = TitleBar(self)
-        root.addWidget(self._title_bar)
-
-        # stacked body: page 0=chat, page 1=notes, page 2=toolbox
-        self._stack = QStackedWidget()
+        # Hide the left sidebar — navigation lives in the title bar
+        self.navigationInterface.hide()
+        self.navigationInterface.setFixedWidth(0)
+        # Reconnect raise_ to our titleBar (was disconnected during __init__)
+        self.navigationInterface.displayModeChanged.connect(self._title_bar.raise_)
 
         # ── page 0: chat view ─────────────────────────────────────────
         chat_page = QWidget()
+        chat_page.setObjectName("chatInterface")
         page_layout = QVBoxLayout(chat_page)
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(0)
 
-        # Use QSplitter for resizable session panel
         self._chat_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._chat_splitter.setHandleWidth(6)
         self._chat_splitter.setChildrenCollapsible(True)
@@ -188,36 +183,38 @@ class MainWindow(QWidget):
         self._input.submitted.connect(self._on_submit)
         chat_col.addWidget(self._input)
 
-        # Connect file drop signal
         self._chat.file_attached.connect(self._on_files_attached)
         chat_area = QFrame()
         chat_area.setObjectName("chatArea")
         chat_area.setLayout(chat_col)
         self._chat_splitter.addWidget(chat_area)
 
-        # Set initial sizes from config (session panel width)
         wcfg = self._config.window_config
         session_width = wcfg.get("session_panel_width", 180)
-        chat_width = wcfg.get("width", 420) - session_width
+        chat_width = wcfg.get("width", 440) - session_width
         self._chat_splitter.setSizes([session_width, chat_width])
-
-        # Collapse session panel if config says it should be hidden
         if not wcfg.get("session_panel_visible", True):
             self._chat_splitter.setSizes([0, session_width + chat_width])
 
         page_layout.addWidget(self._chat_splitter)
-        self._stack.addWidget(chat_page)          # index 0
 
         # ── page 1: notes panel ───────────────────────────────────────
         self._notes_panel = NotesPanel(self._notes)
+        self._notes_panel.setObjectName("notesInterface")
         self._notes_panel.note_updated.connect(self._on_note_updated)
-        self._stack.addWidget(self._notes_panel)  # index 1
 
-        # ── page 2: toolbox panel ────────────────────────────────────
+        # ── page 2: toolbox panel ─────────────────────────────────────
         self._toolbox_panel = ToolboxPanel(self._tools, self._config)
-        self._stack.addWidget(self._toolbox_panel)  # index 2
+        self._toolbox_panel.setObjectName("toolboxInterface")
 
-        root.addWidget(self._stack, 1)
+        # Register pages with FluentWindow (required for switchTo to work)
+        self.addSubInterface(chat_page, FluentIcon.CHAT, "聊天")
+        self.addSubInterface(self._notes_panel, FluentIcon.EDIT, "笔记")
+        self.addSubInterface(self._toolbox_panel, FluentIcon.DEVELOPER_TOOLS, "工坊")
+
+        # Keep page references for _switch_view
+        self._pages = [chat_page, self._notes_panel, self._toolbox_panel]
+
         self.setMinimumSize(320, 420)
         self.setMouseTracking(True)
 
@@ -734,24 +731,27 @@ class MainWindow(QWidget):
         dlg = SettingsDialog(self._config, self._hotkey_mgr, self)
         if dlg.exec():
             wcfg = self._config.window_config
-            new_opacity = wcfg.get("opacity", 0.97)
-            self.setWindowOpacity(new_opacity)
             flag = Qt.WindowType.WindowStaysOnTopHint
             self.setWindowFlag(flag, wcfg.get("always_on_top", True))
             if self._snap_mgr is not None:
                 self._snap_mgr.set_enabled(wcfg.get("edge_snap", True))
             new_theme = self._config.theme
-            if new_theme != old_theme:
-                custom_qss = apply_theme(new_theme, new_opacity)
-            else:
-                custom_qss = apply_theme(new_theme, new_opacity)
+            custom_qss = apply_theme(new_theme)
             QApplication.instance().setStyleSheet(custom_qss)
-            self._apply_mica_effect()
             self.show()
 
     def _switch_view(self, index: int):
-        self._stack.setCurrentIndex(index)
+        if 0 <= index < len(self._pages):
+            self.switchTo(self._pages[index])
         self._title_bar.set_active_view(index)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # FluentWindow offsets titleBar to leave room for the nav panel expand button.
+        # Since the sidebar is hidden, keep the title bar full-width.
+        if hasattr(self, '_title_bar'):
+            self._title_bar.move(0, 0)
+            self._title_bar.resize(self.width(), self._title_bar.height())
 
     def _minimize(self):
         self.hide()
@@ -823,17 +823,17 @@ class MainWindow(QWidget):
     # ──────────────────────────────────────────── window events
     def moveEvent(self, event):
         super().moveEvent(event)
-        if self._snap_mgr is not None:
+        if getattr(self, '_snap_mgr', None) is not None:
             self._snap_mgr.check_position()
 
     def enterEvent(self, event):
         super().enterEvent(event)
-        if self._snap_mgr is not None:
+        if getattr(self, '_snap_mgr', None) is not None:
             self._snap_mgr.on_enter()
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
-        if self._snap_mgr is not None:
+        if getattr(self, '_snap_mgr', None) is not None:
             self._snap_mgr.on_leave()
 
     def _toggle_session_panel(self):

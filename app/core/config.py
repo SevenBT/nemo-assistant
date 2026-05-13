@@ -128,7 +128,6 @@ DEFAULT_APP_CONFIG: dict = {
         "height": 700,
         "x": 100,
         "y": 80,
-        "opacity": 0.97,
         "always_on_top": True,
         "theme": "classic",
         "edge_snap": True,

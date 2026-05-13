@@ -73,8 +73,7 @@ def main():
     app.setQuitOnLastWindowClosed(False)  # keep alive in tray
 
     config = ConfigManager()
-    initial_opacity = config.window_config.get("opacity", 0.97)
-    custom_qss = apply_theme(config.theme, initial_opacity)
+    custom_qss = apply_theme(config.theme)
     app.setStyleSheet(custom_qss)
     sessions = SessionManager()
     tools = ToolManager(config)

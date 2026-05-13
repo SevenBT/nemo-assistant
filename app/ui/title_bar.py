@@ -2,6 +2,7 @@
 
 Uses Fluent Design components: SegmentedWidget for navigation,
 TransparentToolButton + FluentIcon for window controls.
+Plain QWidget injected into FluentWindow via setTitleBar().
 """
 from __future__ import annotations
 
@@ -9,14 +10,13 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QHBoxLayout, QMenu, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QWidget
 from qfluentwidgets import (
     FluentIcon,
     SegmentedWidget,
     TransparentToolButton,
     ToolTipFilter,
     ToolTipPosition,
-    CaptionLabel,
     RoundMenu,
     Action,
 )
@@ -25,8 +25,23 @@ if TYPE_CHECKING:
     from app.ui.main_window import MainWindow
 
 
+class _DummyBtn(QWidget):
+    """Invisible zero-size placeholder satisfying FluentWindow's titleBar.minBtn/maxBtn/closeBtn contract."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(0, 0)
+        super().hide()
+
+    def setState(self, state):
+        pass
+
+    def hide(self):
+        pass
+
+
 class TitleBar(QWidget):
-    def __init__(self, window: MainWindow):
+    def __init__(self, window: "MainWindow"):
         super().__init__(window)
         self._win = window
         self.setObjectName("titleBar")
@@ -84,6 +99,13 @@ class TitleBar(QWidget):
             FluentIcon.CLOSE, "最小化到托盘", self._win._minimize
         )
         layout.addWidget(self._close_btn)
+
+        # Aliases required by FluentWindow's nativeEvent and setTitleBar internals.
+        # maxBtn needs setState(); min/closeBtn just need hide(). Use dummies so
+        # FluentWindow's hit-testing never matches our actual buttons.
+        self.minBtn = _DummyBtn(self)
+        self.maxBtn = _DummyBtn(self)
+        self.closeBtn = _DummyBtn(self)
 
     def _make_tool_btn(self, icon: FluentIcon, tooltip: str, slot) -> TransparentToolButton:
         btn = TransparentToolButton(icon)
@@ -146,7 +168,6 @@ class TitleBar(QWidget):
     def _toggle_always_on_top(self, currently_on_top: bool):
         self._win.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, not currently_on_top)
         self._win.show()
-
     def mouseDoubleClickEvent(self, e: QMouseEvent):
         """双击标题栏切换最大化/还原"""
         if e.button() == Qt.MouseButton.LeftButton:
