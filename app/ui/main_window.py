@@ -46,7 +46,7 @@ from app.ui.toolbox_panel import ToolboxPanel
 from app.ui.screenshot_overlay import ScreenshotOverlay
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_dialog import SettingsDialog
-from app.ui.style import THEMES, apply_theme
+from app.ui.style import THEMES, apply_theme, set_dark_titlebar
 from app.ui.title_bar import TitleBar
 from app.ui.toast import show_toast
 from app.ui.tray_manager import TrayManager
@@ -72,6 +72,7 @@ class MainWindow(FluentWindow):
         note_mgr: NoteManager,
     ):
         super().__init__()
+        self._config = config
         # Replace FluentWindow's default FluentTitleBar immediately.
         # Disconnect the signal that would re-raise the old titleBar, then
         # forcibly hide any lingering children before our titleBar takes over.
@@ -90,7 +91,6 @@ class MainWindow(FluentWindow):
             btn.hide()
             btn.deleteLater()
 
-        self._config = config
         self._sessions = session_mgr
         self._tools = tool_mgr
         self._scheduler = scheduler
@@ -137,10 +137,15 @@ class MainWindow(FluentWindow):
         # Qt >= 6.10: qframelesswindow uses NoTitleBarBackgroundHint which still
         # renders system close button.  Force FramelessWindowHint to suppress it.
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        # Re-apply Tool flag (hide from taskbar) after FluentWindow resets flags
-        self.setWindowFlag(Qt.WindowType.Tool, True)
-        if wcfg.get("always_on_top", True):
-            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        # 任务栏模式下不设置 Tool 标志，让窗口出现在任务栏中
+        if self._config.minimize_to == "tray":
+            self.setWindowFlag(Qt.WindowType.Tool, True)
+            if wcfg.get("always_on_top", True):
+                self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        else:
+            # taskbar 模式：设置窗口图标，不置顶
+            from app.ui.tray_manager import _make_icon
+            self.setWindowIcon(_make_icon())
 
     def _build_ui(self):
         # Hide the left sidebar — navigation lives in the title bar
@@ -261,12 +266,14 @@ class MainWindow(FluentWindow):
         win.delete_requested.connect(lambda _: self._notes_panel.refresh())
 
     def _toggle_window_visibility(self):
-        if self.isVisible():
+        if self.isVisible() and not self.isMinimized():
             if self._snap_mgr is not None and self._snap_mgr.is_snapped:
                 self._snap_mgr.unsnap_full()
             else:
                 self.hide()
         else:
+            if self.isMinimized():
+                self.showNormal()
             self.show()
             self.raise_()
             self.activateWindow()
@@ -722,7 +729,7 @@ class MainWindow(FluentWindow):
 
     @pyqtSlot(str, str)
     def _on_notify(self, title: str, body: str):
-        theme = THEMES.get(self._config.theme, THEMES["classic"])
+        theme = THEMES.get(self._config.theme, THEMES["morning"])
         show_toast(title, body, accent=theme["accent"])
 
     # ──────────────────────────────────────────── dialogs / window actions
@@ -731,14 +738,19 @@ class MainWindow(FluentWindow):
         dlg = SettingsDialog(self._config, self._hotkey_mgr, self)
         if dlg.exec():
             wcfg = self._config.window_config
+            new_on_top = wcfg.get("always_on_top", True)
             flag = Qt.WindowType.WindowStaysOnTopHint
-            self.setWindowFlag(flag, wcfg.get("always_on_top", True))
+            current_on_top = bool(self.windowFlags() & flag)
+            if new_on_top != current_on_top:
+                self.setWindowFlag(flag, new_on_top)
+                self.show()
             if self._snap_mgr is not None:
                 self._snap_mgr.set_enabled(wcfg.get("edge_snap", True))
             new_theme = self._config.theme
             custom_qss = apply_theme(new_theme)
-            QApplication.instance().setStyleSheet(custom_qss)
-            self.show()
+            self.setStyleSheet(custom_qss)
+            if not self.isVisible():
+                self.show()
 
     def _switch_view(self, index: int):
         if 0 <= index < len(self._pages):
@@ -754,6 +766,13 @@ class MainWindow(FluentWindow):
             self._title_bar.resize(self.width(), self._title_bar.height())
 
     def _minimize(self):
+        if self._config.minimize_to == "taskbar":
+            self.showMinimized()
+        else:
+            self.hide()
+
+    def _hide_to_tray(self):
+        """始终隐藏到托盘（关闭按钮专用）"""
         self.hide()
 
     def _toggle_maximize(self):
@@ -816,11 +835,25 @@ class MainWindow(FluentWindow):
         if self._snap_mgr is not None and self._snap_mgr.is_snapped:
             self._snap_mgr.unsnap_full()
         else:
+            if self.isMinimized():
+                self.showNormal()
             self.show()
             self.raise_()
             self.activateWindow()
 
     # ──────────────────────────────────────────── window events
+    def nativeEvent(self, eventType, message):
+        # Suppress Windows system context menu on title bar right-click.
+        # FluentWindow returns HTCAPTION for the title bar area, which causes
+        # Windows to show its own system menu alongside our custom RoundMenu.
+        if eventType == b"windows_generic_MSG":
+            import ctypes.wintypes
+            msg = ctypes.wintypes.MSG.from_address(int(message))
+            WM_NCRBUTTONUP = 0x00A5
+            if msg.message == WM_NCRBUTTONUP:
+                return True, 0
+        return super().nativeEvent(eventType, message)
+
     def moveEvent(self, event):
         super().moveEvent(event)
         if getattr(self, '_snap_mgr', None) is not None:

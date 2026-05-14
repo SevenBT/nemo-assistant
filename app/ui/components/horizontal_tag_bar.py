@@ -4,7 +4,8 @@
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QScrollArea, QWidget
-from qfluentwidgets import PillPushButton, FluentIcon, RoundMenu, Action
+from qfluentwidgets import PillPushButton, FluentIcon, Action
+from app.ui.components.context_menu import ContextMenu
 
 
 # 固定显示的标签
@@ -117,7 +118,7 @@ class HorizontalTagBar(QWidget):
     def _show_custom_menu(self):
         if not self._custom_tags or not self._custom_button:
             return
-        menu = RoundMenu(parent=self)
+        menu = ContextMenu(parent=self)
         for tag_name, count in self._custom_tags:
             menu.addAction(Action(
                 FluentIcon.TAG, f"{tag_name} ({count})",

@@ -6,6 +6,8 @@ Plain QWidget injected into FluentWindow via setTitleBar().
 """
 from __future__ import annotations
 
+import ctypes
+import sys
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
@@ -17,12 +19,42 @@ from qfluentwidgets import (
     TransparentToolButton,
     ToolTipFilter,
     ToolTipPosition,
-    RoundMenu,
     Action,
 )
+from app.ui.components.context_menu import ContextMenu
 
 if TYPE_CHECKING:
     from app.ui.main_window import MainWindow
+
+
+def _remove_tooltip_border(widget):
+    """Remove Windows 11 DWM border from a tooltip window."""
+    if sys.platform != "win32":
+        return
+    try:
+        hwnd = int(widget.winId())
+        if not hwnd:
+            return
+        dwmapi = ctypes.windll.dwmapi
+        color_none = ctypes.c_uint(0xFFFFFFFE)
+        dwmapi.DwmSetWindowAttribute(
+            hwnd, 34, ctypes.byref(color_none), ctypes.sizeof(color_none)
+        )
+        corner_pref = ctypes.c_int(1)
+        dwmapi.DwmSetWindowAttribute(
+            hwnd, 33, ctypes.byref(corner_pref), ctypes.sizeof(corner_pref)
+        )
+    except Exception:
+        pass
+
+
+class _BorderlessToolTipFilter(ToolTipFilter):
+    """ToolTipFilter that removes the Windows 11 DWM border on the tooltip."""
+
+    def showToolTip(self):
+        super().showToolTip()
+        if self._tooltip and self._tooltip.isVisible():
+            _remove_tooltip_border(self._tooltip)
 
 
 class _DummyBtn(QWidget):
@@ -58,7 +90,7 @@ class TitleBar(QWidget):
         self._toggle_btn.setFixedSize(36, 32)
         self._toggle_btn.setToolTip("显示/隐藏会话列表")
         self._toggle_btn.installEventFilter(
-            ToolTipFilter(self._toggle_btn, showDelay=400, position=ToolTipPosition.BOTTOM)
+            _BorderlessToolTipFilter(self._toggle_btn, showDelay=400, position=ToolTipPosition.BOTTOM)
         )
         self._toggle_btn.clicked.connect(self._win._toggle_session_panel)
         layout.addWidget(self._toggle_btn)
@@ -86,7 +118,7 @@ class TitleBar(QWidget):
 
         # ── Window control buttons ────────────────────────────────────
         self._min_btn = self._make_tool_btn(
-            FluentIcon.MINIMIZE, "最小化到托盘", self._win._minimize
+            FluentIcon.MINIMIZE, "最小化", self._win._minimize
         )
         layout.addWidget(self._min_btn)
 
@@ -96,7 +128,7 @@ class TitleBar(QWidget):
         layout.addWidget(self._max_btn)
 
         self._close_btn = self._make_tool_btn(
-            FluentIcon.CLOSE, "最小化到托盘", self._win._minimize
+            FluentIcon.CLOSE, "关闭到托盘", self._win._hide_to_tray
         )
         layout.addWidget(self._close_btn)
 
@@ -112,7 +144,7 @@ class TitleBar(QWidget):
         btn.setFixedSize(32, 32)
         btn.setToolTip(tooltip)
         btn.installEventFilter(
-            ToolTipFilter(btn, showDelay=400, position=ToolTipPosition.BOTTOM)
+            _BorderlessToolTipFilter(btn, showDelay=400, position=ToolTipPosition.BOTTOM)
         )
         btn.clicked.connect(slot)
         return btn
@@ -146,7 +178,7 @@ class TitleBar(QWidget):
                     handle.startSystemMove()
 
     def _show_context_menu(self, global_pos):
-        menu = RoundMenu(parent=self)
+        menu = ContextMenu(parent=self)
 
         menu.addAction(Action(FluentIcon.CLIPPING_TOOL, "截图", triggered=self._win._start_screenshot))
         menu.addAction(Action(FluentIcon.SETTING, "设置", triggered=self._win._open_settings))
@@ -159,7 +191,7 @@ class TitleBar(QWidget):
         top_act.triggered.connect(lambda: self._toggle_always_on_top(is_top))
         menu.addAction(top_act)
 
-        menu.addAction(Action(FluentIcon.MINIMIZE, "最小化到托盘", triggered=self._win._minimize))
+        menu.addAction(Action(FluentIcon.MINIMIZE, "最小化到托盘", triggered=self._win._hide_to_tray))
         menu.addSeparator()
         menu.addAction(Action(FluentIcon.CLOSE, "退出", triggered=self._win._on_quit))
 

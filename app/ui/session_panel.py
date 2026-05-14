@@ -14,12 +14,12 @@ from qfluentwidgets import (
     LineEdit,
     ListWidget,
     PrimaryPushButton,
-    RoundMenu,
     TransparentToolButton,
     ToolTipFilter,
     ToolTipPosition,
     MessageBox,
 )
+from app.ui.components.context_menu import ContextMenu
 
 from app.models.session import Session
 
@@ -149,7 +149,7 @@ class SessionPanel(QFrame):
         sid = item.data(Qt.ItemDataRole.UserRole)
         pinned = item.data(Qt.ItemDataRole.UserRole + 1)
 
-        menu = RoundMenu(parent=self)
+        menu = ContextMenu(parent=self)
 
         pin_icon = FluentIcon.UNPIN if pinned else FluentIcon.PIN
         pin_text = "取消置顶" if pinned else "置顶"

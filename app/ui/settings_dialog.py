@@ -283,6 +283,11 @@ class SettingsDialog(QDialog):
         self._edge_snap_threshold.setSuffix(" (屏幕宽度比例)")
         win_form.addRow("吸附宽度阈值:", self._edge_snap_threshold)
 
+        self._minimize_to = QComboBox()
+        self._minimize_to.addItem("系统托盘", "tray")
+        self._minimize_to.addItem("任务栏", "taskbar")
+        win_form.addRow("最小化到:", self._minimize_to)
+
         self._theme_combo = QComboBox()
         for key, t in THEMES.items():
             self._theme_combo.addItem(t["name"], key)
@@ -403,7 +408,11 @@ class SettingsDialog(QDialog):
         self._always_on_top.setChecked(win.get("always_on_top", True))
         self._edge_snap.setChecked(win.get("edge_snap", True))
         self._edge_snap_threshold.setValue(win.get("edge_snap_width_threshold", 0.4))
-        theme = win.get("theme", "classic")
+        minimize_to = win.get("minimize_to", "tray")
+        midx = self._minimize_to.findData(minimize_to)
+        if midx >= 0:
+            self._minimize_to.setCurrentIndex(midx)
+        theme = win.get("theme", "morning")
         idx = self._theme_combo.findData(theme)
         if idx >= 0:
             self._theme_combo.setCurrentIndex(idx)
@@ -472,6 +481,11 @@ class SettingsDialog(QDialog):
         self._on_ll_toggled(ll.get("enabled", False))
 
     def _save(self):
+        # 检测最小化模式是否变更（需要重启生效）
+        old_minimize_to = self._config.window_config.get("minimize_to", "tray")
+        new_minimize_to = self._minimize_to.currentData()
+        minimize_changed = old_minimize_to != new_minimize_to
+
         # 判断启用的 API 类型
         if self._ll_enabled.isChecked():
             api_type = "litellm"
@@ -494,6 +508,7 @@ class SettingsDialog(QDialog):
             theme=self._theme_combo.currentData(),
             edge_snap=self._edge_snap.isChecked(),
             edge_snap_width_threshold=self._edge_snap_threshold.value(),
+            minimize_to=self._minimize_to.currentData(),
         )
         self._config.update_tools_config(
             {
@@ -542,6 +557,10 @@ class SettingsDialog(QDialog):
         self._config.set_litellm_models(updated_models)
 
         self._hotkey_widget.save()
+
+        if minimize_changed:
+            FluentMessageBox("提示", "最小化模式已更改，重启应用后生效。", self).exec()
+
         self.accept()
 
     # ------------------------------------------------------------------ litellm model management

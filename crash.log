@@ -1,8 +1,15 @@
 Traceback (most recent call last):
-  File "C:\Users\usirs\.pyenv\pyenv-win\versions\3.12.7\Lib\site-packages\qfluentwidgets\components\widgets\frameless_window.py", line 31, in nativeEvent
-    if self._isHoverMaxBtn():
-       ^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\usirs\.pyenv\pyenv-win\versions\3.12.7\Lib\site-packages\qfluentwidgets\components\widgets\frameless_window.py", line 49, in _isHoverMaxBtn
-    return self.titleBar.childAt(pos) is self.titleBar.maxBtn
-                                         ^^^^^^^^^^^^^^^^^^^^
-AttributeError: 'TitleBar' object has no attribute 'maxBtn'. Did you mean: '_max_btn'?
+  File "D:\claudecode-projects\assistant\main.py", line 94, in <module>
+    main()
+  File "D:\claudecode-projects\assistant\main.py", line 85, in main
+    window = MainWindow(config, sessions, tools, scheduler, notes)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 80, in __init__
+    self._title_bar = TitleBar(self)
+                      ^^^^^^^^^^^^^^
+  File "D:\claudecode-projects\assistant\app\ui\title_bar.py", line 49, in __init__
+    self._build()
+  File "D:\claudecode-projects\assistant\app\ui\title_bar.py", line 88, in _build
+    _min_tip = "最小化到任务栏" if self._win._config.minimize_to == "taskbar" else "最小化到托盘"
+                                   ^^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute '_config'

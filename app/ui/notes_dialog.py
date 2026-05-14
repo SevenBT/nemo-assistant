@@ -23,7 +23,6 @@ from qfluentwidgets import (
     ListWidget,
     MessageBox,
     PushButton,
-    RoundMenu,
     TextEdit,
     TransparentToolButton,
     ToolTipFilter,
@@ -37,6 +36,7 @@ from app.ui.components.tag_input import TagInput
 from app.ui.components.horizontal_tag_bar import HorizontalTagBar
 from app.ui.components.search_bar import SearchBar
 from app.ui.components.checklist_editor import ChecklistEditor
+from app.ui.components.context_menu import ContextMenu
 
 
 # Palette for note color dots — cycles by note id
@@ -592,7 +592,7 @@ class NotesPanel(QWidget):
             if not item:
                 return
             note_id = item.data(Qt.ItemDataRole.UserRole)
-            menu = RoundMenu(parent=self)
+            menu = ContextMenu(parent=self)
             menu.addAction(Action(FluentIcon.HISTORY, "恢复",
                                   triggered=lambda: (self._mgr.restore(note_id), self._load())))
             menu.addSeparator()
@@ -601,7 +601,7 @@ class NotesPanel(QWidget):
             menu.exec(global_pos)
             return
 
-        menu = RoundMenu(parent=self)
+        menu = ContextMenu(parent=self)
 
         if item:
             note_id = item.data(Qt.ItemDataRole.UserRole)

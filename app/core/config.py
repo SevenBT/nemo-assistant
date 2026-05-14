@@ -129,9 +129,10 @@ DEFAULT_APP_CONFIG: dict = {
         "x": 100,
         "y": 80,
         "always_on_top": True,
-        "theme": "classic",
+        "theme": "morning",
         "edge_snap": True,
         "edge_snap_width_threshold": 0.4,  # 边缘吸附宽度阈值（40% 屏幕宽度）
+        "minimize_to": "tray",  # "tray" | "taskbar"
     },
 }
 
@@ -217,12 +218,17 @@ class ConfigManager:
 
     @property
     def theme(self) -> str:
-        return self._app["window"].get("theme", "classic")
+        return self._app["window"].get("theme", "morning")
 
     @property
     def edge_snap_width_threshold(self) -> float:
         """边缘吸附宽度阈值（相对于屏幕宽度的比例）"""
         return self._app["window"].get("edge_snap_width_threshold", 0.4)
+
+    @property
+    def minimize_to(self) -> str:
+        """最小化目标：'tray' 或 'taskbar'"""
+        return self._app["window"].get("minimize_to", "tray")
 
     @property
     def api_type(self) -> str:
