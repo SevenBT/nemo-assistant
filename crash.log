@@ -4,12 +4,12 @@ Traceback (most recent call last):
   File "D:\claudecode-projects\assistant\main.py", line 85, in main
     window = MainWindow(config, sessions, tools, scheduler, notes)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 80, in __init__
+  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 81, in __init__
     self._title_bar = TitleBar(self)
                       ^^^^^^^^^^^^^^
-  File "D:\claudecode-projects\assistant\app\ui\title_bar.py", line 49, in __init__
+  File "D:\claudecode-projects\assistant\app\ui\title_bar.py", line 81, in __init__
     self._build()
-  File "D:\claudecode-projects\assistant\app\ui\title_bar.py", line 88, in _build
-    _min_tip = "最小化到任务栏" if self._win._config.minimize_to == "taskbar" else "最小化到托盘"
-                                   ^^^^^^^^^^^^^^^^^
-AttributeError: 'MainWindow' object has no attribute '_config'
+  File "D:\claudecode-projects\assistant\app\ui\title_bar.py", line 84, in _build
+    root = QVBoxLayout(self)
+           ^^^^^^^^^^^
+NameError: name 'QVBoxLayout' is not defined. Did you mean: 'QHBoxLayout'?

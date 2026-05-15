@@ -3,8 +3,6 @@ import markdown as _md
 from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
-    QHBoxLayout,
-    QLabel,
     QSizePolicy,
     QTextBrowser,
     QVBoxLayout,
@@ -42,15 +40,25 @@ class TypingIndicator(QWidget):
 class _MessageText(QTextBrowser):
     """Auto-height read-only text area. Replaces QLabel for reliable word-wrap."""
 
+    _MAX_USER_WIDTH = 420  # max content width for user bubbles
+
     def __init__(self, is_user: bool, parent=None):
         super().__init__(parent)
+        self._is_user = is_user
         self.setReadOnly(True)
         self.setOpenExternalLinks(False)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setObjectName("userBubble" if is_user else "aiBubble")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        if is_user:
+            self.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+            )
+        else:
+            self.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            )
         self.document().setDocumentMargin(2)
 
     def set_text(self, text: str):
@@ -65,10 +73,20 @@ class _MessageText(QTextBrowser):
         self._fit()
 
     def _fit(self):
-        vp_w = max(self.viewport().width(), 60)
-        self.document().setTextWidth(vp_w)
-        h = int(self.document().size().height()) + 10
-        self.setFixedHeight(max(h, 22))
+        if self._is_user:
+            # Let document flow without constraint to get ideal width
+            self.document().setTextWidth(-1)
+            ideal_w = int(self.document().idealWidth()) + 4
+            use_w = min(ideal_w, self._MAX_USER_WIDTH)
+            self.document().setTextWidth(use_w)
+            h = int(self.document().size().height()) + 4
+            self.setFixedWidth(use_w)
+            self.setFixedHeight(max(h, 20))
+        else:
+            vp_w = max(self.viewport().width(), 60)
+            self.document().setTextWidth(vp_w)
+            h = int(self.document().size().height()) + 4
+            self.setFixedHeight(max(h, 20))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -94,6 +112,10 @@ class MessageBubble(QFrame):
         self._is_user = message.role == MessageRole.USER
         self._tool_cards: dict = {}  # call_id -> ToolCard
         self.setObjectName("userMessage" if self._is_user else "aiMessage")
+        if self._is_user:
+            self.setSizePolicy(
+                QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
+            )
         self._build(message)
 
     @property
@@ -102,13 +124,11 @@ class MessageBubble(QFrame):
 
     def _build(self, message: Message):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
+        if self._is_user:
+            layout.setContentsMargins(12, 8, 12, 8)
+        else:
+            layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
-
-        role_label = QLabel("你" if self._is_user else "AI")
-        role_label.setObjectName("userLabel" if self._is_user else "aiLabel")
-        role_label.setFixedHeight(20)
-        layout.addWidget(role_label, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # Attachments section -- user bubbles only
         if self._is_user and message.attachments:
@@ -204,8 +224,8 @@ class ChatWidget(QWidget):
         self._inner = QWidget()
         self._layout = QVBoxLayout(self._inner)
         self._layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._layout.setSpacing(10)
-        self._layout.setContentsMargins(12, 12, 12, 12)
+        self._layout.setSpacing(16)
+        self._layout.setContentsMargins(32, 20, 32, 20)
 
         self._scroll.setWidget(self._inner)
         root.addWidget(self._scroll)
@@ -220,7 +240,10 @@ class ChatWidget(QWidget):
     def add_message(self, message: Message) -> MessageBubble:
         bubble = MessageBubble(message)
         self._bubbles.append(bubble)
-        self._layout.addWidget(bubble)
+        if bubble.is_user:
+            self._layout.addWidget(bubble, alignment=Qt.AlignmentFlag.AlignRight)
+        else:
+            self._layout.addWidget(bubble)
         QTimer.singleShot(30, self._scroll_bottom)
         return bubble
 

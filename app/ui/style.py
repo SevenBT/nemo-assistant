@@ -400,11 +400,17 @@ def _build_custom_qss(theme: dict) -> str:
 }}
 
 /* ═══════════════════════════════════════════════════════════════════
-   Title Bar — accent bottom highlight
+   Title Bar — two-row layout
    ═══════════════════════════════════════════════════════════════════ */
 #titleBar {{
     background: {surface};
-    border-bottom: 2px solid {accent};
+}}
+#titleBarTop {{
+    background: transparent;
+}}
+#titleBarNav {{
+    background: transparent;
+    border-top: 1px solid {theme["border"]};
 }}
 
 /* SegmentedWidget selected item text color */
@@ -465,39 +471,22 @@ QSplitter::handle {{
 QSplitter::handle:hover {{ background: {accent}; }}
 
 /* ═══════════════════════════════════════════════════════════════════
-   Message Bubbles — visual hierarchy + accent stripe on AI
+   Message Bubbles — user has visible bubble, AI is frameless
    ═══════════════════════════════════════════════════════════════════ */
 #userMessage {{
-    background: {user_bg};
-    border: 1px solid {user_border};
+    background: {accent_light};
+    border: 1.5px solid {user_border};
     border-radius: 18px; border-top-right-radius: 4px;
-    margin-left: 40px;
+    padding: 4px 6px;
 }}
 #aiMessage {{
-    background: {theme["ai_bubble"]};
-    border: 1px solid {theme["ai_bubble_border"]};
+    background: transparent;
+    border: none;
     border-left: 3px solid {accent};
-    border-radius: 18px; border-top-left-radius: 4px;
-    margin-right: 40px;
+    border-radius: 0;
+    padding: 2px 6px 2px 10px;
 }}
 
-/* Role badges — pill-shaped colored labels */
-#userLabel {{
-    font-size: 10px; font-weight: 700;
-    color: {accent_text};
-    background: {accent};
-    border-radius: 9px;
-    padding: 2px 10px;
-    max-width: 36px;
-}}
-#aiLabel {{
-    font-size: 10px; font-weight: 700;
-    color: #FFFFFF;
-    background: {theme["success"]};
-    border-radius: 9px;
-    padding: 2px 10px;
-    max-width: 30px;
-}}
 /* ═══════════════════════════════════════════════════════════════════
    Tool Card — status-colored left border
    ═══════════════════════════════════════════════════════════════════ */

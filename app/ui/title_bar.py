@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QHBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     FluentIcon,
     SegmentedWidget,
@@ -77,15 +77,47 @@ class TitleBar(QWidget):
         super().__init__(window)
         self._win = window
         self.setObjectName("titleBar")
-        self.setFixedHeight(44)
+        self.setFixedHeight(76)
         self._build()
 
     def _build(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 0, 4, 0)
-        layout.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # ── Sidebar toggle ────────────────────────────────────────────
+        # ── Row 1: Title / drag area + window controls ────────────────
+        top_row = QWidget()
+        top_row.setObjectName("titleBarTop")
+        top_layout = QHBoxLayout(top_row)
+        top_layout.setContentsMargins(8, 0, 4, 0)
+        top_layout.setSpacing(0)
+        top_layout.addStretch()
+
+        self._min_btn = self._make_tool_btn(
+            FluentIcon.MINIMIZE, "最小化", self._win._minimize
+        )
+        top_layout.addWidget(self._min_btn)
+
+        self._max_btn = self._make_tool_btn(
+            FluentIcon.FULL_SCREEN, "最大化", self._win._toggle_maximize
+        )
+        top_layout.addWidget(self._max_btn)
+
+        self._close_btn = self._make_tool_btn(
+            FluentIcon.CLOSE, "关闭到托盘", self._win._hide_to_tray
+        )
+        top_layout.addWidget(self._close_btn)
+
+        root.addWidget(top_row)
+
+        # ── Row 2: Navigation bar ─────────────────────────────────────
+        nav_row = QWidget()
+        nav_row.setObjectName("titleBarNav")
+        nav_layout = QHBoxLayout(nav_row)
+        nav_layout.setContentsMargins(8, 0, 8, 0)
+        nav_layout.setSpacing(0)
+
+        # Sidebar toggle
         self._toggle_btn = TransparentToolButton(FluentIcon.MENU)
         self._toggle_btn.setFixedSize(36, 32)
         self._toggle_btn.setToolTip("显示/隐藏会话列表")
@@ -93,11 +125,11 @@ class TitleBar(QWidget):
             _BorderlessToolTipFilter(self._toggle_btn, showDelay=400, position=ToolTipPosition.BOTTOM)
         )
         self._toggle_btn.clicked.connect(self._win._toggle_session_panel)
-        layout.addWidget(self._toggle_btn)
+        nav_layout.addWidget(self._toggle_btn)
 
-        layout.addSpacing(8)
+        nav_layout.addSpacing(8)
 
-        # ── View-switcher (SegmentedWidget) ───────────────────────────
+        # View-switcher (SegmentedWidget)
         self._nav = SegmentedWidget()
         self._nav.setFixedHeight(32)
         self._nav.addItem("chat", "聊天", icon=FluentIcon.CHAT)
@@ -105,36 +137,19 @@ class TitleBar(QWidget):
         self._nav.addItem("workshop", "工坊", icon=FluentIcon.DEVELOPER_TOOLS)
         self._nav.setCurrentItem("chat")
         self._nav.currentItemChanged.connect(self._on_nav_changed)
-        layout.addWidget(self._nav)
+        nav_layout.addWidget(self._nav)
 
-        # ── Screenshot button (right of nav, before stretch) ──────────
-        layout.addSpacing(8)
+        # Screenshot button
+        nav_layout.addSpacing(8)
         self._screenshot_btn = self._make_tool_btn(
             FluentIcon.CLIPPING_TOOL, "截图", self._win._start_screenshot
         )
-        layout.addWidget(self._screenshot_btn)
+        nav_layout.addWidget(self._screenshot_btn)
 
-        layout.addStretch()
-
-        # ── Window control buttons ────────────────────────────────────
-        self._min_btn = self._make_tool_btn(
-            FluentIcon.MINIMIZE, "最小化", self._win._minimize
-        )
-        layout.addWidget(self._min_btn)
-
-        self._max_btn = self._make_tool_btn(
-            FluentIcon.FULL_SCREEN, "最大化", self._win._toggle_maximize
-        )
-        layout.addWidget(self._max_btn)
-
-        self._close_btn = self._make_tool_btn(
-            FluentIcon.CLOSE, "关闭到托盘", self._win._hide_to_tray
-        )
-        layout.addWidget(self._close_btn)
+        nav_layout.addStretch()
+        root.addWidget(nav_row)
 
         # Aliases required by FluentWindow's nativeEvent and setTitleBar internals.
-        # maxBtn needs setState(); min/closeBtn just need hide(). Use dummies so
-        # FluentWindow's hit-testing never matches our actual buttons.
         self.minBtn = _DummyBtn(self)
         self.maxBtn = _DummyBtn(self)
         self.closeBtn = _DummyBtn(self)
@@ -198,6 +213,12 @@ class TitleBar(QWidget):
         menu.exec(global_pos)
 
     def _toggle_always_on_top(self, currently_on_top: bool):
+        if not currently_on_top:
+            # 只有窗口宽度小于屏幕一半时才允许置顶
+            from PyQt6.QtWidgets import QApplication
+            screen = QApplication.primaryScreen()
+            if screen and self._win.width() >= screen.availableGeometry().width() // 2:
+                return
         self._win.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, not currently_on_top)
         self._win.show()
     def mouseDoubleClickEvent(self, e: QMouseEvent):

@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QApplication, QScrollBar
 if TYPE_CHECKING:
     from app.ui.main_window import MainWindow
 
-_RESIZE_BORDER = 8  # pixels from window edge that trigger resize
+_RESIZE_BORDER = 12  # pixels from window edge that trigger resize
 
 
 class ResizeFilter(QObject):

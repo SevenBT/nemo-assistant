@@ -137,6 +137,9 @@ class MainWindow(FluentWindow):
         # Qt >= 6.10: qframelesswindow uses NoTitleBarBackgroundHint which still
         # renders system close button.  Force FramelessWindowHint to suppress it.
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        # Disable qframelesswindow's native resize (WM_NCHITTEST) — our ResizeFilter
+        # handles resize via setGeometry to avoid ghost border artifacts.
+        self.setResizeEnabled(False)
         # 任务栏模式下不设置 Tool 标志，让窗口出现在任务栏中
         if self._config.minimize_to == "tray":
             self.setWindowFlag(Qt.WindowType.Tool, True)
@@ -153,6 +156,8 @@ class MainWindow(FluentWindow):
         self.navigationInterface.setFixedWidth(0)
         # Reconnect raise_ to our titleBar (was disconnected during __init__)
         self.navigationInterface.displayModeChanged.connect(self._title_bar.raise_)
+        # Adjust content top margin to match our taller title bar (default is 48)
+        self.widgetLayout.setContentsMargins(0, self._title_bar.height(), 0, 0)
 
         # ── page 0: chat view ─────────────────────────────────────────
         chat_page = QWidget()
