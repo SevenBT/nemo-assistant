@@ -12,10 +12,13 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import QEvent, QObject, Qt
 from PyQt6.QtWidgets import QApplication, QScrollBar
 
+from qfluentwidgets.components.widgets.scroll_bar import ScrollBar as FluentScrollBar
+
 if TYPE_CHECKING:
     from app.ui.main_window import MainWindow
 
 _RESIZE_BORDER = 12  # pixels from window edge that trigger resize
+_RESIZE_PRIORITY = 4  # outermost pixels always reserved for resize (even over scrollbar)
 
 
 class ResizeFilter(QObject):
@@ -34,6 +37,24 @@ class ResizeFilter(QObject):
 
     def install(self):
         QApplication.instance().installEventFilter(self)
+
+    # ── helpers ───────────────────────────────────────────────────────
+
+    def _is_scrollbar_widget(self, widget) -> bool:
+        """Check if widget or any of its ancestors is a scrollbar."""
+        w = widget
+        while w is not None and w is not self._win:
+            if isinstance(w, (QScrollBar, FluentScrollBar)):
+                return True
+            w = w.parent()
+        return False
+
+    def _in_priority_zone(self, win_pos) -> bool:
+        """True if position is in the outermost pixels reserved for resize."""
+        x, y = win_pos.x(), win_pos.y()
+        w, h = self._win.width(), self._win.height()
+        P = _RESIZE_PRIORITY
+        return x < P or x > w - P or y < P or y > h - P
 
     # ── edge detection ────────────────────────────────────────────────
 
@@ -116,8 +137,11 @@ class ResizeFilter(QObject):
             edges = self._resize_edges(local) if self._win.rect().contains(local) else None
             if edges is not None:
                 # Don't show resize cursor when hovering over a scrollbar
+                # (unless in the outermost priority zone reserved for resize)
                 widget_under = QApplication.widgetAt(gpos)
-                if widget_under is not None and isinstance(widget_under, QScrollBar):
+                if (widget_under is not None
+                        and self._is_scrollbar_widget(widget_under)
+                        and not self._in_priority_zone(local)):
                     self._clear_cursor()
                 else:
                     self._apply_cursor(edges)
@@ -131,8 +155,11 @@ class ResizeFilter(QObject):
                 edges = self._resize_edges(local) if self._win.rect().contains(local) else None
                 if edges is not None:
                     # Don't intercept clicks on scrollbars
+                    # (unless in the outermost priority zone reserved for resize)
                     widget_under = QApplication.widgetAt(gpos)
-                    if widget_under is not None and isinstance(widget_under, QScrollBar):
+                    if (widget_under is not None
+                            and self._is_scrollbar_widget(widget_under)
+                            and not self._in_priority_zone(local)):
                         return False
                     self._active = True
                     self._edges_active = edges

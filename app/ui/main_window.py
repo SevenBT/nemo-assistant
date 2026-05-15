@@ -158,6 +158,8 @@ class MainWindow(FluentWindow):
         self.navigationInterface.displayModeChanged.connect(self._title_bar.raise_)
         # Adjust content top margin to match our taller title bar (default is 48)
         self.widgetLayout.setContentsMargins(0, self._title_bar.height(), 0, 0)
+        # Remove any border/background from stacked widget that FluentStyleSheet adds
+        self.stackedWidget.setStyleSheet("border: none; background: transparent;")
 
         # ── page 0: chat view ─────────────────────────────────────────
         chat_page = QWidget()

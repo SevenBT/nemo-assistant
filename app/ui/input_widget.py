@@ -1,7 +1,9 @@
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtGui import QColor, QKeyEvent, QTextCharFormat
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QTextEdit, QWidget
 from qfluentwidgets import PrimaryPushButton, FluentIcon
+
+from app.ui.style import get_text_color
 
 
 class InputWidget(QWidget):
@@ -47,6 +49,23 @@ class InputWidget(QWidget):
 
 class _TextEdit(QTextEdit):
     submitted = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursorWidth(2)
+
+    def _apply_text_color(self):
+        """Force text/cursor color from theme. Called on every focus-in
+        to override FluentWindow's stylesheet interference."""
+        color = QColor(get_text_color())
+        fmt = self.currentCharFormat()
+        fmt.setForeground(color)
+        self.setCurrentCharFormat(fmt)
+        self.setTextColor(color)
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._apply_text_color()
 
     def keyPressEvent(self, event: QKeyEvent):
         if (

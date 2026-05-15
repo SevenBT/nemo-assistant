@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import IndeterminateProgressBar, SmoothScrollArea
 
 from app.models.message import Message, MessageRole
-from app.ui.tool_card import ToolCard
+from app.ui.tool_card import ToolSummaryWidget
 from app.ui.file_card_widget import FileCardWidget
 
 
@@ -101,16 +101,16 @@ class MessageBubble(QFrame):
     """
     Renders one message (user or assistant).
 
-    AI bubbles support inline tool cards (ChatGPT-style):
+    AI bubbles support a compact tool summary (collapsed by default):
       [AI label]
-      [ToolCard ...]  <- collapsed by default, one per tool call
-      [answer text]   <- only the final response text
+      [ToolSummary]  <- single line "已调用 N 个工具", expandable
+      [answer text]  <- only the final response text
     """
 
     def __init__(self, message: Message, parent=None):
         super().__init__(parent)
         self._is_user = message.role == MessageRole.USER
-        self._tool_cards: dict = {}  # call_id -> ToolCard
+        self._tool_summary: ToolSummaryWidget | None = None
         self.setObjectName("userMessage" if self._is_user else "aiMessage")
         if self._is_user:
             self.setSizePolicy(
@@ -144,18 +144,16 @@ class MessageBubble(QFrame):
 
             layout.addWidget(attachments_widget)
 
-        # Tool cards section -- AI bubbles only
+        # Tool summary section -- AI bubbles only
         if not self._is_user:
-            self._tools_widget = QWidget()
-            self._tools_widget.setObjectName("toolsContainer")
-            self._tools_layout = QVBoxLayout(self._tools_widget)
-            self._tools_layout.setContentsMargins(0, 0, 0, 0)
-            self._tools_layout.setSpacing(4)
-            layout.addWidget(self._tools_widget)
+            self._tool_summary = ToolSummaryWidget()
+            layout.addWidget(self._tool_summary)
             # Populate existing tool calls (used by load_session)
             for tc in message.tool_calls:
-                self._insert_tool_card(tc.id, tc.name, tc.arguments, tc.result)
-            self._tools_widget.setVisible(bool(message.tool_calls))
+                self._tool_summary.add_tool(tc.id, tc.name)
+                if tc.result is not None:
+                    self._tool_summary.update_tool(tc.id, tc.result)
+            self._tool_summary.setVisible(bool(message.tool_calls))
 
         self._content = _MessageText(self._is_user)
         self._content.set_text(message.content or "")
@@ -166,25 +164,19 @@ class MessageBubble(QFrame):
 
     # -- internal --------------------------------------------------------
 
-    def _insert_tool_card(self, call_id: str, name: str, params: dict, result=None):
-        card = ToolCard(name, params, result)
-        self._tool_cards[call_id] = card
-        self._tools_layout.addWidget(card)
-
     # -- public API -------------------------------------------------------
 
     def add_tool_card(self, call_id: str, name: str, params: dict):
-        """Append a pending tool card during live streaming."""
-        if self._is_user:
+        """Append a pending tool call to the summary widget."""
+        if self._is_user or not self._tool_summary:
             return
-        self._insert_tool_card(call_id, name, params)
-        self._tools_widget.show()
+        self._tool_summary.add_tool(call_id, name)
+        self._tool_summary.show()
 
     def update_tool_card(self, call_id: str, result: dict):
-        """Update an existing tool card with its final result."""
-        card = self._tool_cards.get(call_id)
-        if card:
-            card.update_result(result)
+        """Update an existing tool call with its final result."""
+        if self._tool_summary:
+            self._tool_summary.update_tool(call_id, result)
 
     def clear_text(self):
         """Hide and clear the text area (called when a tool call starts)."""

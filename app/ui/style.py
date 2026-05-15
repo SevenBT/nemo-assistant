@@ -253,6 +253,8 @@ DEFAULT_THEME = "morning"
 
 # Track current dark mode state for the event filter
 _current_dark_mode = False
+# Track current text color for cursor sync (QSS doesn't propagate to cursor)
+_current_text_color: str = "#E8E0D6"
 
 
 class _DarkTitleBarFilter(QObject):
@@ -284,10 +286,11 @@ _filter_instance: _DarkTitleBarFilter | None = None
 
 def apply_theme(theme_name: str, opacity: float = 1.0) -> str:
     """Apply Fluent theme globally and return custom QSS for app-specific elements."""
-    global _current_dark_mode, _filter_instance
+    global _current_dark_mode, _filter_instance, _current_text_color
     theme = THEMES.get(theme_name, THEMES[DEFAULT_THEME])
     dark = theme["mode"] == Theme.DARK
     _current_dark_mode = dark
+    _current_text_color = theme["text"]
     setTheme(theme["mode"])
     setThemeColor(QColor(theme["accent"]))
     _apply_palette(theme)
@@ -358,6 +361,11 @@ def _apply_palette(theme: dict) -> None:
 def get_theme(theme_name: str) -> Dict[str, Any]:
     """Return full theme dict (identity + palette merged)."""
     return THEMES.get(theme_name, THEMES[DEFAULT_THEME])
+
+
+def get_text_color() -> str:
+    """Return current theme's text color hex string."""
+    return _current_text_color
 
 
 def enable_mica(hwnd: int, dark: bool = False) -> bool:
@@ -488,13 +496,13 @@ QSplitter::handle:hover {{ background: {accent}; }}
 }}
 
 /* ═══════════════════════════════════════════════════════════════════
-   Tool Card — status-colored left border
+   Tool Summary — compact collapsed indicator
    ═══════════════════════════════════════════════════════════════════ */
-#toolCard {{
+#toolSummary {{
     background: {theme["surface_raised"]};
     border: 1px solid {theme["border"]};
-    border-left: 3px solid {theme["warning"]};
-    border-radius: 8px;
+    border-radius: 6px;
+    padding: 2px 4px;
 }}
 #detailLabel {{
     font-size: 11px; color: {theme["text_muted"]}; font-weight: 700;
@@ -547,7 +555,6 @@ QSplitter::handle:hover {{ background: {accent}; }}
 }}
 #inputWidget QTextEdit {{
     background: {theme["surface_raised"]};
-    color: {theme["text"]};
     border: 2px solid transparent;
     border-radius: 10px;
     padding: 8px 14px;
