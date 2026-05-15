@@ -117,6 +117,7 @@ class ScreenshotOverlay(QWidget):
         self._resize_edge: str = ""  # "N","S","E","W","NW","NE","SW","SE"
         self._resize_start_mouse = QPoint()
         self._resize_start_rect = QRect()
+        self._resize_cursor_shape: Qt.CursorShape | None = None
 
         self._setup_window()
         self._ocr_done.connect(self._on_ocr_ready)
@@ -194,6 +195,18 @@ class ScreenshotOverlay(QWidget):
         "NE": Qt.CursorShape.SizeBDiagCursor,
         "SW": Qt.CursorShape.SizeBDiagCursor,
     }
+
+    def _set_resize_cursor(self, shape: Qt.CursorShape):
+        if self._resize_cursor_shape is None:
+            QApplication.setOverrideCursor(shape)
+        elif shape != self._resize_cursor_shape:
+            QApplication.changeOverrideCursor(shape)
+        self._resize_cursor_shape = shape
+
+    def _clear_resize_cursor(self):
+        if self._resize_cursor_shape is not None:
+            QApplication.restoreOverrideCursor()
+            self._resize_cursor_shape = None
 
     # ── Screen capture ─────────────────────────────────────────────────
 
@@ -312,6 +325,7 @@ class ScreenshotOverlay(QWidget):
             self._toolbar = None
 
     def _on_action(self, action: str):
+        self._clear_resize_cursor()
         if action == "cancel":
             self.captured.emit(QPixmap(), "cancel", "", QPoint())
             self.close()
@@ -337,6 +351,7 @@ class ScreenshotOverlay(QWidget):
     def _do_ocr(self):
         import numpy as np
 
+        self._clear_resize_cursor()
         r = self._normalized_rect()
         self.hide()
         QApplication.processEvents()
@@ -623,12 +638,13 @@ class ScreenshotOverlay(QWidget):
                     self._resize_start_mouse = gpos
                     self._resize_start_rect = self._normalized_rect()
                     self._state = "RESIZING"
-                    QApplication.setOverrideCursor(self._EDGE_CURSORS[edge])
+                    self._set_resize_cursor(self._EDGE_CURSORS[edge])
                     return
                 # Click inside selection → start new selection
                 if self._normalized_rect_local().contains(pos):
                     pass  # fall through to start new selection
 
+            self._clear_resize_cursor()
             self._hide_toolbar()
             self._hide_ocr_panel()
             self._start = event.globalPosition().toPoint()
@@ -668,11 +684,11 @@ class ScreenshotOverlay(QWidget):
             if not self._is_on_panel(pos):
                 edge = self._edge_at(pos)
                 if edge:
-                    QApplication.setOverrideCursor(self._EDGE_CURSORS[edge])
+                    self._set_resize_cursor(self._EDGE_CURSORS[edge])
                 else:
-                    QApplication.restoreOverrideCursor()
+                    self._clear_resize_cursor()
             else:
-                QApplication.restoreOverrideCursor()
+                self._clear_resize_cursor()
 
     def _do_resize(self, gpos: QPoint):
         """Update _start/_end based on the active resize edge."""
@@ -705,7 +721,7 @@ class ScreenshotOverlay(QWidget):
                 self._dragging_panel = False
                 return
             if self._state == "RESIZING":
-                QApplication.restoreOverrideCursor()
+                self._clear_resize_cursor()
                 self._state = "SELECTED"
                 self._resize_edge = ""
                 self.update()
@@ -723,12 +739,12 @@ class ScreenshotOverlay(QWidget):
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key.Key_Escape:
-            QApplication.restoreOverrideCursor()
+            self._clear_resize_cursor()
             self.captured.emit(QPixmap(), "cancel", "", QPoint())
             self.close()
             return
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
-        QApplication.restoreOverrideCursor()
+        self._clear_resize_cursor()
         super().closeEvent(event)
