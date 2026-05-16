@@ -83,6 +83,10 @@ def main():
     scheduler.start()
 
     window = MainWindow(config, sessions, tools, scheduler, notes)
+    # Re-apply theme after MainWindow init — FluentWindow's constructor
+    # resets internal styles which can override the initial apply_theme call.
+    custom_qss = apply_theme(config.theme, font_size=config.font_size)
+    app.setStyleSheet(custom_qss)
     window.show()
 
     exit_code = app.exec()

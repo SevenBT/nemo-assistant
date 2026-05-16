@@ -486,8 +486,8 @@ QSplitter::handle:hover {{ background: {accent}; }}
 #userMessage {{
     background: {accent_subtle};
     border: 1.5px solid {accent};
-    border-radius: 18px; border-top-right-radius: 4px;
-    padding: 2px 6px;
+    border-radius: 14px;
+    padding: 1px 6px;
 }}
 #aiMessage {{
     background: transparent;

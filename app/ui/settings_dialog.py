@@ -270,9 +270,6 @@ class SettingsDialog(QDialog):
         win_w = QWidget()
         win_form = QFormLayout(win_w)
 
-        self._always_on_top = QCheckBox("始终置顶")
-        win_form.addRow("", self._always_on_top)
-
         self._edge_snap = QCheckBox("顶栏吸附")
         win_form.addRow("", self._edge_snap)
 
@@ -411,7 +408,6 @@ class SettingsDialog(QDialog):
         # 加载 System Prompt
         self._system_prompt_edit.setPlainText(self._config.system_prompt)
 
-        self._always_on_top.setChecked(win.get("always_on_top", True))
         self._edge_snap.setChecked(win.get("edge_snap", True))
         self._edge_snap_threshold.setValue(win.get("edge_snap_width_threshold", 0.4))
         minimize_to = win.get("minimize_to", "tray")
@@ -511,7 +507,6 @@ class SettingsDialog(QDialog):
             api_type=api_type,
         )
         self._config.update_window_config(
-            always_on_top=self._always_on_top.isChecked(),
             theme=self._theme_combo.currentData(),
             edge_snap=self._edge_snap.isChecked(),
             edge_snap_width_threshold=self._edge_snap_threshold.value(),

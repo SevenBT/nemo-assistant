@@ -126,7 +126,7 @@ class MessageBubble(QFrame):
     def _build(self, message: Message):
         layout = QVBoxLayout(self)
         if self._is_user:
-            layout.setContentsMargins(12, 4, 12, 4)
+            layout.setContentsMargins(10, 2, 10, 2)
         else:
             layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)

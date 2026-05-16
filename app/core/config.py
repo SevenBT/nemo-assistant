@@ -126,7 +126,6 @@ DEFAULT_APP_CONFIG: dict = {
     "window": {
         "width": 440,
         "height": 700,
-        "always_on_top": False,
         "theme": "morning",
         "edge_snap": True,
         "edge_snap_width_threshold": 0.4,  # 边缘吸附宽度阈值（40% 屏幕宽度）

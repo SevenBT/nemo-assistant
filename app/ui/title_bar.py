@@ -199,28 +199,12 @@ class TitleBar(QWidget):
         menu.addAction(Action(FluentIcon.SETTING, "设置", triggered=self._win._open_settings))
         menu.addSeparator()
 
-        is_top = bool(self._win.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
-        top_act = Action(FluentIcon.PIN if not is_top else FluentIcon.UNPIN, "始终置顶")
-        top_act.setCheckable(True)
-        top_act.setChecked(is_top)
-        top_act.triggered.connect(lambda: self._toggle_always_on_top(is_top))
-        menu.addAction(top_act)
-
         menu.addAction(Action(FluentIcon.MINIMIZE, "最小化到托盘", triggered=self._win._hide_to_tray))
         menu.addSeparator()
         menu.addAction(Action(FluentIcon.CLOSE, "退出", triggered=self._win._on_quit))
 
         menu.exec(global_pos)
 
-    def _toggle_always_on_top(self, currently_on_top: bool):
-        if not currently_on_top:
-            # 只有窗口宽度小于屏幕一半时才允许置顶
-            from PyQt6.QtWidgets import QApplication
-            screen = QApplication.primaryScreen()
-            if screen and self._win.width() >= screen.availableGeometry().width() // 2:
-                return
-        self._win.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, not currently_on_top)
-        self._win.show()
     def mouseDoubleClickEvent(self, e: QMouseEvent):
         """双击标题栏切换最大化/还原"""
         if e.button() == Qt.MouseButton.LeftButton:

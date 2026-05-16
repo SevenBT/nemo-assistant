@@ -149,8 +149,6 @@ class MainWindow(FluentWindow):
         # 任务栏模式下不设置 Tool 标志，让窗口出现在任务栏中
         if self._config.minimize_to == "tray":
             self.setWindowFlag(Qt.WindowType.Tool, True)
-            if wcfg.get("always_on_top", True):
-                self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         else:
             # taskbar 模式：设置窗口图标，不置顶
             from app.ui.tray_manager import _make_icon
@@ -751,12 +749,6 @@ class MainWindow(FluentWindow):
         dlg = SettingsDialog(self._config, self._hotkey_mgr, self)
         if dlg.exec():
             wcfg = self._config.window_config
-            new_on_top = wcfg.get("always_on_top", True)
-            flag = Qt.WindowType.WindowStaysOnTopHint
-            current_on_top = bool(self.windowFlags() & flag)
-            if new_on_top != current_on_top:
-                self.setWindowFlag(flag, new_on_top)
-                self.show()
             if self._snap_mgr is not None:
                 self._snap_mgr.set_enabled(wcfg.get("edge_snap", True))
             new_theme = self._config.theme

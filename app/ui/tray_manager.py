@@ -85,6 +85,28 @@ class TrayManager(QObject):
 
     def _build_menu(self):
         self._menu = QMenu()
+        # Fixed style — tray menu should not follow app theme
+        self._menu.setStyleSheet("""
+            QMenu {
+                background: #FFFFFF;
+                color: #1E293B;
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 24px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background: #F1F5F9;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #E2E8F0;
+                margin: 4px 8px;
+            }
+        """)
         menu = self._menu
         show_act = QAction("显示窗口", menu)
         show_act.triggered.connect(self.show_requested)
