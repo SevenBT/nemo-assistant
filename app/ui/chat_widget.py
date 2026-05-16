@@ -112,6 +112,7 @@ class MessageBubble(QFrame):
         self._is_user = message.role == MessageRole.USER
         self._tool_summary: ToolSummaryWidget | None = None
         self.setObjectName("userMessage" if self._is_user else "aiMessage")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         if self._is_user:
             self.setSizePolicy(
                 QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
@@ -125,7 +126,7 @@ class MessageBubble(QFrame):
     def _build(self, message: Message):
         layout = QVBoxLayout(self)
         if self._is_user:
-            layout.setContentsMargins(12, 8, 12, 8)
+            layout.setContentsMargins(12, 4, 12, 4)
         else:
             layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
@@ -217,7 +218,7 @@ class ChatWidget(QWidget):
         self._layout = QVBoxLayout(self._inner)
         self._layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._layout.setSpacing(16)
-        self._layout.setContentsMargins(32, 20, 32, 20)
+        self._layout.setContentsMargins(192, 20, 192, 20)
 
         self._scroll.setWidget(self._inner)
         root.addWidget(self._scroll)

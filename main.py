@@ -73,7 +73,7 @@ def main():
     app.setQuitOnLastWindowClosed(False)  # keep alive in tray
 
     config = ConfigManager()
-    custom_qss = apply_theme(config.theme)
+    custom_qss = apply_theme(config.theme, font_size=config.font_size)
     app.setStyleSheet(custom_qss)
     sessions = SessionManager()
     tools = ToolManager(config)

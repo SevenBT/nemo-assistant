@@ -39,6 +39,7 @@ class EdgeSnapManager(QObject):
         self._snapped = False
         self._at_edge = False       # True when unsnapped via hover (sitting at edge)
         self._animating = False
+        self._drag_cooldown = False  # True briefly after cancel_animation to prevent re-snap
         self._unsnapped_geo: QRect | None = None
         self._anim: QPropertyAnimation | None = None
         self._indicator: QFrame | None = None
@@ -48,6 +49,10 @@ class EdgeSnapManager(QObject):
         self._auto_hide_timer = QTimer(self)
         self._auto_hide_timer.setSingleShot(True)
         self._auto_hide_timer.timeout.connect(self._on_auto_hide)
+
+        self._cooldown_timer = QTimer(self)
+        self._cooldown_timer.setSingleShot(True)
+        self._cooldown_timer.timeout.connect(self._clear_cooldown)
 
         QApplication.instance().installEventFilter(self)
 
@@ -73,6 +78,10 @@ class EdgeSnapManager(QObject):
         if not self._enabled or self._snapped or self._animating:
             return
 
+        # Don't snap during drag cooldown (after cancel_animation)
+        if self._drag_cooldown:
+            return
+
         # Don't snap while the user is actively resizing the window
         resize_filter = getattr(self._window, '_resize_filter', None)
         if resize_filter is not None and resize_filter.is_resizing:
@@ -83,6 +92,11 @@ class EdgeSnapManager(QObject):
         # startSystemMove() — the released event will retry via the event filter.
         if QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
             self._pending_snap_check = True
+            return
+
+        # Don't snap if the window was just resized (resize changes geometry
+        # which fires moveEvent, but user intent is resize not snap)
+        if resize_filter is not None and resize_filter.recently_resized:
             return
 
         # 只有窗口足够窄时才触发边缘吸附
@@ -134,8 +148,8 @@ class EdgeSnapManager(QObject):
 
     def cancel_animation(self):
         """Stop any running animation and reset to normal state."""
-        if not self._snapped and not self._animating:
-            return  # Nothing active – don't disturb _at_edge state
+        if not self._snapped and not self._animating and not self._at_edge:
+            return  # Nothing active – don't disturb state
         if self._anim is not None and self._anim.state() == QPropertyAnimation.State.Running:
             self._anim.stop()
         self._hide_indicator()
@@ -144,6 +158,10 @@ class EdgeSnapManager(QObject):
         self._at_edge = False
         self._unsnapped_geo = None
         self._auto_hide_timer.stop()
+        self._pending_snap_check = False
+        # Prevent re-snap during and shortly after a drag operation
+        self._drag_cooldown = True
+        self._cooldown_timer.start(500)
 
     # ── app-level event filter ──────────────────────────────────────────
     def eventFilter(self, obj, event):
@@ -239,6 +257,9 @@ class EdgeSnapManager(QObject):
         if not self._snapped and not self._animating and self._at_edge:
             self._at_edge = False
             self._snap()
+
+    def _clear_cooldown(self):
+        self._drag_cooldown = False
 
     # ── internals: indicator tab ────────────────────────────────────────
     def _ensure_indicator(self):

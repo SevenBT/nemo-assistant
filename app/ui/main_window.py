@@ -132,8 +132,14 @@ class MainWindow(FluentWindow):
     # ──────────────────────────────────────────── window setup
     def _build_window(self):
         wcfg = self._config.window_config
-        self.resize(wcfg.get("width", 440), wcfg.get("height", 700))
-        self.move(wcfg.get("x", 100), wcfg.get("y", 80))
+        w = wcfg.get("width", 440)
+        h = wcfg.get("height", 700)
+        self.resize(w, h)
+        # 默认居中屏幕
+        sg = QApplication.primaryScreen().availableGeometry()
+        default_x = sg.x() + (sg.width() - w) // 2
+        default_y = sg.y() + (sg.height() - h) // 2
+        self.move(wcfg.get("x", default_x), wcfg.get("y", default_y))
         # Qt >= 6.10: qframelesswindow uses NoTitleBarBackgroundHint which still
         # renders system close button.  Force FramelessWindowHint to suppress it.
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
@@ -754,7 +760,7 @@ class MainWindow(FluentWindow):
             if self._snap_mgr is not None:
                 self._snap_mgr.set_enabled(wcfg.get("edge_snap", True))
             new_theme = self._config.theme
-            custom_qss = apply_theme(new_theme)
+            custom_qss = apply_theme(new_theme, font_size=self._config.font_size)
             self.setStyleSheet(custom_qss)
             if not self.isVisible():
                 self.show()

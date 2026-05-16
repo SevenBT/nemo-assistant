@@ -293,6 +293,12 @@ class SettingsDialog(QDialog):
             self._theme_combo.addItem(t["name"], key)
         win_form.addRow("主题:", self._theme_combo)
 
+        self._font_size = QSpinBox()
+        self._font_size.setRange(12, 24)
+        self._font_size.setSingleStep(1)
+        self._font_size.setSuffix(" px")
+        win_form.addRow("字体大小:", self._font_size)
+
         tabs.addTab(win_w, "窗口")
 
         # ── Tools tab ─────────────────────────────────────────────────
@@ -416,6 +422,7 @@ class SettingsDialog(QDialog):
         idx = self._theme_combo.findData(theme)
         if idx >= 0:
             self._theme_combo.setCurrentIndex(idx)
+        self._font_size.setValue(win.get("font_size", 15))
 
         # Tools tab
         ws = self._config.get_tool_params("web_search")
@@ -509,6 +516,7 @@ class SettingsDialog(QDialog):
             edge_snap=self._edge_snap.isChecked(),
             edge_snap_width_threshold=self._edge_snap_threshold.value(),
             minimize_to=self._minimize_to.currentData(),
+            font_size=self._font_size.value(),
         )
         self._config.update_tools_config(
             {

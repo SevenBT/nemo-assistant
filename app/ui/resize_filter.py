@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QEvent, QObject, Qt
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
 from PyQt6.QtWidgets import QApplication, QScrollBar
 
 from qfluentwidgets.components.widgets.scroll_bar import ScrollBar as FluentScrollBar
@@ -30,10 +30,16 @@ class ResizeFilter(QObject):
         self._start_geo = None
         self._start_pos = None
         self._cursor_shape = None
+        self._recently_resized = False
 
     @property
     def is_resizing(self) -> bool:
         return self._active
+
+    @property
+    def recently_resized(self) -> bool:
+        """True for a short period after a resize operation ends."""
+        return self._recently_resized
 
     def install(self):
         QApplication.instance().installEventFilter(self)
@@ -171,6 +177,11 @@ class ResizeFilter(QObject):
         elif etype == QEvent.Type.MouseButtonRelease:
             if self._active:
                 self._active = False
+                self._recently_resized = True
+                QTimer.singleShot(300, self._clear_recently_resized)
                 return True
 
         return False
+
+    def _clear_recently_resized(self):
+        self._recently_resized = False

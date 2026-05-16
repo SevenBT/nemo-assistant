@@ -284,7 +284,7 @@ _filter_instance: _DarkTitleBarFilter | None = None
 
 # ── Public API ────────────────────────────────────────────────────────
 
-def apply_theme(theme_name: str, opacity: float = 1.0) -> str:
+def apply_theme(theme_name: str, opacity: float = 1.0, font_size: int = 15) -> str:
     """Apply Fluent theme globally and return custom QSS for app-specific elements."""
     global _current_dark_mode, _filter_instance, _current_text_color
     theme = THEMES.get(theme_name, THEMES[DEFAULT_THEME])
@@ -301,7 +301,7 @@ def apply_theme(theme_name: str, opacity: float = 1.0) -> str:
         app.installEventFilter(_filter_instance)
     # Apply dark title bar to all existing top-level windows
     _apply_dark_titlebar_to_all(dark)
-    return _build_custom_qss(theme)
+    return _build_custom_qss(theme, font_size)
 
 
 def _apply_dark_titlebar_to_all(dark: bool) -> None:
@@ -385,7 +385,7 @@ def enable_mica(hwnd: int, dark: bool = False) -> bool:
 
 # ── Internal ──────────────────────────────────────────────────────────
 
-def _build_custom_qss(theme: dict) -> str:
+def _build_custom_qss(theme: dict, font_size: int = 15) -> str:
     dark = theme["mode"] == Theme.DARK
     accent = theme["accent"]
     accent_light = theme["accent_light"]
@@ -398,6 +398,8 @@ def _build_custom_qss(theme: dict) -> str:
 
     accent_text = "#FFFFFF"
     dialog_btn_text = "#FFFFFF" if dark else "#FFFFFF"
+
+    code_size = max(font_size - 2, 10)
 
     return f"""
 /* ═══════════════════════════════════════════════════════════════════
@@ -482,10 +484,10 @@ QSplitter::handle:hover {{ background: {accent}; }}
    Message Bubbles — user has visible bubble, AI is frameless
    ═══════════════════════════════════════════════════════════════════ */
 #userMessage {{
-    background: {accent_light};
-    border: 1.5px solid {user_border};
+    background: {accent_subtle};
+    border: 1.5px solid {accent};
     border-radius: 18px; border-top-right-radius: 4px;
-    padding: 4px 6px;
+    padding: 2px 6px;
 }}
 #aiMessage {{
     background: transparent;
@@ -558,11 +560,13 @@ QSplitter::handle:hover {{ background: {accent}; }}
     border: 2px solid transparent;
     border-radius: 10px;
     padding: 8px 14px;
-    font-size: 13px;
+    font-size: {font_size}px;
+    color: {theme["text"]};
 }}
 #inputWidget QTextEdit:focus {{
     border-color: {accent};
     background: {theme["surface_solid"]};
+    color: {theme["text"]};
 }}
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -594,7 +598,7 @@ QSplitter::handle:hover {{ background: {accent}; }}
    Markdown rendered content in chat bubbles
    ═══════════════════════════════════════════════════════════════════ */
 #userBubble, #aiBubble {{
-    color: {theme["text"]}; font-size: 13px; line-height: 1.65;
+    color: {theme["text"]}; font-size: {font_size}px; line-height: 1.65;
     background: transparent; border: none;
     selection-background-color: {accent_light};
 }}
@@ -606,7 +610,7 @@ QSplitter::handle:hover {{ background: {accent}; }}
     border-radius: 3px;
     padding: 1px 4px;
     font-family: "Cascadia Code", "JetBrains Mono", "Consolas", monospace;
-    font-size: 12px;
+    font-size: {code_size}px;
 }}
 #userBubble pre, #aiBubble pre {{
     background: {"rgba(0,0,0,0.04)" if not dark else "rgba(255,255,255,0.06)"};
