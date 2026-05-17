@@ -274,6 +274,7 @@ class ToolboxPanel(QWidget):
         self._tools = tool_mgr
         self._config = config
         self._current_tool: ToolDefinition | None = None
+        self._saved_list_width: int | None = None
         self._build()
 
     def _build(self):
@@ -455,3 +456,23 @@ class ToolboxPanel(QWidget):
     def showEvent(self, event):
         self._load_list()
         super().showEvent(event)
+
+    def toggle_list(self):
+        """Public: toggle tool list visibility (called from TitleBar)."""
+        sizes = self._splitter.sizes()
+        total = sum(sizes)
+        list_width = sizes[0]
+        if list_width > 0:
+            self._saved_list_width = list_width
+            self._splitter.setSizes([0, total])
+        else:
+            width = self._saved_list_width or 200
+            self._splitter.setSizes([width, total - width])
+
+    def apply_search(self, keyword: str):
+        """Public: filter tool list by keyword (called from TitleBar)."""
+        kw = keyword.lower()
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            name = item.data(Qt.ItemDataRole.UserRole) or ""
+            item.setHidden(bool(kw) and kw not in name.lower())

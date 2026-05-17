@@ -257,8 +257,11 @@ class StickyNoteWindow(QWidget):
             f"border: none; padding: 8px 10px; font-size: 13px; line-height: 1.5; }}"
         )
         self._content_edit.setPlaceholderText("在此记录…")
-        # Load plain text from HTML content
-        self._content_edit.setPlainText(_html_to_plain(content))
+        # Sticky notes store HTML (supports text + images)
+        if content and "<" in content:
+            self._content_edit.setHtml(content)
+        else:
+            self._content_edit.setPlainText(content)
         # Enable context menu
         self._content_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._content_edit.customContextMenuRequested.connect(self._show_context_menu)
@@ -271,14 +274,12 @@ class StickyNoteWindow(QWidget):
     def _flush(self):
         if not self._note_mgr or not self._note_id:
             return
-        text = self._content_edit.toPlainText()
-        # Preserve existing title; only update content
+        content = self._content_edit.toHtml()
         note = self._note_mgr.get(self._note_id)
         if note:
-            self._note_mgr.update(self._note_id, note.title, text)
+            self._note_mgr.update(self._note_id, note.title, content)
             self._title_bar.set_title(note.title)
-            # Emit signal for external listeners (notes panel)
-            self.content_changed.emit(self._note_id, note.title, text)
+            self.content_changed.emit(self._note_id, note.title, content)
 
     def _save_position(self):
         """保存浮窗位置到数据库。"""
@@ -292,9 +293,11 @@ class StickyNoteWindow(QWidget):
 
     def update_content(self, title: str, content: str):
         """外部调用：更新浮窗内容（用于同步笔记面板的编辑）。"""
-        # Block signals to prevent triggering another update
         self._content_edit.blockSignals(True)
-        self._content_edit.setPlainText(_html_to_plain(content))
+        if content and "<" in content:
+            self._content_edit.setHtml(content)
+        else:
+            self._content_edit.setPlainText(content)
         self._content_edit.blockSignals(False)
         self._title_bar.set_title(title)
 

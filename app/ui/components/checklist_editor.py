@@ -158,6 +158,7 @@ class ChecklistEditor(QWidget):
             item.deleteLater()
         self._items.clear()
 
+        self.blockSignals(True)
         for line in content.splitlines():
             line = line.strip()
             if line.startswith("[x] ") or line.startswith("[X] "):
@@ -166,6 +167,7 @@ class ChecklistEditor(QWidget):
                 self._add_item(line[4:], False)
             elif line:
                 self._add_item(line, False)
+        self.blockSignals(False)
 
     def clear(self):
         for item in self._items[:]:

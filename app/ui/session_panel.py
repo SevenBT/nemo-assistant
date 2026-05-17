@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -40,6 +40,7 @@ class SessionPanel(QFrame):
         self.setObjectName("sessionPanel")
         self.setMinimumWidth(120)
         self._sessions: list[Session] = []
+        self._search_keyword = ""
         self._build()
 
     def _build(self):
@@ -78,12 +79,39 @@ class SessionPanel(QFrame):
         self._list.model().rowsMoved.connect(self._on_rows_moved)
         layout.addWidget(self._list)
 
+    # ------------------------------------------------------------------ search
+    def apply_search(self, keyword: str):
+        self._search_keyword = keyword
+        self._reload_list()
+
+    def _reload_list(self):
+        """Reload list applying current search filter, preserving selection."""
+        current_id = ""
+        cur = self._list.currentItem()
+        if cur:
+            current_id = cur.data(Qt.ItemDataRole.UserRole)
+
+        kw = self._search_keyword.lower()
+        self._list.blockSignals(True)
+        self._list.clear()
+        for s in self._sessions:
+            if kw and kw not in s.title.lower():
+                continue
+            item = self._make_item(s)
+            self._list.addItem(item)
+            if s.id == current_id:
+                self._list.setCurrentItem(item)
+        self._list.blockSignals(False)
+
     # ------------------------------------------------------------------ data
     def load(self, sessions: list[Session], selected_id: str = ""):
         self._sessions = sessions
         self._list.blockSignals(True)
         self._list.clear()
+        kw = self._search_keyword.lower()
         for s in sessions:
+            if kw and kw not in s.title.lower():
+                continue
             item = self._make_item(s)
             self._list.addItem(item)
             if s.id == selected_id:

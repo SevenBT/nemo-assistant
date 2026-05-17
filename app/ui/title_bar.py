@@ -10,11 +10,12 @@ import ctypes
 import sys
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     FluentIcon,
+    SearchLineEdit,
     SegmentedWidget,
     TransparentToolButton,
     ToolTipFilter,
@@ -73,6 +74,10 @@ class _DummyBtn(QWidget):
 
 
 class TitleBar(QWidget):
+    session_search_changed = pyqtSignal(str)   # 聊天视图搜索
+    notes_search_changed = pyqtSignal(str)     # 笔记视图搜索
+    workshop_search_changed = pyqtSignal(str)  # 工坊视图搜索
+
     def __init__(self, window: "MainWindow"):
         super().__init__(window)
         self._win = window
@@ -117,19 +122,47 @@ class TitleBar(QWidget):
         nav_layout.setContentsMargins(8, 0, 8, 0)
         nav_layout.setSpacing(0)
 
-        # Sidebar toggle
-        self._toggle_btn = TransparentToolButton(FluentIcon.MENU)
-        self._toggle_btn.setFixedSize(36, 32)
-        self._toggle_btn.setToolTip("显示/隐藏会话列表")
-        self._toggle_btn.installEventFilter(
-            _BorderlessToolTipFilter(self._toggle_btn, showDelay=400, position=ToolTipPosition.BOTTOM)
+        # ── Left: toggle + search (view-specific) ─────────────────────
+        # Chat controls
+        self._chat_toggle = self._make_tool_btn(
+            FluentIcon.MENU, "显示/隐藏会话列表", self._win._toggle_session_panel
         )
-        self._toggle_btn.clicked.connect(self._win._toggle_session_panel)
-        nav_layout.addWidget(self._toggle_btn)
+        nav_layout.addWidget(self._chat_toggle)
+        nav_layout.addSpacing(4)
 
-        nav_layout.addSpacing(8)
+        self._chat_search = self._make_search("搜索会话...", self.session_search_changed)
+        self._chat_search.setFixedWidth(180)
+        nav_layout.addWidget(self._chat_search)
 
-        # View-switcher (SegmentedWidget)
+        # Notes controls
+        self._notes_toggle = self._make_tool_btn(
+            FluentIcon.MENU, "显示/隐藏笔记列表", lambda: self._win._notes_panel.toggle_list()
+        )
+        self._notes_toggle.hide()
+        nav_layout.addWidget(self._notes_toggle)
+        nav_layout.addSpacing(4)
+
+        self._notes_search = self._make_search("搜索笔记...", self.notes_search_changed)
+        self._notes_search.setFixedWidth(180)
+        self._notes_search.hide()
+        nav_layout.addWidget(self._notes_search)
+
+        # Workshop controls
+        self._workshop_toggle = self._make_tool_btn(
+            FluentIcon.MENU, "显示/隐藏工具列表", lambda: self._win._toolbox_panel.toggle_list()
+        )
+        self._workshop_toggle.hide()
+        nav_layout.addWidget(self._workshop_toggle)
+        nav_layout.addSpacing(4)
+
+        self._workshop_search = self._make_search("搜索工具...", self.workshop_search_changed)
+        self._workshop_search.setFixedWidth(180)
+        self._workshop_search.hide()
+        nav_layout.addWidget(self._workshop_search)
+
+        # ── Right: nav + screenshot (always visible, right-aligned) ───
+        nav_layout.addStretch()
+
         self._nav = SegmentedWidget()
         self._nav.setFixedHeight(32)
         self._nav.addItem("chat", "聊天", icon=FluentIcon.CHAT)
@@ -139,14 +172,12 @@ class TitleBar(QWidget):
         self._nav.currentItemChanged.connect(self._on_nav_changed)
         nav_layout.addWidget(self._nav)
 
-        # Screenshot button
         nav_layout.addSpacing(8)
         self._screenshot_btn = self._make_tool_btn(
             FluentIcon.CLIPPING_TOOL, "截图", self._win._start_screenshot
         )
         nav_layout.addWidget(self._screenshot_btn)
 
-        nav_layout.addStretch()
         root.addWidget(nav_row)
 
         # Aliases required by FluentWindow's nativeEvent and setTitleBar internals.
@@ -164,6 +195,22 @@ class TitleBar(QWidget):
         btn.clicked.connect(slot)
         return btn
 
+    def _make_search(self, placeholder: str, signal: pyqtSignal) -> SearchLineEdit:
+        """Create a debounced SearchLineEdit wired to the given signal."""
+        edit = SearchLineEdit()
+        edit.setPlaceholderText(placeholder)
+        edit.setFixedHeight(28)
+
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(300)
+        timer.timeout.connect(lambda: signal.emit(edit.text().strip()))
+
+        edit.textChanged.connect(lambda _: timer.start())
+        edit.searchSignal.connect(lambda t: (timer.stop(), signal.emit(t.strip())))
+        edit.clearSignal.connect(lambda: (timer.stop(), signal.emit("")))
+        return edit
+
     # ── Navigation ────────────────────────────────────────────────────
     _NAV_MAP = {"chat": 0, "notes": 1, "workshop": 2}
 
@@ -175,8 +222,12 @@ class TitleBar(QWidget):
         keys = list(self._NAV_MAP.keys())
         if 0 <= index < len(keys):
             self._nav.setCurrentItem(keys[index])
-        # Sidebar toggle only makes sense on chat view
-        self._toggle_btn.setVisible(index == 0)
+        self._chat_toggle.setVisible(index == 0)
+        self._chat_search.setVisible(index == 0)
+        self._notes_toggle.setVisible(index == 1)
+        self._notes_search.setVisible(index == 1)
+        self._workshop_toggle.setVisible(index == 2)
+        self._workshop_search.setVisible(index == 2)
 
     # ── Drag + right-click ────────────────────────────────────────────
     def mousePressEvent(self, e: QMouseEvent):

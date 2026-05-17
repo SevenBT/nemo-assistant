@@ -1,6 +1,6 @@
 import markdown as _md
 
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QEvent, QSize, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
     QSizePolicy,
@@ -198,6 +198,8 @@ class ChatWidget(QWidget):
 
     file_attached = pyqtSignal(list)  # Emits list[Attachment]
 
+    _MAX_CONTENT_WIDTH = 760  # content column max width; centered when viewport is wider
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._bubbles: list[MessageBubble] = []
@@ -218,9 +220,10 @@ class ChatWidget(QWidget):
         self._layout = QVBoxLayout(self._inner)
         self._layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._layout.setSpacing(16)
-        self._layout.setContentsMargins(192, 20, 192, 20)
+        self._layout.setContentsMargins(16, 20, 16, 20)
 
         self._scroll.setWidget(self._inner)
+        self._scroll.viewport().installEventFilter(self)
         root.addWidget(self._scroll)
 
         # Typing indicator at bottom (outside scroll area)
@@ -229,6 +232,16 @@ class ChatWidget(QWidget):
         self._typing.hide()
 
     # -- public ----------------------------------------------------------
+
+    def eventFilter(self, obj, event):
+        if obj is self._scroll.viewport() and event.type() == QEvent.Type.Resize:
+            self._update_inner_margins(event.size().width())
+        return super().eventFilter(obj, event)
+
+    def _update_inner_margins(self, viewport_width: int):
+        """Keep content centered with equal side margins when viewport > max width."""
+        side = max(16, (viewport_width - self._MAX_CONTENT_WIDTH) // 2)
+        self._layout.setContentsMargins(side, 20, side, 20)
 
     def add_message(self, message: Message) -> MessageBubble:
         bubble = MessageBubble(message)

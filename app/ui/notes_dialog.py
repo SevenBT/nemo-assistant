@@ -1,8 +1,9 @@
 import re
 from datetime import datetime
+from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QGuiApplication, QPainter
+from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal
+from PyQt6.QtGui import QColor, QGuiApplication
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -11,6 +12,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidgetItem,
     QSplitter,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -23,19 +25,16 @@ from qfluentwidgets import (
     ListWidget,
     MessageBox,
     PushButton,
+    RoundMenu,
     TextEdit,
+    TogglePushButton,
     TransparentToolButton,
-    ToolTipFilter,
-    ToolTipPosition,
 )
 
 from app.core.config import NOTES_IMAGES_DIR
 from app.core.note_manager import NoteManager
-from app.ui.sticky_note_window import _html_to_plain
-from app.ui.components.tag_input import TagInput
-from app.ui.components.horizontal_tag_bar import HorizontalTagBar
-from app.ui.components.search_bar import SearchBar
-from app.ui.components.checklist_editor import ChecklistEditor
+from app.models.note import Folder
+from app.ui.components.markdown_editor import MarkdownEditor
 from app.ui.components.context_menu import ContextMenu
 
 
@@ -61,14 +60,60 @@ def _note_color(note_id) -> str:
     return _NOTE_DOT_COLORS[idx]
 
 
+def _render_markdown(text: str, images_base: Path | None = None) -> str:
+    """Convert Markdown text to HTML for preview."""
+    import markdown
+    extensions = [
+        "tables",
+        "fenced_code",
+        "codehilite",
+        "nl2br",
+        "sane_lists",
+        "toc",
+    ]
+    extension_configs = {
+        "codehilite": {"guess_lang": False, "noclasses": True},
+    }
+    html = markdown.markdown(
+        text,
+        extensions=extensions,
+        extension_configs=extension_configs,
+    )
+    # Replace relative image paths with absolute paths for QTextBrowser
+    if images_base and "images/" in html:
+        def replace_img(m):
+            src = m.group(1)
+            if src.startswith("images/"):
+                abs_path = images_base.parent / src
+                return f'<img src="{abs_path}"'
+            return m.group(0)
+        html = re.sub(r'<img src="(images/[^"]+)"', replace_img, html)
+    return html
+
+
+def _html_to_plain(html: str) -> str:
+    """Strip HTML tags to get plain text (for clipboard copy)."""
+    text = re.sub(r"<[^>]+>", "", html)
+    return text.strip()
+
+
+class _NoteList(ListWidget):
+    """Simple note list widget without drag-to-reorder."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
+
+
 class _NoteItemWidget(QWidget):
     """List item widget with a colored left stripe, title, and date."""
 
-    def __init__(self, title: str, date_str: str, color: str, parent=None):
+    def __init__(self, title: str, date_str: str, color: str, indent: bool = False, parent=None):
         super().__init__(parent)
         self._color = color
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 6, 8, 6)
+        left_margin = 28 if indent else 10
+        layout.setContentsMargins(left_margin, 6, 8, 6)
         layout.setSpacing(8)
 
         # Colored dot indicator
@@ -95,9 +140,71 @@ class _NoteItemWidget(QWidget):
 
         layout.addLayout(text_col, 1)
 
+        # Let all child widgets pass mouse events through to the viewport
+        for child in self.findChildren(QWidget):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
     def update_text(self, title: str, date_str: str):
         self._title_lbl.setText(title)
         self._date_lbl.setText(date_str)
+
+
+
+class _FolderItem(QWidget):
+    """List item widget for a folder entry with expand/collapse arrow."""
+
+    def __init__(self, name: str, expanded: bool = False, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 5, 8, 5)
+        layout.setSpacing(6)
+
+        self._arrow = QLabel("▾" if expanded else "▸")
+        self._arrow.setStyleSheet("font-size: 18px; color: #9CA3AF; background: transparent; min-width: 14px;")
+        layout.addWidget(self._arrow, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(16, 16)
+        icon_lbl.setStyleSheet("background: transparent;")
+        icon_lbl.setPixmap(FluentIcon.FOLDER.icon().pixmap(16, 16))
+        layout.addWidget(icon_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._name_lbl = QLabel(name)
+        self._name_lbl.setStyleSheet("font-size: 13px; font-weight: 500; background: transparent;")
+        self._name_lbl.setWordWrap(False)
+        layout.addWidget(self._name_lbl, 1)
+
+        for child in self.findChildren(QWidget):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def set_expanded(self, expanded: bool):
+        self._arrow.setText("▾" if expanded else "▸")
+
+    def update_name(self, name: str):
+        self._name_lbl.setText(name)
+
+
+class _UncategorizedSection(QWidget):
+    """Section header for uncategorized notes — acts as a drop target for moving notes out of folders."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 5, 8, 5)
+        layout.setSpacing(6)
+
+        spacer = QLabel("")
+        spacer.setFixedWidth(14)
+        spacer.setStyleSheet("background: transparent;")
+        layout.addWidget(spacer, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        name_lbl = QLabel("未分类")
+        name_lbl.setStyleSheet("font-size: 13px; font-weight: 500; color: #9CA3AF; background: transparent;")
+        name_lbl.setWordWrap(False)
+        layout.addWidget(name_lbl, 1)
+
+        for child in self.findChildren(QWidget):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
 
 class NotesPanel(QWidget):
@@ -111,53 +218,41 @@ class NotesPanel(QWidget):
         self._current_note_id: str | None = None
         self._trash_mode = False
         self._pin_windows: list = []
-        self._current_filter_tag: str | None = None
         self._current_search_keyword: str = ""
+        self._current_folder_id: int | None = None  # used only for new-note placement
+        self._expanded_folders: set[int] = set()
         self._saved_list_width: int | None = None
+        self._preview_mode = False
         self._build()
         self._load()
 
     def _build(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
-        # ── Tag bar (top) ────────────────────────────────────────────
-        self._tag_bar = HorizontalTagBar()
-        self._tag_bar.tag_selected.connect(self._on_tag_filter_changed)
-        layout.addWidget(self._tag_bar)
-
-        # ── Toolbar ──────────────────────────────────────────────────
+        # ── Toolbar (top, left-aligned) ──────────────────────────────
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
+        toolbar.setContentsMargins(0, 0, 0, 0)
 
-        self._toggle_btn = TransparentToolButton(FluentIcon.MENU)
-        self._toggle_btn.setFixedSize(36, 32)
-        self._toggle_btn.setToolTip("显示/隐藏笔记列表")
-        self._toggle_btn.installEventFilter(
-            ToolTipFilter(self._toggle_btn, showDelay=400, position=ToolTipPosition.BOTTOM)
-        )
-        self._toggle_btn.clicked.connect(self._toggle_note_list)
-        toolbar.addWidget(self._toggle_btn)
-
-        self._search_bar = SearchBar()
-        self._search_bar.search_triggered.connect(self._on_search)
-        toolbar.addWidget(self._search_bar)
-
-        toolbar.addStretch()
-
-        # Normal mode buttons
+        # Normal mode buttons — left-aligned
         self._new_note_btn = PushButton(FluentIcon.EDIT, "新建笔记")
         self._new_note_btn.clicked.connect(lambda: self._on_new("note"))
         toolbar.addWidget(self._new_note_btn)
 
-        self._new_todo_btn = PushButton(FluentIcon.CHECKBOX, "新建待办")
-        self._new_todo_btn.clicked.connect(lambda: self._on_new("todo"))
-        toolbar.addWidget(self._new_todo_btn)
+        self._new_sticky_btn = PushButton(FluentIcon.PIN, "新建便签")
+        self._new_sticky_btn.clicked.connect(lambda: self._on_new("sticky"))
+        toolbar.addWidget(self._new_sticky_btn)
 
         self._trash_btn = PushButton(FluentIcon.DELETE, "回收站")
         self._trash_btn.clicked.connect(self._enter_trash)
         toolbar.addWidget(self._trash_btn)
+
+        self._preview_btn = TogglePushButton(FluentIcon.VIEW, "预览")
+        self._preview_btn.toggled.connect(self._on_preview_toggled)
+        self._preview_btn.hide()
+        toolbar.addWidget(self._preview_btn)
 
         # Trash mode buttons (hidden by default)
         self._back_btn = PushButton(FluentIcon.RETURN, "返回")
@@ -203,14 +298,26 @@ class NotesPanel(QWidget):
         self._list_panel.setMinimumWidth(120)
         list_panel_layout = QVBoxLayout(self._list_panel)
         list_panel_layout.setContentsMargins(6, 6, 6, 6)
-        list_panel_layout.setSpacing(6)
+        list_panel_layout.setSpacing(4)
 
-        self._list = ListWidget()
+        # List header: new-folder icon button (right-aligned)
+        list_header = QHBoxLayout()
+        list_header.setContentsMargins(2, 0, 2, 0)
+        list_header.addStretch()
+        self._new_folder_btn = TransparentToolButton(FluentIcon.FOLDER_ADD)
+        self._new_folder_btn.setFixedSize(24, 24)
+        self._new_folder_btn.setToolTip("新建文件夹")
+        self._new_folder_btn.clicked.connect(self._on_new_folder)
+        list_header.addWidget(self._new_folder_btn)
+        list_panel_layout.addLayout(list_header)
+
+        self._list = _NoteList()
         self._list.setWordWrap(True)
         self._list.setUniformItemSizes(False)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._list.itemSelectionChanged.connect(self._on_selection_changed)
+        self._list.itemClicked.connect(self._on_item_clicked)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_list_context_menu)
         list_panel_layout.addWidget(self._list)
@@ -228,18 +335,22 @@ class NotesPanel(QWidget):
         self._title_edit.setPlaceholderText("标题…")
         right_layout.addWidget(self._title_edit)
 
-        self._content_edit = TextEdit()
-        self._content_edit.setPlaceholderText("在此输入笔记内容…")
-        right_layout.addWidget(self._content_edit, 1)
+        # Markdown editor (for note type)
+        self._md_editor = MarkdownEditor(images_dir=NOTES_IMAGES_DIR)
+        self._md_editor.setPlaceholderText("在此输入 Markdown 内容…")
+        right_layout.addWidget(self._md_editor, 1)
 
-        self._checklist_editor = ChecklistEditor()
-        self._checklist_editor.content_changed.connect(lambda: self._auto_save_timer.start())
-        self._checklist_editor.hide()
-        right_layout.addWidget(self._checklist_editor, 1)
+        # Markdown preview (for note type, preview mode)
+        self._md_preview = QTextBrowser()
+        self._md_preview.setOpenExternalLinks(True)
+        self._md_preview.hide()
+        right_layout.addWidget(self._md_preview, 1)
 
-        self._tag_input = TagInput()
-        self._tag_input.tags_changed.connect(self._on_tags_changed)
-        right_layout.addWidget(self._tag_input)
+        # Rich text editor (for sticky type — HTML with images)
+        self._sticky_edit = TextEdit()
+        self._sticky_edit.setPlaceholderText("在此输入便签内容…")
+        self._sticky_edit.hide()
+        right_layout.addWidget(self._sticky_edit, 1)
 
         self._set_editor_enabled(False)
         self._splitter.addWidget(self._editor_widget)
@@ -258,14 +369,36 @@ class NotesPanel(QWidget):
 
         layout.addWidget(self._splitter, 1)
 
-        # Auto-save timer (1.5s debounce)
+        # Auto-save: flush on focus-out; also a 5s idle timer as safety net
         self._auto_save_timer = QTimer(self)
         self._auto_save_timer.setSingleShot(True)
-        self._auto_save_timer.setInterval(1500)
+        self._auto_save_timer.setInterval(5000)
         self._auto_save_timer.timeout.connect(self._flush_current)
 
         self._title_edit.textChanged.connect(lambda _: self._auto_save_timer.start())
-        self._content_edit.textChanged.connect(self._auto_save_timer.start)
+        self._md_editor.textChanged.connect(self._auto_save_timer.start)
+        self._sticky_edit.textChanged.connect(self._auto_save_timer.start)
+
+        self._title_edit.editingFinished.connect(self._flush_current)
+        self._md_editor.installEventFilter(self)
+        self._sticky_edit.installEventFilter(self)
+        self._sticky_edit.viewport().installEventFilter(self)
+
+    # ------------------------------------------------------------------ preview toggle
+    def _on_preview_toggled(self, checked: bool):
+        self._preview_mode = checked
+        note = self._mgr.get(self._current_note_id) if self._current_note_id else None
+        is_note_type = note and note.note_type == "note"
+        if is_note_type:
+            if checked:
+                self._flush_current()
+                html = _render_markdown(self._md_editor.toPlainText(), NOTES_IMAGES_DIR)
+                self._md_preview.setHtml(html)
+                self._md_editor.hide()
+                self._md_preview.show()
+            else:
+                self._md_preview.hide()
+                self._md_editor.show()
 
     # ------------------------------------------------------------------ load
     def _load(self):
@@ -274,33 +407,66 @@ class NotesPanel(QWidget):
 
         if self._trash_mode:
             notes = self._mgr.get_trash()
+            for note in notes:
+                self._add_note_item(note, indent=False)
         elif self._current_search_keyword:
-            tags = [self._current_filter_tag] if self._current_filter_tag else None
-            notes = self._mgr.search_notes(keyword=self._current_search_keyword, tags=tags, note_types=None)
-        elif self._current_filter_tag:
-            notes = self._mgr.search_by_tag(self._current_filter_tag)
+            notes = self._mgr.search_notes(keyword=self._current_search_keyword, note_types=None)
+            for note in notes:
+                self._add_note_item(note, indent=False)
         else:
-            notes = self._mgr.get_notes()
+            # Top-level: folders (with inline expansion) then uncategorized notes
+            folders = self._mgr.get_folders()
+            for folder in folders:
+                expanded = folder.id in self._expanded_folders
+                f_item = QListWidgetItem()
+                f_item.setData(Qt.ItemDataRole.UserRole, folder.id)
+                f_item.setData(Qt.ItemDataRole.UserRole + 1, "folder")
+                f_item.setToolTip(folder.name)
+                f_item.setFlags(
+                    (f_item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsDragEnabled)
+                    | Qt.ItemFlag.ItemIsDropEnabled
+                )
+                self._list.addItem(f_item)
+                widget = _FolderItem(folder.name, expanded=expanded)
+                f_item.setSizeHint(widget.sizeHint())
+                self._list.setItemWidget(f_item, widget)
 
-        restore_item = None
-        for note in notes:
-            date_str = datetime.fromisoformat(note.updated_at).strftime("%m-%d %H:%M")
-            short = note.title[:20] + "…" if len(note.title) > 20 else note.title
-            color = _note_color(note.id)
+                if expanded:
+                    folder_notes = self._mgr.get_notes_in_folder(folder.id)
+                    for note in folder_notes:
+                        self._add_note_item(note, indent=True)
 
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, note.id)
-            item.setToolTip(note.title)
-            self._list.addItem(item)
+            # Uncategorized notes (folder_id IS NULL)
+            all_notes = self._mgr.get_notes()
+            uncategorized = [n for n in all_notes if n.folder_id is None]
 
-            widget = _NoteItemWidget(short, date_str, color)
-            item.setSizeHint(widget.sizeHint())
-            self._list.setItemWidget(item, widget)
+            # Add "未分类" section header when folders exist (provides a drop target)
+            if folders:
+                uc_item = QListWidgetItem()
+                uc_item.setData(Qt.ItemDataRole.UserRole, None)
+                uc_item.setData(Qt.ItemDataRole.UserRole + 1, "uncategorized")
+                uc_item.setFlags(
+                    uc_item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsDragEnabled
+                )
+                self._list.addItem(uc_item)
+                widget = _UncategorizedSection()
+                uc_item.setSizeHint(widget.sizeHint())
+                self._list.setItemWidget(uc_item, widget)
 
-            if not self._trash_mode and note.id == self._current_note_id:
-                restore_item = item
+            for note in uncategorized:
+                self._add_note_item(note, indent=False)
 
         self._list.blockSignals(False)
+
+        # Restore selection
+        restore_item = None
+        if self._current_note_id is not None and not self._trash_mode:
+            for i in range(self._list.count()):
+                it = self._list.item(i)
+                if (it.data(Qt.ItemDataRole.UserRole + 1) == "note"
+                        and it.data(Qt.ItemDataRole.UserRole) == self._current_note_id):
+                    restore_item = it
+                    break
 
         if restore_item:
             self._list.blockSignals(True)
@@ -312,21 +478,56 @@ class NotesPanel(QWidget):
 
         self._update_editor_visibility()
         self._update_toolbar()
-        self._refresh_tag_filter()
 
-    def _refresh_tag_filter(self):
-        if self._trash_mode:
-            self._tag_bar.hide()
-            self._search_bar.hide()
-        else:
-            self._tag_bar.show()
-            self._search_bar.show()
-            tags_with_count = self._mgr.get_all_tags_with_count()
-            self._tag_bar.set_tags(tags_with_count)
+    def _add_note_item(self, note, indent: bool):
+        """Add a note QListWidgetItem to self._list."""
+        date_str = datetime.fromisoformat(note.updated_at).strftime("%m-%d %H:%M")
+        short = note.title[:20] + "…" if len(note.title) > 20 else note.title
+        color = _note_color(note.id)
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, note.id)
+        item.setData(Qt.ItemDataRole.UserRole + 1, "note")
+        item.setData(Qt.ItemDataRole.UserRole + 2, note.folder_id)  # for drag-drop folder resolution
+        item.setToolTip(note.title)
+        self._list.addItem(item)
+        widget = _NoteItemWidget(short, date_str, color, indent=indent)
+        item.setSizeHint(widget.sizeHint())
+        self._list.setItemWidget(item, widget)
+
+    def _on_new_folder(self):
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "新建文件夹", "文件夹名称:")
+        if ok and name.strip():
+            self._mgr.create_folder(name.strip())
+            self._load()
+
+    def _on_folder_selected(self, folder_id):
+        """Set current folder context for new-note placement."""
+        self._current_folder_id = folder_id
+
+    def _on_folder_renamed(self, folder_id: int, name: str):
+        self._mgr.rename_folder(folder_id, name)
+        self._load()
+
+    def _on_folder_deleted(self, folder_id: int):
+        self._mgr.delete_folder(folder_id)
+        if self._current_folder_id == folder_id:
+            self._current_folder_id = None
+        self._load()
+
+    def _rename_folder_dialog(self, folder_id: int, current_name: str):
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "重命名文件夹", "新名称:", text=current_name)
+        if ok and name.strip():
+            self._on_folder_renamed(folder_id, name.strip())
+
+    def _delete_folder_confirm(self, folder_id: int):
+        w = MessageBox("删除文件夹", "删除文件夹后，其中的笔记将移至顶层。确定继续吗？", self.window())
+        if w.exec():
+            self._on_folder_deleted(folder_id)
 
     def _on_tag_filter_changed(self, tag_name: str):
-        self._current_filter_tag = tag_name if tag_name else None
-        self._load()
+        pass  # tags removed
 
     def _on_search(self, keyword: str):
         self._current_search_keyword = keyword
@@ -341,20 +542,13 @@ class NotesPanel(QWidget):
         self._title_edit.setText(note.title)
         self._title_edit.blockSignals(False)
 
-        self._tag_input.blockSignals(True)
-        self._tag_input.set_tags(note.tags)
-        self._tag_input.set_all_tags(self._mgr.get_all_tags())
-        self._tag_input.blockSignals(False)
+        if note.note_type == "sticky":
+            self._md_editor.hide()
+            self._md_preview.hide()
+            self._sticky_edit.show()
+            self._preview_btn.hide()
 
-        if note.note_type == "todo":
-            self._content_edit.hide()
-            self._checklist_editor.show()
-            self._checklist_editor.set_content(note.content)
-        else:
-            self._checklist_editor.hide()
-            self._content_edit.show()
-
-            self._content_edit.blockSignals(True)
+            self._sticky_edit.blockSignals(True)
             content = note.content
             if "images/" in content:
                 def replace_path(m):
@@ -362,11 +556,45 @@ class NotesPanel(QWidget):
                     abs_path = NOTES_IMAGES_DIR.parent / rel_path
                     return f'<img src="{abs_path}"'
                 content = re.sub(r'<img src="(images/[^"]+)"', replace_path, content)
-            self._content_edit.setHtml(content)
-            self._content_edit.blockSignals(False)
+            self._sticky_edit.setHtml(content)
+            self._sticky_edit.blockSignals(False)
+        elif note.note_type == "todo":
+            # Legacy todo notes — show as plain text in markdown editor, read-only feel
+            self._sticky_edit.hide()
+            self._md_preview.hide()
+            self._preview_btn.show()
+            self._md_editor.blockSignals(True)
+            self._md_editor.setPlainText(note.content)
+            self._md_editor.blockSignals(False)
+            self._md_editor.show()
+        else:
+            # note type — Markdown
+            self._sticky_edit.hide()
+            self._preview_btn.show()
 
-    def _on_tags_changed(self, tags: list[str]):
-        self._auto_save_timer.start()
+            self._md_editor.blockSignals(True)
+            self._md_editor.setPlainText(note.content)
+            self._md_editor.blockSignals(False)
+
+            if self._preview_mode:
+                html = _render_markdown(note.content, NOTES_IMAGES_DIR)
+                self._md_preview.setHtml(html)
+                self._md_editor.hide()
+                self._md_preview.show()
+            else:
+                self._md_preview.hide()
+                self._md_editor.show()
+
+    # ------------------------------------------------------------------ item clicked (folder toggle)
+    def _on_item_clicked(self, item: QListWidgetItem):
+        if item.data(Qt.ItemDataRole.UserRole + 1) not in ("folder",):
+            return
+        folder_id = item.data(Qt.ItemDataRole.UserRole)
+        if folder_id in self._expanded_folders:
+            self._expanded_folders.discard(folder_id)
+        else:
+            self._expanded_folders.add(folder_id)
+        self._load()
 
     # ------------------------------------------------------------------ selection
     def _on_selection_changed(self):
@@ -374,11 +602,17 @@ class NotesPanel(QWidget):
         n = len(selected)
 
         if not self._trash_mode and n == 1:
-            note_id = selected[0].data(Qt.ItemDataRole.UserRole)
-            if note_id != self._current_note_id:
-                self._flush_current()
-                self._current_note_id = note_id
-                self._load_note_into_editor(note_id)
+            item_type = selected[0].data(Qt.ItemDataRole.UserRole + 1)
+            item_id = selected[0].data(Qt.ItemDataRole.UserRole)
+
+            if item_type in ("folder", "uncategorized"):
+                return  # handled by _on_item_clicked or non-selectable
+            else:
+                note_id = item_id
+                if note_id != self._current_note_id:
+                    self._flush_current()
+                    self._current_note_id = note_id
+                    self._load_note_into_editor(note_id)
         else:
             self._flush_current()
             if n == 0:
@@ -390,31 +624,37 @@ class NotesPanel(QWidget):
     # ------------------------------------------------------------------ editor visibility
     def _update_editor_visibility(self):
         selected = self._list.selectedItems()
-        has_selection = (not self._trash_mode) and len(selected) == 1
-        self._set_editor_enabled(has_selection)
-        if not has_selection:
+        has_note_selection = (
+            not self._trash_mode
+            and len(selected) == 1
+            and selected[0].data(Qt.ItemDataRole.UserRole + 1) == "note"
+        )
+        self._set_editor_enabled(has_note_selection)
+        if not has_note_selection:
             self._clear_editor()
 
     def _set_editor_enabled(self, enabled: bool):
         self._title_edit.setEnabled(enabled)
-        self._content_edit.setEnabled(enabled)
-        self._tag_input.setEnabled(enabled)
-        self._checklist_editor.set_enabled_editing(enabled)
+        self._md_editor.setEnabled(enabled)
+        self._sticky_edit.setEnabled(enabled)
 
         if not enabled:
             self._title_edit.setPlaceholderText("请从左侧列表选择笔记…")
-            self._content_edit.setPlaceholderText("请从左侧列表选择笔记…")
+            self._md_editor.setPlaceholderText("请从左侧列表选择笔记…")
+            self._sticky_edit.setPlaceholderText("请从左侧列表选择笔记…")
         else:
             self._title_edit.setPlaceholderText("标题…")
-            self._content_edit.setPlaceholderText("在此输入笔记内容…")
+            self._md_editor.setPlaceholderText("在此输入 Markdown 内容…")
+            self._sticky_edit.setPlaceholderText("在此输入便签内容…")
 
     # ------------------------------------------------------------------ toolbar state
     def _update_toolbar(self):
         selected_n = len(self._list.selectedItems())
         if self._trash_mode:
             self._new_note_btn.hide()
-            self._new_todo_btn.hide()
+            self._new_sticky_btn.hide()
             self._trash_btn.hide()
+            self._preview_btn.hide()
             self._back_btn.show()
             self._restore_btn.show()
             self._restore_btn.setEnabled(selected_n > 0)
@@ -428,21 +668,19 @@ class NotesPanel(QWidget):
             self._purge_btn.hide()
             self._purge_all_btn.hide()
             self._new_note_btn.show()
-            self._new_todo_btn.show()
+            self._new_sticky_btn.show()
             tc = self._mgr.trash_count()
             self._trash_btn.setText(f"回收站({tc})" if tc > 0 else "回收站")
             self._trash_btn.show()
+            # Preview button visibility is managed by _load_note_into_editor
 
     # ------------------------------------------------------------------ normal actions
     def _on_new(self, note_type: str = "note"):
         self._flush_current()
-        if note_type == "todo":
-            note = self._mgr.create(title="新待办", content="", note_type="todo")
+        if note_type == "sticky":
+            note = self._mgr.create(title="新便签", content="", note_type="sticky")
         else:
             note = self._mgr.create(title="新笔记", content="", note_type="note")
-
-        if self._current_filter_tag and self._current_filter_tag != "全部笔记":
-            self._mgr.update(note.id, note.title, note.content, [self._current_filter_tag])
 
         self._current_note_id = note.id
         self._load()
@@ -477,13 +715,11 @@ class NotesPanel(QWidget):
         self._flush_current()
         self._trash_mode = True
         self._current_search_keyword = ""
-        self._search_bar.clear()
         self._load()
 
     def _exit_trash(self):
         self._trash_mode = False
         self._current_search_keyword = ""
-        self._search_bar.clear()
         self._load()
 
     def _on_restore(self):
@@ -517,6 +753,30 @@ class NotesPanel(QWidget):
             self._load()
 
     # ------------------------------------------------------------------ save
+    def eventFilter(self, obj, event):
+        from PyQt6.QtCore import QEvent
+        if event.type() == QEvent.Type.FocusOut:
+            if obj is self._md_editor or obj is self._sticky_edit:
+                self._auto_save_timer.stop()
+                self._flush_current()
+        if event.type() == QEvent.Type.FocusIn:
+            if obj is self._sticky_edit or obj is self._sticky_edit.viewport():
+                self._apply_sticky_text_color()
+        return super().eventFilter(obj, event)
+
+    def _apply_sticky_text_color(self):
+        """Force sticky editor text color to follow theme."""
+        try:
+            from app.ui.style import get_text_color
+            color = get_text_color()
+        except Exception:
+            color = "#000000"
+        from PyQt6.QtGui import QColor, QTextCharFormat
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(color))
+        self._sticky_edit.setCurrentCharFormat(fmt)
+        self._sticky_edit.setTextColor(QColor(color))
+
     def _flush_current(self):
         if not self._current_note_id:
             return
@@ -525,17 +785,16 @@ class NotesPanel(QWidget):
             return
 
         title = self._title_edit.text().strip() or "无标题"
-        tags = self._tag_input.get_tags()
 
-        if current_note.note_type == "todo":
-            content = self._checklist_editor.get_content()
-            note = self._mgr.update(self._current_note_id, title, content, tags)
-        else:
-            content = self._content_edit.toHtml()
+        if current_note.note_type == "sticky":
+            content = self._sticky_edit.toHtml()
             if str(NOTES_IMAGES_DIR) in content:
                 content = content.replace(str(NOTES_IMAGES_DIR) + "/", "images/")
                 content = content.replace(str(NOTES_IMAGES_DIR.parent) + "/images/", "images/")
-            note = self._mgr.update(self._current_note_id, title, content, tags)
+        else:
+            content = self._md_editor.toPlainText()
+
+        note = self._mgr.update(self._current_note_id, title, content)
 
         if note:
             self._status_label.setText("已保存")
@@ -543,7 +802,8 @@ class NotesPanel(QWidget):
             self.note_updated.emit(self._current_note_id, title, content)
             for i in range(self._list.count()):
                 item = self._list.item(i)
-                if item.data(Qt.ItemDataRole.UserRole) == self._current_note_id:
+                if (item.data(Qt.ItemDataRole.UserRole + 1) == "note"
+                        and item.data(Qt.ItemDataRole.UserRole) == self._current_note_id):
                     date_str = datetime.fromisoformat(note.updated_at).strftime("%m-%d %H:%M")
                     short = note.title[:20] + "…" if len(note.title) > 20 else note.title
                     self._list.blockSignals(True)
@@ -554,21 +814,21 @@ class NotesPanel(QWidget):
                     item.setToolTip(note.title)
                     self._list.blockSignals(False)
                     break
-            self._refresh_tag_filter()
 
     def _clear_editor(self):
         self._title_edit.blockSignals(True)
-        self._content_edit.blockSignals(True)
-        self._tag_input.blockSignals(True)
+        self._md_editor.blockSignals(True)
+        self._sticky_edit.blockSignals(True)
         self._title_edit.clear()
-        self._content_edit.clear()
-        self._tag_input.set_tags([])
+        self._md_editor.clear()
+        self._sticky_edit.clear()
         self._title_edit.blockSignals(False)
-        self._content_edit.blockSignals(False)
-        self._tag_input.blockSignals(False)
-        self._checklist_editor.clear()
-        self._content_edit.show()
-        self._checklist_editor.hide()
+        self._md_editor.blockSignals(False)
+        self._sticky_edit.blockSignals(False)
+        self._md_preview.hide()
+        self._sticky_edit.hide()
+        self._md_editor.show()
+        self._preview_btn.hide()
 
     def hideEvent(self, event):
         self._auto_save_timer.stop()
@@ -604,23 +864,55 @@ class NotesPanel(QWidget):
         menu = ContextMenu(parent=self)
 
         if item:
-            note_id = item.data(Qt.ItemDataRole.UserRole)
+            item_type = item.data(Qt.ItemDataRole.UserRole + 1)
+            item_id = item.data(Qt.ItemDataRole.UserRole)
+
+            if item_type == "folder":
+                folder_id = item_id
+                widget = self._list.itemWidget(item)
+                folder_name = widget._name_lbl.text() if widget else ""
+                menu.addAction(Action(FluentIcon.EDIT, "重命名",
+                                      triggered=lambda: self._rename_folder_dialog(folder_id, folder_name)))
+                menu.addSeparator()
+                menu.addAction(Action(FluentIcon.DELETE, "删除文件夹",
+                                      triggered=lambda: self._delete_folder_confirm(folder_id)))
+                menu.exec(global_pos)
+                return
+            elif item_type in ("uncategorized", "back"):
+                return
+            # Note item
+            note_id = item_id
             note = self._mgr.get(note_id)
 
-            if note and note.is_pinned:
-                menu.addAction(Action(FluentIcon.UNPIN, "取消固定",
-                                      triggered=lambda: self._unpin_note(note_id)))
-            else:
-                menu.addAction(Action(FluentIcon.PIN, "贴到屏幕",
-                                      triggered=lambda: self._pin_note_to_screen(note_id)))
+            # Only sticky notes can be pinned to screen
+            if note and note.note_type == "sticky":
+                if note.is_pinned:
+                    menu.addAction(Action(FluentIcon.UNPIN, "取消固定",
+                                          triggered=lambda: self._unpin_note(note_id)))
+                else:
+                    menu.addAction(Action(FluentIcon.PIN, "贴到屏幕",
+                                          triggered=lambda: self._pin_note_to_screen(note_id)))
+                menu.addSeparator()
 
-            menu.addSeparator()
             menu.addAction(Action(FluentIcon.COPY, "复制内容",
                                   triggered=lambda: self._copy_note_content(note_id)))
             menu.addAction(Action(FluentIcon.DOCUMENT, "创建副本",
                                   triggered=lambda: self._duplicate_note(note_id)))
             menu.addAction(Action(FluentIcon.SAVE, "导出 .txt",
                                   triggered=lambda: self._export_note_txt(note_id)))
+            if note and note.note_type == "note":
+                menu.addAction(Action(FluentIcon.DOCUMENT, "导出 .md",
+                                      triggered=lambda: self._export_note_md(note_id)))
+            # Move to folder submenu
+            folders = self._mgr.get_folders()
+            if folders:
+                move_menu = RoundMenu("移入文件夹", menu)
+                menu.addMenu(move_menu)
+                move_menu.addAction(Action(FluentIcon.FOLDER, "无文件夹",
+                                           triggered=lambda: self._move_to_folder(note_id, None)))
+                for f in folders:
+                    move_menu.addAction(Action(FluentIcon.FOLDER, f.name,
+                                               triggered=lambda checked=False, fid=f.id: self._move_to_folder(note_id, fid)))
             menu.addSeparator()
             menu.addAction(Action(FluentIcon.DELETE, "删除",
                                   triggered=lambda: (
@@ -628,8 +920,10 @@ class NotesPanel(QWidget):
                                       else self._on_delete_by_id(note_id)
                                   )))
         else:
-            menu.addAction(Action(FluentIcon.EDIT, "新建便签",
-                                  triggered=self._on_new))
+            menu.addAction(Action(FluentIcon.EDIT, "新建笔记",
+                                  triggered=lambda: self._on_new("note")))
+            menu.addAction(Action(FluentIcon.PIN, "新建便签",
+                                  triggered=lambda: self._on_new("sticky")))
 
         menu.exec(global_pos)
 
@@ -637,7 +931,11 @@ class NotesPanel(QWidget):
         note = self._mgr.get(note_id)
         if not note:
             return
-        QGuiApplication.clipboard().setText(_html_to_plain(note.content))
+        if note.note_type == "sticky":
+            text = _html_to_plain(note.content)
+        else:
+            text = note.content
+        QGuiApplication.clipboard().setText(text)
         self._show_status("已复制到剪贴板")
 
     def _duplicate_note(self, note_id: str):
@@ -645,7 +943,7 @@ class NotesPanel(QWidget):
         if not note:
             return
         self._flush_current()
-        new_note = self._mgr.create()
+        new_note = self._mgr.create(note_type=note.note_type)
         self._mgr.update(new_note.id, f"{note.title} (副本)", note.content)
         self._load()
         self._show_status("已创建副本")
@@ -660,13 +958,33 @@ class NotesPanel(QWidget):
         )
         if not path:
             return
+        if note.note_type == "sticky":
+            body = _html_to_plain(note.content)
+        else:
+            body = note.content
         try:
             with open(path, "w", encoding="utf-8") as f:
-                f.write(f"{note.title}\n{'─' * 40}\n{_html_to_plain(note.content)}\n")
+                f.write(f"{note.title}\n{'─' * 40}\n{body}\n")
             self._show_status("已导出")
         except OSError:
-            w = MessageBox("导出失败", "无法写入文件，请检查路径权限。", self.window())
-            w.exec()
+            MessageBox("导出失败", "无法写入文件，请检查路径权限。", self.window()).exec()
+
+    def _export_note_md(self, note_id: str):
+        note = self._mgr.get(note_id)
+        if not note:
+            return
+        safe_name = note.title[:40].replace("/", "-").replace("\\", "-") or "笔记"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出 Markdown", f"{safe_name}.md", "Markdown 文件 (*.md)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"# {note.title}\n\n{note.content}\n")
+            self._show_status("已导出")
+        except OSError:
+            MessageBox("导出失败", "无法写入文件，请检查路径权限。", self.window()).exec()
 
     def _on_delete_by_id(self, note_id: str):
         w = MessageBox("移入回收站", "确定要将这条笔记移入回收站吗？", self.window())
@@ -692,6 +1010,15 @@ class NotesPanel(QWidget):
     def _show_status(self, msg: str):
         self._status_label.setText(msg)
         self._status_timer.start()
+
+    def _move_to_folder(self, note_id, folder_id):
+        self._flush_current()
+        self._mgr.move_note_to_folder(note_id, folder_id)
+        if folder_id is not None:
+            self._expanded_folders.add(folder_id)
+        self._current_note_id = note_id
+        self._load()
+        self._show_status("已移动")
 
     def _pin_note_to_screen(self, note_id: str):
         from app.ui.sticky_note_window import StickyNoteWindow
@@ -747,31 +1074,51 @@ class NotesPanel(QWidget):
             width = self._saved_list_width or ConfigManager().window_config.get("note_list_width", 250)
             self._splitter.setSizes([width, total - width])
 
+    def toggle_list(self):
+        """Public: toggle note list visibility (called from TitleBar)."""
+        self._toggle_note_list()
+
+    def apply_search(self, keyword: str):
+        """Public: apply search filter (called from TitleBar)."""
+        self._on_search(keyword)
+
     def refresh(self):
         if not self._trash_mode:
             self._load()
 
     def refresh_note(self, note_id: int):
         if self._current_note_id == note_id:
-            note = self._mgr.get(note_id)
-            if note:
-                self._title_edit.blockSignals(True)
-                self._content_edit.blockSignals(True)
-                self._title_edit.setText(note.title)
-                content = note.content
-                if "images/" in content:
-                    def replace_path(m):
-                        rel_path = m.group(1)
-                        abs_path = NOTES_IMAGES_DIR.parent / rel_path
-                        return f'<img src="{abs_path}"'
-                    content = re.sub(r'<img src="(images/[^"]+)"', replace_path, content)
-                self._content_edit.setHtml(content)
-                self._title_edit.blockSignals(False)
-                self._content_edit.blockSignals(False)
+            editor_has_focus = (
+                self._title_edit.hasFocus()
+                or self._md_editor.hasFocus()
+                or self._sticky_edit.hasFocus()
+            )
+            if not editor_has_focus:
+                note = self._mgr.get(note_id)
+                if note:
+                    self._title_edit.blockSignals(True)
+                    self._title_edit.setText(note.title)
+                    self._title_edit.blockSignals(False)
+                    if note.note_type == "sticky":
+                        self._sticky_edit.blockSignals(True)
+                        content = note.content
+                        if "images/" in content:
+                            def replace_path(m):
+                                rel_path = m.group(1)
+                                abs_path = NOTES_IMAGES_DIR.parent / rel_path
+                                return f'<img src="{abs_path}"'
+                            content = re.sub(r'<img src="(images/[^"]+)"', replace_path, content)
+                        self._sticky_edit.setHtml(content)
+                        self._sticky_edit.blockSignals(False)
+                    else:
+                        self._md_editor.blockSignals(True)
+                        self._md_editor.setPlainText(note.content)
+                        self._md_editor.blockSignals(False)
 
         for i in range(self._list.count()):
             item = self._list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == note_id:
+            if (item.data(Qt.ItemDataRole.UserRole + 1) == "note"
+                    and item.data(Qt.ItemDataRole.UserRole) == note_id):
                 note = self._mgr.get(note_id)
                 if note:
                     date_str = datetime.fromisoformat(note.updated_at).strftime("%m-%d %H:%M")

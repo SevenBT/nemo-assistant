@@ -5,6 +5,10 @@ from qfluentwidgets import PrimaryPushButton, FluentIcon
 
 from app.ui.style import get_text_color
 
+_MAX_CONTENT_WIDTH = 760  # must match ChatWidget._MAX_CONTENT_WIDTH
+_SIDE_MIN = 16
+_BOTTOM_MARGIN = 30
+
 
 class InputWidget(QWidget):
     submitted = pyqtSignal(str)
@@ -15,9 +19,9 @@ class InputWidget(QWidget):
         self._build()
 
     def _build(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 10)
-        layout.setSpacing(8)
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(_SIDE_MIN, 8, _SIDE_MIN, _BOTTOM_MARGIN)
+        self._layout.setSpacing(8)
 
         self._edit = _TextEdit(self)
         self._edit.setPlaceholderText("输入消息… (Enter 发送，Shift+Enter 换行)")
@@ -25,13 +29,18 @@ class InputWidget(QWidget):
         self._edit.setMaximumHeight(120)
         self._edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self._edit.submitted.connect(self._submit)
-        layout.addWidget(self._edit)
+        self._layout.addWidget(self._edit)
 
         self._btn = PrimaryPushButton(FluentIcon.SEND, "发送")
         self._btn.setFixedWidth(80)
         self._btn.setFixedHeight(36)
         self._btn.clicked.connect(self._submit)
-        layout.addWidget(self._btn)
+        self._layout.addWidget(self._btn)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        side = max(_SIDE_MIN, (self.width() - _MAX_CONTENT_WIDTH) // 2)
+        self._layout.setContentsMargins(side, 8, side, _BOTTOM_MARGIN)
 
     def _submit(self):
         text = self._edit.toPlainText().strip()

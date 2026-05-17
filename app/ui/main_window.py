@@ -231,6 +231,11 @@ class MainWindow(FluentWindow):
         # Keep page references for _switch_view
         self._pages = [chat_page, self._notes_panel, self._toolbox_panel]
 
+        # Wire title bar search → panel filters
+        self._title_bar.session_search_changed.connect(self._session_panel.apply_search)
+        self._title_bar.notes_search_changed.connect(self._notes_panel.apply_search)
+        self._title_bar.workshop_search_changed.connect(self._toolbox_panel.apply_search)
+
         self.setMinimumSize(320, 420)
         self.setMouseTracking(True)
 

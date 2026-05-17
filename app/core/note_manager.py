@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Optional, Union
 
 from app.core.db_manager import DatabaseManager
-from app.models.note import Note
+from app.models.note import Note, Folder
 
 
 class NoteManager:
@@ -23,6 +23,7 @@ class NoteManager:
             db_manager: 数据库管理器实例，默认创建新实例
         """
         self.db = db_manager or DatabaseManager()
+        self.migrate_html_to_markdown()
 
     @staticmethod
     def _normalize_id(note_id: Union[str, int]) -> int:
@@ -45,18 +46,13 @@ class NoteManager:
 
     # ------------------------------------------------------------------ notes CRUD
     def get_notes(self) -> list[Note]:
-        """
-        获取所有未删除的笔记，按更新时间倒序排列。
-
-        Returns:
-            list[Note]: 笔记列表
-        """
+        """获取所有未删除的笔记，按 sort_order 排列。"""
         with self.db.get_connection() as conn:
             cursor = conn.execute(
                 """
                 SELECT * FROM notes
                 WHERE is_deleted = 0
-                ORDER BY updated_at DESC
+                ORDER BY sort_order ASC, updated_at DESC
                 """
             )
             notes = [Note.from_row(row) for row in cursor.fetchall()]
@@ -87,26 +83,26 @@ class NoteManager:
             note.tags = self._get_note_tags(conn, note.id)
             return note
 
-    def create(self, title: str = "新笔记", content: str = "", note_type: str = "note") -> Note:
+    def create(self, title: str = "新笔记", content: str = "", note_type: str = "note", folder_id: int | None = None) -> Note:
         """
         创建新笔记。
 
         Args:
             title: 笔记标题
             content: 笔记内容
-            note_type: 笔记类型（note | todo | daily）
+            note_type: 笔记类型（note | sticky | todo | daily）
 
         Returns:
             Note: 创建的笔记对象
         """
-        note = Note(title=title, content=content, note_type=note_type)
+        note = Note(title=title, content=content, note_type=note_type, folder_id=folder_id)
         with self.db.get_connection() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO notes (title, content, note_type, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO notes (title, content, note_type, folder_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (note.title, note.content, note.note_type, note.created_at, note.updated_at),
+                (note.title, note.content, note.note_type, note.folder_id, note.created_at, note.updated_at),
             )
             note.id = cursor.lastrowid
             conn.commit()
@@ -567,6 +563,35 @@ class NoteManager:
             conn.commit()
             return new_state
 
+    # ------------------------------------------------------------------ migration
+    def migrate_html_to_markdown(self):
+        """一次性将旧 HTML 格式的 note 类型笔记内容迁移为 Markdown。"""
+        try:
+            import html2text
+        except ImportError:
+            return
+
+        converter = html2text.HTML2Text()
+        converter.ignore_links = False
+        converter.ignore_images = False
+        converter.body_width = 0  # no line wrapping
+
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT id, content FROM notes WHERE note_type = 'note' AND is_deleted = 0"
+            )
+            rows = cursor.fetchall()
+            for row in rows:
+                content = row["content"]
+                # Detect HTML: contains tags like <p>, <div>, <br>, <b>, etc.
+                if content and ("</" in content or "<br" in content):
+                    md = converter.handle(content).strip()
+                    conn.execute(
+                        "UPDATE notes SET content = ? WHERE id = ?",
+                        (md, row["id"]),
+                    )
+            conn.commit()
+
     def search_notes(
         self,
         keyword: str,
@@ -662,6 +687,84 @@ class NoteManager:
             """
 
             cursor = conn.execute(query, params)
+            notes = [Note.from_row(row) for row in cursor.fetchall()]
+            for note in notes:
+                note.tags = self._get_note_tags(conn, note.id)
+            return notes
+
+    # ------------------------------------------------------------------ folder CRUD
+    def get_folders(self) -> list[Folder]:
+        """获取所有文件夹，按 sort_order 排序。"""
+        with self.db.get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM folders ORDER BY sort_order, name")
+            return [Folder.from_row(row) for row in cursor.fetchall()]
+
+    def create_folder(self, name: str, parent_id: int | None = None) -> Folder:
+        """创建文件夹。"""
+        folder = Folder(name=name, parent_id=parent_id)
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                "INSERT INTO folders (name, parent_id, sort_order, created_at) VALUES (?, ?, ?, ?)",
+                (folder.name, folder.parent_id, folder.sort_order, folder.created_at),
+            )
+            folder.id = cursor.lastrowid
+            conn.commit()
+        return folder
+
+    def rename_folder(self, folder_id: int, name: str) -> bool:
+        """重命名文件夹。"""
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                "UPDATE folders SET name = ? WHERE id = ?", (name, folder_id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_folder(self, folder_id: int, move_notes_to: int | None = None):
+        """删除文件夹。笔记移到 move_notes_to 文件夹，或置为无文件夹（None）。"""
+        with self.db.get_connection() as conn:
+            conn.execute(
+                "UPDATE notes SET folder_id = ? WHERE folder_id = ?",
+                (move_notes_to, folder_id),
+            )
+            conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
+            conn.commit()
+
+    def move_note_to_folder(self, note_id: int | str, folder_id: int | None):
+        """将笔记移入文件夹（folder_id=None 表示移出文件夹）。"""
+        note_id = self._normalize_id(note_id)
+        with self.db.get_connection() as conn:
+            conn.execute(
+                "UPDATE notes SET folder_id = ? WHERE id = ?", (folder_id, note_id)
+            )
+            conn.commit()
+
+    def reorder_notes(self, ordered_ids: list[int], folder_id: int | None):
+        """
+        按给定顺序更新同一 folder_id 下笔记的 sort_order，
+        同时将这些笔记的 folder_id 设为 folder_id。
+        ordered_ids 是该 folder（或顶层）内笔记的完整有序列表。
+        """
+        with self.db.get_connection() as conn:
+            for idx, note_id in enumerate(ordered_ids):
+                conn.execute(
+                    "UPDATE notes SET sort_order = ?, folder_id = ? WHERE id = ?",
+                    (idx, folder_id, note_id),
+                )
+            conn.commit()
+
+    def get_notes_in_folder(self, folder_id: int | None) -> list[Note]:
+        """获取指定文件夹内的笔记，按 sort_order 排列。"""
+        with self.db.get_connection() as conn:
+            if folder_id is None:
+                cursor = conn.execute(
+                    "SELECT * FROM notes WHERE folder_id IS NULL AND is_deleted = 0 ORDER BY sort_order ASC, updated_at DESC"
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM notes WHERE folder_id = ? AND is_deleted = 0 ORDER BY sort_order ASC, updated_at DESC",
+                    (folder_id,),
+                )
             notes = [Note.from_row(row) for row in cursor.fetchall()]
             for note in notes:
                 note.tags = self._get_note_tags(conn, note.id)
