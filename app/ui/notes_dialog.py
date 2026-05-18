@@ -63,22 +63,16 @@ def _note_color(note_id) -> str:
 def _render_markdown(text: str, images_base: Path | None = None) -> str:
     """Convert Markdown text to HTML for preview."""
     import markdown
+    from app.ui.style import _current_dark_mode, get_text_color
+
     extensions = [
         "tables",
         "fenced_code",
-        "codehilite",
-        "nl2br",
         "sane_lists",
         "toc",
     ]
-    extension_configs = {
-        "codehilite": {"guess_lang": False, "noclasses": True},
-    }
-    html = markdown.markdown(
-        text,
-        extensions=extensions,
-        extension_configs=extension_configs,
-    )
+    html = markdown.markdown(text, extensions=extensions)
+
     # Replace relative image paths with absolute paths for QTextBrowser
     if images_base and "images/" in html:
         def replace_img(m):
@@ -88,6 +82,30 @@ def _render_markdown(text: str, images_base: Path | None = None) -> str:
                 return f'<img src="{abs_path}"'
             return m.group(0)
         html = re.sub(r'<img src="(images/[^"]+)"', replace_img, html)
+
+    # Theme colors
+    text_color = get_text_color()
+    if _current_dark_mode:
+        bg = "#1e1e1e"
+        code_bg = "#2d2d2d"
+        code_color = "#d4d4d4"
+    else:
+        bg = "#ffffff"
+        code_bg = "#f0f0f0"
+        code_color = "#1e1e1e"
+
+    # QTextBrowser doesn't support background-color on <pre>.
+    # Wrap code blocks in a table cell which does support bgcolor.
+    html = re.sub(
+        r'<pre><code[^>]*>(.*?)</code></pre>',
+        rf'<table width="100%" cellpadding="8"><tr><td bgcolor="{code_bg}">'
+        rf'<pre style="color:{code_color}; margin:0;">\1</pre></td></tr></table>',
+        html,
+        flags=re.DOTALL,
+    )
+
+    style = f"body {{ color: {text_color}; background: {bg}; font-size: 14px; }}"
+    html = f"<html><head><style>{style}</style></head><body>{html}</body></html>"
     return html
 
 
@@ -103,6 +121,12 @@ class _NoteList(ListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
+
+    def mouseMoveEvent(self, event):
+        # Suppress rubber-band selection on mouse drag to prevent
+        # accidental deselection that clears the editor.
+        # Multi-select is still available via Ctrl+click / Shift+click.
+        pass
 
 
 class _NoteItemWidget(QWidget):
@@ -226,6 +250,13 @@ class NotesPanel(QWidget):
         self._build()
         self._load()
 
+    def _top_window(self):
+        """获取真正的顶层窗口，避免 FluentWindow StackedWidget 内部窗口问题。"""
+        w = self
+        while w.parent():
+            w = w.parent()
+        return w
+
     def _build(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -250,7 +281,7 @@ class NotesPanel(QWidget):
         toolbar.addWidget(self._trash_btn)
 
         self._preview_btn = TogglePushButton(FluentIcon.VIEW, "预览")
-        self._preview_btn.toggled.connect(self._on_preview_toggled)
+        self._preview_btn.clicked.connect(self._on_preview_clicked)
         self._preview_btn.hide()
         toolbar.addWidget(self._preview_btn)
 
@@ -335,9 +366,18 @@ class NotesPanel(QWidget):
         self._title_edit.setPlaceholderText("标题…")
         right_layout.addWidget(self._title_edit)
 
+        # Apply note editor font size from config
+        from app.core.config import ConfigManager
+        _cfg = ConfigManager()
+        _note_font_size = _cfg.note_editor_font_size
+        from PyQt6.QtGui import QFont
+        _editor_font = QFont()
+        _editor_font.setPointSize(_note_font_size)
+
         # Markdown editor (for note type)
         self._md_editor = MarkdownEditor(images_dir=NOTES_IMAGES_DIR)
         self._md_editor.setPlaceholderText("在此输入 Markdown 内容…")
+        self._md_editor.setFont(_editor_font)
         right_layout.addWidget(self._md_editor, 1)
 
         # Markdown preview (for note type, preview mode)
@@ -349,6 +389,7 @@ class NotesPanel(QWidget):
         # Rich text editor (for sticky type — HTML with images)
         self._sticky_edit = TextEdit()
         self._sticky_edit.setPlaceholderText("在此输入便签内容…")
+        self._sticky_edit.setFont(_editor_font)
         self._sticky_edit.hide()
         right_layout.addWidget(self._sticky_edit, 1)
 
@@ -385,20 +426,23 @@ class NotesPanel(QWidget):
         self._sticky_edit.viewport().installEventFilter(self)
 
     # ------------------------------------------------------------------ preview toggle
-    def _on_preview_toggled(self, checked: bool):
+    def _on_preview_clicked(self):
+        checked = self._preview_btn.isChecked()
         self._preview_mode = checked
-        note = self._mgr.get(self._current_note_id) if self._current_note_id else None
-        is_note_type = note and note.note_type == "note"
-        if is_note_type:
-            if checked:
-                self._flush_current()
-                html = _render_markdown(self._md_editor.toPlainText(), NOTES_IMAGES_DIR)
-                self._md_preview.setHtml(html)
-                self._md_editor.hide()
-                self._md_preview.show()
-            else:
-                self._md_preview.hide()
-                self._md_editor.show()
+        if not self._current_note_id:
+            return
+        note = self._mgr.get(self._current_note_id)
+        if not note or note.note_type not in ("note", "todo"):
+            return
+        if checked:
+            content = self._md_editor.toPlainText()
+            html = _render_markdown(content, NOTES_IMAGES_DIR)
+            self._md_preview.setHtml(html)
+            self._md_editor.hide()
+            self._md_preview.show()
+        else:
+            self._md_preview.hide()
+            self._md_editor.show()
 
     # ------------------------------------------------------------------ load
     def _load(self):
@@ -522,7 +566,7 @@ class NotesPanel(QWidget):
             self._on_folder_renamed(folder_id, name.strip())
 
     def _delete_folder_confirm(self, folder_id: int):
-        w = MessageBox("删除文件夹", "删除文件夹后，其中的笔记将移至顶层。确定继续吗？", self.window())
+        w = MessageBox("删除文件夹", "删除文件夹后，其中的笔记将移至顶层。确定继续吗？", self._top_window())
         if w.exec():
             self._on_folder_deleted(folder_id)
 
@@ -615,8 +659,7 @@ class NotesPanel(QWidget):
                     self._load_note_into_editor(note_id)
         else:
             self._flush_current()
-            if n == 0:
-                self._current_note_id = None
+            self._current_note_id = None
 
         self._update_editor_visibility()
         self._update_toolbar()
@@ -693,7 +736,7 @@ class NotesPanel(QWidget):
         n = len(selected)
         msg = f"确定要将选中的 {n} 条笔记移入回收站吗？" if n > 1 else "确定要将这条笔记移入回收站吗？"
 
-        w = MessageBox("移入回收站", msg, self.window())
+        w = MessageBox("移入回收站", msg, self._top_window())
         if not w.exec():
             return
 
@@ -737,7 +780,7 @@ class NotesPanel(QWidget):
         n = len(selected)
         msg = (f"确定要永久删除选中的 {n} 条笔记吗？此操作不可撤销！"
                if n > 1 else "确定要永久删除这条笔记吗？此操作不可撤销！")
-        w = MessageBox("永久删除", msg, self.window())
+        w = MessageBox("永久删除", msg, self._top_window())
         if w.exec():
             for item in selected:
                 self._mgr.purge(item.data(Qt.ItemDataRole.UserRole))
@@ -747,7 +790,7 @@ class NotesPanel(QWidget):
         tc = self._mgr.trash_count()
         if tc == 0:
             return
-        w = MessageBox("清空回收站", f"确定要永久删除回收站中全部 {tc} 条笔记吗？此操作不可撤销！", self.window())
+        w = MessageBox("清空回收站", f"确定要永久删除回收站中全部 {tc} 条笔记吗？此操作不可撤销！", self._top_window())
         if w.exec():
             self._mgr.purge_all()
             self._load()
@@ -967,7 +1010,7 @@ class NotesPanel(QWidget):
                 f.write(f"{note.title}\n{'─' * 40}\n{body}\n")
             self._show_status("已导出")
         except OSError:
-            MessageBox("导出失败", "无法写入文件，请检查路径权限。", self.window()).exec()
+            MessageBox("导出失败", "无法写入文件，请检查路径权限。", self._top_window()).exec()
 
     def _export_note_md(self, note_id: str):
         note = self._mgr.get(note_id)
@@ -984,10 +1027,10 @@ class NotesPanel(QWidget):
                 f.write(f"# {note.title}\n\n{note.content}\n")
             self._show_status("已导出")
         except OSError:
-            MessageBox("导出失败", "无法写入文件，请检查路径权限。", self.window()).exec()
+            MessageBox("导出失败", "无法写入文件，请检查路径权限。", self._top_window()).exec()
 
     def _on_delete_by_id(self, note_id: str):
-        w = MessageBox("移入回收站", "确定要将这条笔记移入回收站吗？", self.window())
+        w = MessageBox("移入回收站", "确定要将这条笔记移入回收站吗？", self._top_window())
         if not w.exec():
             return
         self._auto_save_timer.stop()
@@ -1001,7 +1044,7 @@ class NotesPanel(QWidget):
         n = len(items)
         msg = (f"确定要永久删除选中的 {n} 条笔记吗？此操作不可撤销！"
                if n > 1 else "确定要永久删除这条笔记吗？此操作不可撤销！")
-        w = MessageBox("永久删除", msg, self.window())
+        w = MessageBox("永久删除", msg, self._top_window())
         if w.exec():
             for item in items:
                 self._mgr.purge(item.data(Qt.ItemDataRole.UserRole))

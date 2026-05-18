@@ -248,17 +248,24 @@ class MarkdownEditor(QPlainTextEdit):
     def _apply_text_color(self):
         """Force text color to follow theme (FluentWindow overrides palette)."""
         try:
-            from app.ui.style import get_text_color
+            from app.ui.style import get_text_color, _current_dark_mode
             color = get_text_color()
+            placeholder_color = "rgba(255,255,255,0.35)" if _current_dark_mode else "rgba(0,0,0,0.35)"
         except Exception:
             color = "#000000"
+            placeholder_color = "rgba(0,0,0,0.35)"
         from PyQt6.QtGui import QColor, QTextCharFormat
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(color))
-        cursor = self.textCursor()
         self.setCurrentCharFormat(fmt)
-        # Also set via viewport stylesheet for the base text color
-        self.viewport().setStyleSheet(f"color: {color}; background: transparent;")
+        self.viewport().setStyleSheet(
+            f"color: {color}; background: transparent;"
+        )
+        # Set placeholder color via widget stylesheet (viewport stylesheet doesn't cover it)
+        self.setStyleSheet(
+            f"QPlainTextEdit {{ color: {color}; }}"
+            f"QPlainTextEdit[placeholderText] {{ color: {placeholder_color}; }}"
+        )
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
@@ -553,14 +560,15 @@ class MarkdownEditor(QPlainTextEdit):
         self.setTextCursor(cursor)
 
     def _insert_block(self, text: str):
-        """Insert block content, ensuring blank lines around it."""
+        """Insert block content at cursor position, ensuring blank lines around it."""
         cursor = self.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
-        cursor.movePosition(QTextCursor.MoveOperation.EndOfLine, QTextCursor.MoveMode.KeepAnchor)
-        line = cursor.selectedText()
-        cursor.movePosition(QTextCursor.MoveOperation.EndOfLine)
-        prefix = "\n\n" if line.strip() else "\n"
-        cursor.insertText(f"{prefix}{text}\n\n")
+        # Check if current line has content before cursor
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.KeepAnchor)
+        before = cursor.selectedText()
+        # Restore cursor to original position
+        cursor = self.textCursor()
+        prefix = "\n\n" if before.strip() else ""
+        cursor.insertText(f"{prefix}{text}\n")
 
     def _paste_plain_text(self):
         clipboard = QApplication.clipboard()

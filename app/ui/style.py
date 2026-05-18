@@ -353,6 +353,7 @@ def _apply_palette(theme: dict) -> None:
     palette.setColor(QPalette.ColorRole.AlternateBase, QColor(theme["surface_raised"]))
     palette.setColor(QPalette.ColorRole.WindowText, QColor(theme["text"]))
     palette.setColor(QPalette.ColorRole.Text, QColor(theme["text"]))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(theme["text_secondary"]))
     palette.setColor(QPalette.ColorRole.Button, QColor(theme["surface_raised"]))
     palette.setColor(QPalette.ColorRole.ButtonText, QColor(theme["text"]))
     app.setPalette(palette)

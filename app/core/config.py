@@ -131,6 +131,7 @@ DEFAULT_APP_CONFIG: dict = {
         "edge_snap_width_threshold": 0.4,  # 边缘吸附宽度阈值（40% 屏幕宽度）
         "minimize_to": "tray",  # "tray" | "taskbar"
         "font_size": 15,  # 全局字体大小（px）
+        "note_editor_font_size": 15,  # 笔记编辑区字体大小（px）
     },
 }
 
@@ -232,6 +233,11 @@ class ConfigManager:
     def font_size(self) -> int:
         """全局字体大小（px）"""
         return self._app["window"].get("font_size", 15)
+
+    @property
+    def note_editor_font_size(self) -> int:
+        """笔记编辑区字体大小（px）"""
+        return self._app["window"].get("note_editor_font_size", 15)
 
     @property
     def api_type(self) -> str:
