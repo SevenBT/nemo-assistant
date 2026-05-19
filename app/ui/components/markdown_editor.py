@@ -1,4 +1,4 @@
-"""MarkdownEditor — QPlainTextEdit with Markdown syntax highlighting, shortcuts and context menu."""
+"""MarkdownEditor — QPlainTextEdit with syntax highlighting, line numbers, wiki-links, and context menu."""
 from __future__ import annotations
 
 import re
@@ -6,14 +6,17 @@ import shutil
 import uuid
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QRect, QSize, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QFont,
     QKeySequence,
-    QSyntaxHighlighter,
+    QPainter,
+    QPalette,
     QTextCharFormat,
     QTextCursor,
+    QTextFormat,
+    QImage,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -21,230 +24,181 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QMenu,
     QPlainTextEdit,
+    QTextEdit,
+    QWidget,
 )
 
+from app.ui.components.markdown_highlighter import MarkdownHighlighter
+from app.core.wiki_links import parse_wiki_links
+
 
 # ---------------------------------------------------------------------------
-# Syntax highlighter
+# Line Number Area (from noteration)
 # ---------------------------------------------------------------------------
 
-class _MarkdownHighlighter(QSyntaxHighlighter):
-    """Applies Markdown syntax highlighting to a QTextDocument."""
+class LineNumberArea(QWidget):
+    """行号显示区域。"""
 
-    def __init__(self, document, palette=None):
-        super().__init__(document)
-        self._in_code_block = False
-        self._build_formats(palette)
+    def __init__(self, editor: "MarkdownEditor") -> None:
+        super().__init__(editor)
+        self._editor = editor
 
-    # ── Format definitions ──────────────────────────────────────────────
-    def _build_formats(self, palette=None):
-        # Detect dark/light theme from palette background luminance
-        dark = False
-        if palette:
-            bg = palette.window().color()
-            dark = bg.lightness() < 128
+    def sizeHint(self) -> QSize:
+        return QSize(self._editor.line_number_area_width(), 0)
 
-        # Base colours
-        if dark:
-            muted       = QColor("#6B7280")   # grey — punctuation/symbols
-            heading_col = QColor("#E5E7EB")   # near-white
-            code_bg     = QColor("#1F2937")   # dark code background
-            code_fg     = QColor("#F9FAFB")
-            link_col    = QColor("#60A5FA")   # blue
-            quote_col   = QColor("#9CA3AF")   # grey-ish
-            bold_col    = QColor("#F3F4F6")
-            italic_col  = QColor("#D1D5DB")
-            strike_col  = QColor("#6B7280")
-            hr_col      = QColor("#4B5563")
-            list_col    = QColor("#60A5FA")
-        else:
-            muted       = QColor("#9CA3AF")
-            heading_col = QColor("#111827")
-            code_bg     = QColor("#F3F4F6")
-            code_fg     = QColor("#1F2937")
-            link_col    = QColor("#2563EB")
-            quote_col   = QColor("#6B7280")
-            bold_col    = QColor("#111827")
-            italic_col  = QColor("#374151")
-            strike_col  = QColor("#9CA3AF")
-            hr_col      = QColor("#D1D5DB")
-            list_col    = QColor("#6366F1")
-
-        mono = QFont("Consolas, Courier New, monospace")
-
-        def fmt(color=None, bold=False, italic=False, bg=None, mono_font=False, size_delta=0):
-            f = QTextCharFormat()
-            if color:
-                f.setForeground(color)
-            if bold:
-                f.setFontWeight(QFont.Weight.Bold)
-            if italic:
-                f.setFontItalic(True)
-            if bg:
-                f.setBackground(bg)
-            if mono_font:
-                f.setFontFamilies(["Consolas", "Courier New", "monospace"])
-            if size_delta:
-                f.setFontPointSize(14 + size_delta)  # base 14pt
-            return f
-
-        self._fmt = {
-            # Headings — symbol muted, text bold + larger
-            "h1_sym":  fmt(muted, size_delta=8),
-            "h1_text": fmt(heading_col, bold=True, size_delta=8),
-            "h2_sym":  fmt(muted, size_delta=5),
-            "h2_text": fmt(heading_col, bold=True, size_delta=5),
-            "h3_sym":  fmt(muted, size_delta=3),
-            "h3_text": fmt(heading_col, bold=True, size_delta=3),
-            "h4_sym":  fmt(muted, size_delta=1),
-            "h4_text": fmt(heading_col, bold=True, size_delta=1),
-            "h5_sym":  fmt(muted),
-            "h5_text": fmt(heading_col, bold=True),
-            "h6_sym":  fmt(muted),
-            "h6_text": fmt(heading_col, bold=True),
-            # Inline
-            "bold_sym":    fmt(muted),
-            "bold_text":   fmt(bold_col, bold=True),
-            "italic_sym":  fmt(muted),
-            "italic_text": fmt(italic_col, italic=True),
-            "strike_sym":  fmt(muted),
-            "strike_text": fmt(strike_col),
-            "code_inline": fmt(code_fg, bg=code_bg, mono_font=True),
-            "link_text":   fmt(link_col),
-            "link_sym":    fmt(muted),
-            "img_sym":     fmt(muted),
-            # Block
-            "quote_sym":   fmt(list_col),
-            "quote_text":  fmt(quote_col, italic=True),
-            "list_sym":    fmt(list_col),
-            "hr":          fmt(hr_col),
-            "code_block":  fmt(code_fg, bg=code_bg, mono_font=True),
-            "code_fence":  fmt(muted, mono_font=True),
-        }
-
-    # ── Highlighter core ────────────────────────────────────────────────
-    def highlightBlock(self, text: str):
-        state = self.previousBlockState()
-
-        # ── Fenced code block ──────────────────────────────────────────
-        fence = re.match(r'^(`{3,}|~{3,})', text)
-        if fence:
-            if state == 1:
-                # Closing fence
-                self.setFormat(0, len(text), self._fmt["code_fence"])
-                self.setCurrentBlockState(0)
-            else:
-                # Opening fence
-                self.setFormat(0, len(text), self._fmt["code_fence"])
-                self.setCurrentBlockState(1)
-            return
-
-        if state == 1:
-            # Inside code block
-            self.setFormat(0, len(text), self._fmt["code_block"])
-            self.setCurrentBlockState(1)
-            return
-
-        self.setCurrentBlockState(0)
-
-        # ── Headings ──────────────────────────────────────────────────
-        m = re.match(r'^(#{1,6})(\s+)(.*)', text)
-        if m:
-            level = len(m.group(1))
-            sym_end = len(m.group(1)) + len(m.group(2))
-            sym_key  = f"h{level}_sym"
-            text_key = f"h{level}_text"
-            self.setFormat(0, sym_end, self._fmt[sym_key])
-            self.setFormat(sym_end, len(text) - sym_end, self._fmt[text_key])
-            return
-
-        # ── Horizontal rule ───────────────────────────────────────────
-        if re.match(r'^(\*{3,}|-{3,}|_{3,})\s*$', text):
-            self.setFormat(0, len(text), self._fmt["hr"])
-            return
-
-        # ── Blockquote ────────────────────────────────────────────────
-        m = re.match(r'^(>\s?)(.*)', text)
-        if m:
-            self.setFormat(0, len(m.group(1)), self._fmt["quote_sym"])
-            self.setFormat(len(m.group(1)), len(text) - len(m.group(1)), self._fmt["quote_text"])
-            self._apply_inline(text)
-            return
-
-        # ── List items ────────────────────────────────────────────────
-        m = re.match(r'^(\s*)([-*+]|\d+\.)(\s)', text)
-        if m:
-            sym_end = len(m.group(1)) + len(m.group(2)) + len(m.group(3))
-            self.setFormat(len(m.group(1)), len(m.group(2)), self._fmt["list_sym"])
-            # Task list checkbox
-            cb = re.match(r'^(\s*[-*+]\s)(\[[ xX]\])(\s)', text)
-            if cb:
-                self.setFormat(len(cb.group(1)), len(cb.group(2)), self._fmt["list_sym"])
-
-        # ── Inline formatting ─────────────────────────────────────────
-        self._apply_inline(text)
-
-    def _apply_inline(self, text: str):
-        """Apply inline Markdown formatting rules."""
-        rules = [
-            # Bold+italic (must come before bold/italic)
-            (r'\*{3}(.+?)\*{3}',   "bold_sym", "bold_text", True),
-            (r'_{3}(.+?)_{3}',     "bold_sym", "bold_text", True),
-            # Bold
-            (r'\*{2}(.+?)\*{2}',   "bold_sym", "bold_text", True),
-            (r'_{2}(.+?)_{2}',     "bold_sym", "bold_text", True),
-            # Italic
-            (r'\*([^*\n]+?)\*',    "italic_sym", "italic_text", True),
-            (r'_([^_\n]+?)_',      "italic_sym", "italic_text", True),
-            # Strikethrough
-            (r'~~(.+?)~~',         "strike_sym", "strike_text", True),
-            # Inline code (no inner formatting)
-            (r'`([^`\n]+?)`',      "code_inline", None, False),
-            # Image (before link)
-            (r'!\[([^\]]*)\]\([^)]*\)', "img_sym", "link_text", True),
-            # Link
-            (r'\[([^\]]+)\]\([^)]*\)',  "link_sym", "link_text", True),
-        ]
-
-        for pattern, sym_key, text_key, has_inner in rules:
-            for m in re.finditer(pattern, text):
-                start, end = m.start(), m.end()
-                if sym_key == "code_inline" or text_key is None:
-                    self.setFormat(start, end - start, self._fmt[sym_key])
-                else:
-                    # sym format for the whole match, then text format for inner group
-                    self.setFormat(start, end - start, self._fmt[sym_key])
-                    if has_inner and m.lastindex and m.lastindex >= 1:
-                        inner_start = m.start(1)
-                        inner_len = len(m.group(1))
-                        self.setFormat(inner_start, inner_len, self._fmt[text_key])
+    def paintEvent(self, event) -> None:
+        self._editor.line_number_area_paint_event(event)
 
 
 # ---------------------------------------------------------------------------
 # Editor
 # ---------------------------------------------------------------------------
 
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
+
+
 class MarkdownEditor(QPlainTextEdit):
-    """Plain-text Markdown editor with syntax highlighting, keyboard shortcuts and context menu."""
+    """Markdown editor with syntax highlighting, line numbers, wiki-links, image paste/drop."""
+
+    wiki_link_activated = pyqtSignal(str)
 
     def __init__(self, images_dir: Path | None = None, parent=None):
         super().__init__(parent)
         self._images_dir = images_dir
+        self._find_replace_dialog = None
         self.setPlaceholderText("在此输入 Markdown 内容…")
-        self._highlighter = _MarkdownHighlighter(self.document(), self.palette())
+        self.setAcceptDrops(True)
 
+        # Syntax highlighter (from noteration)
+        self._highlighter = MarkdownHighlighter(self.document())
+
+        # Line numbers (from noteration)
+        self._lnum_area = LineNumberArea(self)
+        self._lnum_visible = True
+        self.blockCountChanged.connect(self._update_line_number_width)
+        self.updateRequest.connect(self._on_update_request)
+        self.cursorPositionChanged.connect(self._highlight_current_line)
+        self._update_line_number_width(0)
+        self._highlight_current_line()
+
+    # ------------------------------------------------------------------ theme
     def changeEvent(self, event):
-        """Re-build highlighter formats when palette changes (theme switch)."""
         from PyQt6.QtCore import QEvent
         if event.type() == QEvent.Type.PaletteChange:
-            self._highlighter._build_formats(self.palette())
-            self._highlighter.rehighlight()
+            self._update_highlighter_palette()
         super().changeEvent(event)
+
+    def _update_highlighter_palette(self):
+        """Update highlighter palette based on current theme."""
+        bg = self.palette().window().color()
+        dark = bg.lightness() < 128
+        if dark:
+            palette = {
+                "heading": "#E5E7EB",
+                "bold_italic": "#F3F4F6",
+                "italic": "#D1D5DB",
+                "link": "#60A5FA",
+                "list": "#60A5FA",
+                "escape": "#EF4444",
+                "image": ("#FBBF24", "#3B2E00"),
+                "wiki": ("#A78BFA", "#2D2250"),
+                "code": ("#34D399", "#1A2E28"),
+                "quote": ("#9CA3AF", "#2A2A2A"),
+                "code_block": ("#9CA3AF", "#1F2937"),
+            }
+        else:
+            palette = {
+                "heading": "#1a1a2e",
+                "bold_italic": "#111111",
+                "italic": "#444444",
+                "link": "#185FA5",
+                "list": "#BA7517",
+                "escape": "#c0392b",
+                "image": ("#c77700", "#FFF8E1"),
+                "wiki": ("#534AB7", "#EEEDFE"),
+                "code": ("#1D9E75", "#F0FFF8"),
+                "quote": ("#888", "#FAFAFA"),
+                "code_block": ("#888", "#F5F5F5"),
+            }
+        self._highlighter.set_palette(palette)
 
     # ------------------------------------------------------------------ public
     def set_images_dir(self, path: Path):
         self._images_dir = path
 
+    def set_line_numbers_visible(self, visible: bool):
+        """切换行号显示。"""
+        self._lnum_visible = visible
+        if visible:
+            self._lnum_area.show()
+        else:
+            self._lnum_area.hide()
+        self._update_line_number_width()
+
+    # ------------------------------------------------------------------ line numbers (from noteration)
+    def line_number_area_width(self) -> int:
+        if not self._lnum_visible:
+            return 0
+        digits = max(1, len(str(self.blockCount())))
+        return 8 + self.fontMetrics().horizontalAdvance("9") * digits + 8
+
+    def _update_line_number_width(self, _=0) -> None:
+        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def _on_update_request(self, rect: QRect, dy: int) -> None:
+        if dy:
+            self._lnum_area.scroll(0, dy)
+        else:
+            self._lnum_area.update(0, rect.y(), self._lnum_area.width(), rect.height())
+        if rect.contains(self.viewport().rect()):
+            self._update_line_number_width()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self._lnum_area.setGeometry(
+            QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height())
+        )
+
+    def line_number_area_paint_event(self, event) -> None:
+        painter = QPainter(self._lnum_area)
+        painter.fillRect(event.rect(), self.palette().color(QPalette.ColorRole.Window))
+        block = self.firstVisibleBlock()
+        block_num = block.blockNumber()
+        top = round(
+            self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
+        )
+        bottom = top + round(self.blockBoundingRect(block).height())
+        current = self.textCursor().blockNumber()
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                color = QColor("#444") if block_num == current else QColor("#bbb")
+                painter.setPen(color)
+                painter.drawText(
+                    0, top, self._lnum_area.width() - 4,
+                    self.fontMetrics().height(),
+                    Qt.AlignmentFlag.AlignRight, str(block_num + 1),
+                )
+            block = block.next()
+            top = bottom
+            bottom = top + round(self.blockBoundingRect(block).height())
+            block_num += 1
+
+    # ------------------------------------------------------------------ current line highlight
+    def _highlight_current_line(self) -> None:
+        extras: list[QTextEdit.ExtraSelection] = []
+        sel = QTextEdit.ExtraSelection()
+        bg_color = self.palette().color(QPalette.ColorRole.Base)
+        is_dark = bg_color.lightness() < 128
+        sel.format.setBackground(QColor("#3A3A3A") if is_dark else QColor("#F5F5FF"))
+        sel.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+        sel.cursor = self.textCursor()
+        sel.cursor.clearSelection()
+        extras.append(sel)
+        self.setExtraSelections(extras)
+
+    # ------------------------------------------------------------------ text color (FluentWindow fix)
     def _apply_text_color(self):
         """Force text color to follow theme (FluentWindow overrides palette)."""
         try:
@@ -254,14 +208,10 @@ class MarkdownEditor(QPlainTextEdit):
         except Exception:
             color = "#000000"
             placeholder_color = "rgba(0,0,0,0.35)"
-        from PyQt6.QtGui import QColor, QTextCharFormat
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(color))
         self.setCurrentCharFormat(fmt)
-        self.viewport().setStyleSheet(
-            f"color: {color}; background: transparent;"
-        )
-        # Set placeholder color via widget stylesheet (viewport stylesheet doesn't cover it)
+        self.viewport().setStyleSheet(f"color: {color}; background: transparent;")
         self.setStyleSheet(
             f"QPlainTextEdit {{ color: {color}; }}"
             f"QPlainTextEdit[placeholderText] {{ color: {placeholder_color}; }}"
@@ -270,6 +220,19 @@ class MarkdownEditor(QPlainTextEdit):
     def focusInEvent(self, event):
         super().focusInEvent(event)
         self._apply_text_color()
+
+    # ------------------------------------------------------------------ mouse (wiki-link Ctrl+Click)
+    def mousePressEvent(self, event):
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            cursor = self.cursorForPosition(event.pos())
+            pos = cursor.position()
+            for link in parse_wiki_links(self.toPlainText()):
+                if link.start <= pos <= link.end:
+                    self.wiki_link_activated.emit(link.target)
+                    return
+        super().mousePressEvent(event)
+
+    # ------------------------------------------------------------------ keyboard
     def keyPressEvent(self, event):
         key = event.key()
         mods = event.modifiers()
@@ -286,30 +249,187 @@ class MarkdownEditor(QPlainTextEdit):
             if key == Qt.Key.Key_K:
                 self._insert_link()
                 return
-            if key == Qt.Key.Key_QuoteLeft:  # Ctrl+`
+            if key == Qt.Key.Key_QuoteLeft:
                 self._wrap_selection("`", "`", "代码")
                 return
+            if key == Qt.Key.Key_F:
+                self._open_find_replace()
+                return
+            if key == Qt.Key.Key_H:
+                self._open_find_replace()
+                return
+            if key == Qt.Key.Key_Y:
+                self.redo()
+                return
+            if key == Qt.Key.Key_V:
+                # Image paste from clipboard
+                clipboard = QApplication.clipboard()
+                image = clipboard.image()
+                if image and not image.isNull():
+                    self._paste_image(image)
+                    return
 
         if mods == (ctrl | shift):
             if key == Qt.Key.Key_V:
                 self._paste_plain_text()
                 return
 
-        # Tab / Shift+Tab for list indentation
+        # Tab / Shift+Tab for list indentation, or soft-tab
         if key == Qt.Key.Key_Tab and mods == Qt.KeyboardModifier.NoModifier:
             if self._indent_list(indent=True):
                 return
+            # Soft-tab: insert spaces
+            self.textCursor().insertText("    ")
+            return
         if key == Qt.Key.Key_Backtab:
             if self._indent_list(indent=False):
                 return
 
         super().keyPressEvent(event)
 
+    # ------------------------------------------------------------------ drag & drop (image)
+    def dragEnterEvent(self, event):
+        mime = event.mimeData()
+        if mime.hasUrls():
+            for url in mime.urls():
+                if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in _IMAGE_EXTS:
+                    event.acceptProposedAction()
+                    return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        mime = event.mimeData()
+        if mime.hasUrls() and self._images_dir:
+            for url in mime.urls():
+                if url.isLocalFile():
+                    file_path = Path(url.toLocalFile())
+                    if file_path.suffix.lower() in _IMAGE_EXTS:
+                        self._drop_image_file(file_path)
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
+
+    # ------------------------------------------------------------------ image helpers
+    def _paste_image(self, image: QImage):
+        """Save clipboard image to images dir and insert markdown."""
+        if not self._images_dir:
+            return
+        self._images_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex}.png"
+        dest = self._images_dir / filename
+        image.save(str(dest), "PNG")
+        rel = f"images/{filename}"
+        self.textCursor().insertText(f"![图片]({rel})")
+
+    def _drop_image_file(self, file_path: Path):
+        """Copy dropped image file to images dir and insert markdown."""
+        if not self._images_dir:
+            return
+        self._images_dir.mkdir(parents=True, exist_ok=True)
+        ext = file_path.suffix
+        filename = f"{uuid.uuid4().hex}{ext}"
+        dest = self._images_dir / filename
+        shutil.copy2(str(file_path), str(dest))
+        rel = f"images/{filename}"
+        self.textCursor().insertText(f"![{file_path.stem}]({rel})")
+
+    # ------------------------------------------------------------------ find/replace
+    def _open_find_replace(self):
+        from app.ui.components.find_replace_dialog import FindReplaceDialog
+        if self._find_replace_dialog is None:
+            self._find_replace_dialog = FindReplaceDialog(self)
+            self._find_replace_dialog.find_next_requested.connect(self._find_next)
+            self._find_replace_dialog.replace_requested.connect(self._replace)
+            self._find_replace_dialog.replace_all_requested.connect(self._replace_all)
+        # Pre-fill from selection
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            self._find_replace_dialog.set_initial_text(cursor.selectedText())
+        self._find_replace_dialog.show()
+        self._find_replace_dialog.raise_()
+
+    def _find_next(self, query: str, case_sensitive: bool, whole_word: bool, use_regex: bool):
+        flags = QTextDocument.FindFlag(0)
+        if case_sensitive:
+            flags |= QTextDocument.FindFlag.FindCaseSensitively
+        if whole_word:
+            flags |= QTextDocument.FindFlag.FindWholeWords
+        if use_regex:
+            from PyQt6.QtCore import QRegularExpression
+            re_flags = QRegularExpression.PatternOption.NoPatternOption
+            if not case_sensitive:
+                re_flags |= QRegularExpression.PatternOption.CaseInsensitiveOption
+            rx = QRegularExpression(query, re_flags)
+            found = self.find(rx, flags)
+        else:
+            found = self.find(query, flags)
+        # Wrap around
+        if not found:
+            cursor = self.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            self.setTextCursor(cursor)
+            if use_regex:
+                from PyQt6.QtCore import QRegularExpression
+                re_flags = QRegularExpression.PatternOption.NoPatternOption
+                if not case_sensitive:
+                    re_flags |= QRegularExpression.PatternOption.CaseInsensitiveOption
+                found = self.find(QRegularExpression(query, re_flags), flags)
+            else:
+                found = self.find(query, flags)
+        return found
+
+    def _replace(self, query: str, replacement: str, case_sensitive: bool, whole_word: bool, use_regex: bool):
+        """Replace current selection if it matches, otherwise find next."""
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            self._find_next(query, case_sensitive, whole_word, use_regex)
+            return
+
+        selected = cursor.selectedText()
+        match = False
+        if use_regex:
+            import re as re_mod
+            re_flags = 0 if case_sensitive else re_mod.IGNORECASE
+            if re_mod.fullmatch(query, selected, flags=re_flags):
+                match = True
+        else:
+            if case_sensitive:
+                match = (selected == query)
+            else:
+                match = (selected.lower() == query.lower())
+
+        if match:
+            cursor.insertText(replacement)
+        self._find_next(query, case_sensitive, whole_word, use_regex)
+
+    def _replace_all(self, query: str, replacement: str, case_sensitive: bool, whole_word: bool, use_regex: bool):
+        """Replace all occurrences in the document."""
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        self.setTextCursor(cursor)
+
+        count = 0
+        while self._find_next(query, case_sensitive, whole_word, use_regex):
+            self.textCursor().insertText(replacement)
+            count += 1
+            if count > 10000:
+                break
+
     # ------------------------------------------------------------------ context menu
     def contextMenuEvent(self, event):
+        # Move cursor to right-click position if no selection
+        if not self.textCursor().hasSelection():
+            cursor = self.cursorForPosition(event.pos())
+            self.setTextCursor(cursor)
+
         menu = QMenu(self)
         menu.setObjectName("markdownContextMenu")
-        # Theme-aware menu colors
         try:
             from app.ui.style import get_text_color, _current_dark_mode
             text_color = get_text_color()
@@ -322,7 +442,6 @@ class MarkdownEditor(QPlainTextEdit):
             f"QMenu::item:selected {{ background: {hover_bg}; }}"
         )
 
-        # Link
         menu.addAction("新增链接").triggered.connect(self._insert_link)
         menu.addSeparator()
 
@@ -364,30 +483,31 @@ class MarkdownEditor(QPlainTextEdit):
 
         menu.addSeparator()
 
-        # Clipboard
         cut_act = menu.addAction("剪切")
         cut_act.setShortcut(QKeySequence.StandardKey.Cut)
         cut_act.triggered.connect(self.cut)
-
         copy_act = menu.addAction("复制")
         copy_act.setShortcut(QKeySequence.StandardKey.Copy)
         copy_act.triggered.connect(self.copy)
-
         paste_act = menu.addAction("粘贴")
         paste_act.setShortcut(QKeySequence.StandardKey.Paste)
         paste_act.triggered.connect(self.paste)
-
+        # Detect image in clipboard and show "粘贴图片" option
+        clipboard = QApplication.clipboard()
+        clip_image = clipboard.image()
+        if clip_image and not clip_image.isNull():
+            paste_img_act = menu.addAction("粘贴图片")
+            paste_img_act.triggered.connect(lambda: self._paste_image(clip_image))
         paste_plain_act = menu.addAction("以纯文本形式粘贴")
         paste_plain_act.setShortcut(QKeySequence("Ctrl+Shift+V"))
         paste_plain_act.triggered.connect(self._paste_plain_text)
-
         menu.addSeparator()
-
         select_all_act = menu.addAction("全选")
         select_all_act.setShortcut(QKeySequence.StandardKey.SelectAll)
         select_all_act.triggered.connect(self.selectAll)
+        menu.addSeparator()
+        menu.addAction("查找替换").triggered.connect(self._open_find_replace)
 
-        # Enable/disable clipboard actions based on state
         has_selection = self.textCursor().hasSelection()
         cut_act.setEnabled(has_selection)
         copy_act.setEnabled(has_selection)
@@ -404,7 +524,6 @@ class MarkdownEditor(QPlainTextEdit):
         text = selected if selected else placeholder
         cursor.insertText(f"{prefix}{text}{suffix}")
         if not selected and placeholder:
-            # Select the placeholder so user can type over it
             pos = cursor.position()
             cursor.setPosition(pos - len(suffix) - len(placeholder))
             cursor.setPosition(pos - len(suffix), QTextCursor.MoveMode.KeepAnchor)
@@ -415,7 +534,6 @@ class MarkdownEditor(QPlainTextEdit):
         cursor = self.textCursor()
         if not cursor.hasSelection():
             return
-        import re
         text = cursor.selectedText()
         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
         text = re.sub(r'\*(.+?)\*', r'\1', text)
@@ -437,45 +555,33 @@ class MarkdownEditor(QPlainTextEdit):
         cursor = self.textCursor()
         start = cursor.selectionStart()
         end = cursor.selectionEnd()
-
         cursor.setPosition(start)
         cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
         block_start = cursor.position()
-
         cursor.setPosition(end)
         cursor.movePosition(QTextCursor.MoveOperation.EndOfLine)
         block_end = cursor.position()
-
         cursor.setPosition(block_start)
         cursor.setPosition(block_end, QTextCursor.MoveMode.KeepAnchor)
         block_text = cursor.selectedText()
-
-        import re
-        # \u2029 is Qt's paragraph separator in selectedText()
         lines = block_text.split("\u2029")
         new_lines = []
         for line in lines:
-            # Remove existing list/heading prefixes before adding new one
             clean = re.sub(r'^(#{1,6}\s+|[-*+]\s+(\[[ x]\]\s+)?|\d+\.\s+|>\s+)', '', line)
             new_lines.append(prefix + clean)
-
         cursor.insertText("\u2029".join(new_lines))
 
     def _set_heading(self, level: int):
         self._set_line_prefix("#" * level + " ")
 
     def _clear_block_prefix(self):
-        """Remove heading/list/quote prefix from selected lines."""
-        import re
         cursor = self.textCursor()
         start = cursor.selectionStart()
         end = cursor.selectionEnd()
-
         cursor.setPosition(start)
         cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         cursor.movePosition(QTextCursor.MoveOperation.EndOfLine, QTextCursor.MoveMode.KeepAnchor)
-
         block_text = cursor.selectedText()
         lines = block_text.split("\u2029")
         new_lines = [re.sub(r'^(#{1,6}\s+|[-*+]\s+(\[[ x]\]\s+)?|\d+\.\s+|>\s+)', '', l) for l in lines]
@@ -483,7 +589,6 @@ class MarkdownEditor(QPlainTextEdit):
 
     def _indent_list(self, indent: bool) -> bool:
         """Indent/unindent list item. Returns True if handled."""
-        import re
         line = self._current_line_text()
         if not re.match(r'^(\s*)([-*+]|\d+\.)\s', line):
             return False
@@ -528,12 +633,9 @@ class MarkdownEditor(QPlainTextEdit):
         self.textCursor().insertText(f"![图片]({rel})")
 
     def _insert_table(self):
-        table = (
-            "| 列1 | 列2 | 列3 |\n"
-            "| --- | --- | --- |\n"
-            "| 内容 | 内容 | 内容 |"
+        self._insert_block(
+            "| 列1 | 列2 | 列3 |\n| --- | --- | --- |\n| 内容 | 内容 | 内容 |"
         )
-        self._insert_block(table)
 
     def _insert_callout(self):
         self._insert_block("> [!NOTE]\n> 标注内容")
@@ -546,26 +648,21 @@ class MarkdownEditor(QPlainTextEdit):
         if not ok:
             return
         self._insert_block(f"```{lang}\n\n```")
-        # Move cursor inside the block
         cursor = self.textCursor()
-        pos = cursor.position()
-        cursor.setPosition(pos - 4)  # before closing ```
+        cursor.setPosition(cursor.position() - 4)
         self.setTextCursor(cursor)
 
     def _insert_math_block(self):
         self._insert_block("$$\n\n$$")
         cursor = self.textCursor()
-        pos = cursor.position()
-        cursor.setPosition(pos - 3)
+        cursor.setPosition(cursor.position() - 3)
         self.setTextCursor(cursor)
 
     def _insert_block(self, text: str):
-        """Insert block content at cursor position, ensuring blank lines around it."""
+        """Insert block content, ensuring blank lines around it."""
         cursor = self.textCursor()
-        # Check if current line has content before cursor
         cursor.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.KeepAnchor)
         before = cursor.selectedText()
-        # Restore cursor to original position
         cursor = self.textCursor()
         prefix = "\n\n" if before.strip() else ""
         cursor.insertText(f"{prefix}{text}\n")

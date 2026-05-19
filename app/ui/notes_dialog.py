@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidgetItem,
     QSplitter,
-    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -35,6 +34,7 @@ from app.core.config import NOTES_IMAGES_DIR
 from app.core.note_manager import NoteManager
 from app.models.note import Folder
 from app.ui.components.markdown_editor import MarkdownEditor
+from app.ui.components.markdown_preview import MarkdownPreview
 from app.ui.components.context_menu import ContextMenu
 
 
@@ -58,55 +58,6 @@ def _note_color(note_id) -> str:
     except (ValueError, TypeError):
         idx = hash(str(note_id)) % len(_NOTE_DOT_COLORS)
     return _NOTE_DOT_COLORS[idx]
-
-
-def _render_markdown(text: str, images_base: Path | None = None) -> str:
-    """Convert Markdown text to HTML for preview."""
-    import markdown
-    from app.ui.style import _current_dark_mode, get_text_color
-
-    extensions = [
-        "tables",
-        "fenced_code",
-        "sane_lists",
-        "toc",
-    ]
-    html = markdown.markdown(text, extensions=extensions)
-
-    # Replace relative image paths with absolute paths for QTextBrowser
-    if images_base and "images/" in html:
-        def replace_img(m):
-            src = m.group(1)
-            if src.startswith("images/"):
-                abs_path = images_base.parent / src
-                return f'<img src="{abs_path}"'
-            return m.group(0)
-        html = re.sub(r'<img src="(images/[^"]+)"', replace_img, html)
-
-    # Theme colors
-    text_color = get_text_color()
-    if _current_dark_mode:
-        bg = "#1e1e1e"
-        code_bg = "#2d2d2d"
-        code_color = "#d4d4d4"
-    else:
-        bg = "#ffffff"
-        code_bg = "#f0f0f0"
-        code_color = "#1e1e1e"
-
-    # QTextBrowser doesn't support background-color on <pre>.
-    # Wrap code blocks in a table cell which does support bgcolor.
-    html = re.sub(
-        r'<pre><code[^>]*>(.*?)</code></pre>',
-        rf'<table width="100%" cellpadding="8"><tr><td bgcolor="{code_bg}">'
-        rf'<pre style="color:{code_color}; margin:0;">\1</pre></td></tr></table>',
-        html,
-        flags=re.DOTALL,
-    )
-
-    style = f"body {{ color: {text_color}; background: {bg}; font-size: 14px; }}"
-    html = f"<html><head><style>{style}</style></head><body>{html}</body></html>"
-    return html
 
 
 def _html_to_plain(html: str) -> str:
@@ -285,6 +236,12 @@ class NotesPanel(QWidget):
         self._preview_btn.hide()
         toolbar.addWidget(self._preview_btn)
 
+        self._line_num_btn = TogglePushButton(FluentIcon.ALIGNMENT, "行号")
+        self._line_num_btn.setChecked(True)
+        self._line_num_btn.clicked.connect(self._on_line_num_toggle)
+        self._line_num_btn.hide()
+        toolbar.addWidget(self._line_num_btn)
+
         # Trash mode buttons (hidden by default)
         self._back_btn = PushButton(FluentIcon.RETURN, "返回")
         self._back_btn.clicked.connect(self._exit_trash)
@@ -378,11 +335,12 @@ class NotesPanel(QWidget):
         self._md_editor = MarkdownEditor(images_dir=NOTES_IMAGES_DIR)
         self._md_editor.setPlaceholderText("在此输入 Markdown 内容…")
         self._md_editor.setFont(_editor_font)
+        self._md_editor.wiki_link_activated.connect(self._on_wiki_link_clicked)
         right_layout.addWidget(self._md_editor, 1)
 
-        # Markdown preview (for note type, preview mode)
-        self._md_preview = QTextBrowser()
-        self._md_preview.setOpenExternalLinks(True)
+        # Markdown preview (QWebEngineView, replaces QTextBrowser)
+        self._md_preview = MarkdownPreview()
+        self._md_preview.link_clicked.connect(self._on_wiki_link_clicked)
         self._md_preview.hide()
         right_layout.addWidget(self._md_preview, 1)
 
@@ -436,13 +394,28 @@ class NotesPanel(QWidget):
             return
         if checked:
             content = self._md_editor.toPlainText()
-            html = _render_markdown(content, NOTES_IMAGES_DIR)
-            self._md_preview.setHtml(html)
+            from app.ui.style import _current_dark_mode
+            self._md_preview.set_content(content, base_path=NOTES_IMAGES_DIR.parent, dark=_current_dark_mode)
             self._md_editor.hide()
             self._md_preview.show()
         else:
             self._md_preview.hide()
             self._md_editor.show()
+
+    def _on_line_num_toggle(self):
+        self._md_editor.set_line_numbers_visible(self._line_num_btn.isChecked())
+
+    def _on_wiki_link_clicked(self, target: str):
+        """Navigate to a wiki-linked note by title match."""
+        notes = self._mgr.search_notes(keyword=target, note_types=["note"])
+        for note in notes:
+            if note.title.lower() == target.lower():
+                self._flush_current()
+                self._current_note_id = note.id
+                self._load()
+                self._load_note_into_editor(note.id)
+                return
+        self._show_status(f"未找到笔记: {target}")
 
     # ------------------------------------------------------------------ load
     def _load(self):
@@ -591,6 +564,7 @@ class NotesPanel(QWidget):
             self._md_preview.hide()
             self._sticky_edit.show()
             self._preview_btn.hide()
+            self._line_num_btn.hide()
 
             self._sticky_edit.blockSignals(True)
             content = note.content
@@ -607,6 +581,7 @@ class NotesPanel(QWidget):
             self._sticky_edit.hide()
             self._md_preview.hide()
             self._preview_btn.show()
+            self._line_num_btn.show()
             self._md_editor.blockSignals(True)
             self._md_editor.setPlainText(note.content)
             self._md_editor.blockSignals(False)
@@ -615,14 +590,15 @@ class NotesPanel(QWidget):
             # note type — Markdown
             self._sticky_edit.hide()
             self._preview_btn.show()
+            self._line_num_btn.show()
 
             self._md_editor.blockSignals(True)
             self._md_editor.setPlainText(note.content)
             self._md_editor.blockSignals(False)
 
             if self._preview_mode:
-                html = _render_markdown(note.content, NOTES_IMAGES_DIR)
-                self._md_preview.setHtml(html)
+                from app.ui.style import _current_dark_mode
+                self._md_preview.set_content(note.content, base_path=NOTES_IMAGES_DIR.parent, dark=_current_dark_mode)
                 self._md_editor.hide()
                 self._md_preview.show()
             else:
@@ -698,6 +674,7 @@ class NotesPanel(QWidget):
             self._new_sticky_btn.hide()
             self._trash_btn.hide()
             self._preview_btn.hide()
+            self._line_num_btn.hide()
             self._back_btn.show()
             self._restore_btn.show()
             self._restore_btn.setEnabled(selected_n > 0)
