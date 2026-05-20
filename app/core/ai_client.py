@@ -4,19 +4,26 @@ from typing import Iterator, Optional
 import httpx
 from openai import OpenAI
 
-from app.core.config import ConfigManager, SHANGDAO_MODELS
+from app.core.config import (
+    SHANGDAO_MODELS,
+    cfg,
+    get_api_key,
+    get_litellm_provider_api_key,
+    get_shangdao_api_key,
+)
 
 _TIMEOUT = httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0)
 
 
 class AIClient:
-    def __init__(self, config: ConfigManager):
-        self._config = config
+    def __init__(self, config_proxy=None):
+        """Optional config_proxy overrides cfg singleton for model/api_type reads."""
+        self._proxy = config_proxy
 
     def _openai_client(self) -> OpenAI:
         return OpenAI(
-            api_key=self._config.api_key or "sk-placeholder",
-            base_url=self._config.api_base_url,
+            api_key=get_api_key() or "sk-placeholder",
+            base_url=cfg.get(cfg.apiBaseUrl),
             timeout=_TIMEOUT,
         )
 
@@ -35,7 +42,7 @@ class AIClient:
         Note: messages should already have attachment content merged
         via merge_attachments_to_content() before calling this method.
         """
-        api_type = self._config.api_type
+        api_type = self._proxy.api_type if self._proxy else cfg.get(cfg.apiType)
         if api_type == "shangdao":
             yield from self._chat_stream_shangdao(messages, tools)
         elif api_type == "litellm":
@@ -49,10 +56,10 @@ class AIClient:
         tools: Optional[list[dict]] = None,
     ) -> Iterator[dict]:
         kwargs: dict = {
-            "model": self._config.model,
+            "model": self._proxy.model if self._proxy else cfg.get(cfg.model),
             "messages": messages,
-            "max_tokens": self._config.max_tokens,
-            "temperature": self._config.temperature,
+            "max_tokens": cfg.get(cfg.maxTokens),
+            "temperature": cfg.get(cfg.temperature),
             "stream": True,
         }
         if tools:
@@ -115,28 +122,27 @@ class AIClient:
         messages: list[dict],
         tools: Optional[list[dict]] = None,
     ) -> Iterator[dict]:
-        model_name = self._config.shangdao_model
+        model_name = self._proxy.shangdao_model if self._proxy else cfg.get(cfg.shangdaoModel)
         model_meta = SHANGDAO_MODELS.get(model_name)
         if not model_meta:
             yield {"type": "error", "message": f"未知的商道模型: {model_name}"}
             return
 
-        api_key = self._config.get_shangdao_api_key()
+        api_key = get_shangdao_api_key()
         if not api_key:
             yield {"type": "error", "message": "商道 API Key 未配置"}
             return
 
-        base_url = self._config.shangdao_base_url.rstrip("/")
+        base_url = cfg.get(cfg.shangdaoBaseUrl).rstrip("/")
         path_prefix = model_meta["path_prefix"]
         url = f"{base_url}/{path_prefix}/v1/chat/completions"
 
-        sd_config = self._config.shangdao_config
         body: dict = {
             model_meta["body_model_field"]: model_meta["body_model_value"],
             "messages": messages,
             "stream": True,
-            "max_tokens": sd_config.get("max_tokens", 2048),
-            "temperature": sd_config.get("temperature", 0.7),
+            "max_tokens": cfg.get(cfg.shangdaoMaxTokens),
+            "temperature": cfg.get(cfg.shangdaoTemperature),
         }
         if tools:
             body["tools"] = tools
@@ -201,28 +207,32 @@ class AIClient:
             return
         
         # 获取默认模型和 provider
-        model_id = self._config.litellm_default_model
-        model_config = self._config.get_litellm_model_by_id(model_id)
-        
+        model_id = self._proxy.litellm_default_model if self._proxy else cfg.get(cfg.litellmDefaultModel)
+        if self._proxy:
+            model_config = self._proxy.get_litellm_model_by_id(model_id)
+        else:
+            models = cfg.get(cfg.litellmModels)
+            model_config = next((m for m in models if m.get("id") == model_id), None)
+
         if not model_config:
             yield {"type": "error", "message": f"模型 {model_id} 未找到"}
             return
-        
+
         provider = model_config["provider"]
-        api_key = self._config.get_litellm_provider_api_key(provider)
-        
+        api_key = get_litellm_provider_api_key(provider)
+
         if not api_key:
             yield {"type": "error", "message": f"{provider} API Key 未配置"}
             return
-        
+
         # 构造 LiteLLM 模型名：provider/model
         litellm_model = f"{provider}/{model_id}"
-        
+
         kwargs: dict = {
             "model": litellm_model,
             "messages": messages,
-            "max_tokens": self._config.max_tokens,
-            "temperature": self._config.temperature,
+            "max_tokens": cfg.get(cfg.maxTokens),
+            "temperature": cfg.get(cfg.temperature),
             "stream": True,
             "api_key": api_key,
         }

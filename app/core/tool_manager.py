@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from app.core.config import TOOLS_DIR, USER_TOOLS_DIR, ConfigManager
+from app.core.config import TOOLS_DIR, USER_TOOLS_DIR, cfg, get_search_api_key
 from app.core.tool_deps import ToolDependencyManager
 from app.models.tool_def import ParameterDef, ToolDefinition
 
@@ -14,8 +14,7 @@ _TOOL_TIMEOUT = 60  # seconds
 
 
 class ToolManager:
-    def __init__(self, config: ConfigManager):
-        self._config = config
+    def __init__(self):
         self._tools: dict[str, ToolDefinition] = {}
         self._deps = ToolDependencyManager()
         self._discover()
@@ -64,7 +63,7 @@ class ToolManager:
             )
 
         # Builtin tools are always enabled; user tools respect saved state
-        enabled = True if is_builtin else self._config.get_tool_enabled(manifest["name"])
+        enabled = True if is_builtin else cfg.get(cfg.toolStates).get(manifest["name"], True)
 
         tool = ToolDefinition(
             name=manifest["name"],
@@ -107,11 +106,17 @@ class ToolManager:
         tool = self._tools.get(tool_name)
         if tool:
             tool.enabled = enabled
-        self._config.set_tool_enabled(tool_name, enabled)
+        states = dict(cfg.get(cfg.toolStates))
+        states[tool_name] = enabled
+        cfg.set(cfg.toolStates, states)
 
     def get_config_params(self, tool_name: str) -> dict:
         """Return config-source parameter values for the given tool."""
-        return self._config.get_tool_params(tool_name)
+        if tool_name == "web_search":
+            return {"provider": cfg.get(cfg.searchProvider), "api_key": get_search_api_key()}
+        if tool_name == "save_file":
+            return {"save_dir": cfg.get(cfg.saveDir)}
+        return {}
 
     @property
     def deps_manager(self) -> ToolDependencyManager:
@@ -129,7 +134,7 @@ class ToolManager:
         if not tool:
             return ai_params
         manual_overrides = manual_overrides or {}
-        config_params = self._config.get_tool_params(tool_name)
+        config_params = self.get_config_params(tool_name)
         resolved = {}
         for pname, pdef in tool.parameters.items():
             if pname in manual_overrides:

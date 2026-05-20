@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import ConfigManager, USER_TOOLS_DIR
+from app.core.config import USER_TOOLS_DIR
 from app.core.tool_generator import ModelOverride, build_model_options, parse_result, stream_generate
 from app.core.tool_manager import ToolManager
 
@@ -32,10 +32,9 @@ class _GenerateWorker(QThread):
     finished = pyqtSignal(str)    # full accumulated text
     error = pyqtSignal(str)
 
-    def __init__(self, requirement: str, config: ConfigManager, model_override: ModelOverride | None = None):
+    def __init__(self, requirement: str, model_override: ModelOverride | None = None):
         super().__init__()
         self._requirement = requirement
-        self._config = config
         self._model_override = model_override
         self._stopped = False
 
@@ -45,7 +44,7 @@ class _GenerateWorker(QThread):
     def run(self):
         full = ""
         try:
-            for event in stream_generate(self._requirement, self._config, self._model_override):
+            for event in stream_generate(self._requirement, self._model_override):
                 if self._stopped:
                     return
                 if event["type"] == "text":
@@ -68,17 +67,15 @@ class ToolGenerateDialog(QDialog):
     def __init__(
         self,
         tool_mgr: ToolManager,
-        config: ConfigManager,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self._tool_mgr = tool_mgr
-        self._config = config
         self._worker: _GenerateWorker | None = None
         self._full_text = ""
         self._manifest_str = ""
         self._script_str = ""
-        self.setWindowTitle("✨ AI 生成工具")
+        self.setWindowTitle("AI 生成工具")
         self.setMinimumSize(620, 600)
         self._build()
 
@@ -102,7 +99,7 @@ class ToolGenerateDialog(QDialog):
         model_row.addWidget(QLabel("模型:"))
         self._model_combo = QComboBox()
         self._model_combo.setMinimumWidth(260)
-        self._model_options: list[ModelOverride] = build_model_options(self._config)
+        self._model_options: list[ModelOverride] = build_model_options()
         for opt in self._model_options:
             self._model_combo.addItem(opt.label)
         model_row.addWidget(self._model_combo)
@@ -206,7 +203,7 @@ class ToolGenerateDialog(QDialog):
         idx = self._model_combo.currentIndex()
         model_override = self._model_options[idx] if self._model_options else None
 
-        self._worker = _GenerateWorker(requirement, self._config, model_override)
+        self._worker = _GenerateWorker(requirement, model_override)
         self._worker.chunk.connect(self._on_chunk)
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)

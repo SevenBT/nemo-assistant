@@ -40,9 +40,8 @@ class HotkeyManager(QObject):
         "quick_ask":     "quick_ask_triggered",
     }
 
-    def __init__(self, config, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self._config = config
 
     # ------------------------------------------------------------------ public
     def start(self):
@@ -69,7 +68,13 @@ class HotkeyManager(QObject):
             pass
 
     def _register_all(self):
-        hotkeys = self._config.hotkeys
+        from app.core.config import cfg
+        hotkeys = {
+            "screenshot": cfg.get(cfg.hotkeyScreenshot),
+            "new_note": cfg.get(cfg.hotkeyNewNote),
+            "toggle_window": cfg.get(cfg.hotkeyToggleWindow),
+            "quick_ask": cfg.get(cfg.hotkeyQuickAsk),
+        }
         for action, signal_name in self._SIGNAL_MAP.items():
             combo = hotkeys.get(action) or DEFAULT_HOTKEYS.get(action, "")
             if combo:

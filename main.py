@@ -58,7 +58,7 @@ _setup_crash_log()
 
 from PyQt6.QtWidgets import QApplication
 
-from app.core.config import ConfigManager
+from app.core.config import cfg
 from app.core.note_manager import NoteManager
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
@@ -72,20 +72,19 @@ def main():
     app.setApplicationName("AI Agent")
     app.setQuitOnLastWindowClosed(False)  # keep alive in tray
 
-    config = ConfigManager()
-    custom_qss = apply_theme(config.theme, font_size=config.font_size)
+    custom_qss = apply_theme(cfg.get(cfg.theme), font_size=cfg.get(cfg.fontSize))
     app.setStyleSheet(custom_qss)
     sessions = SessionManager()
-    tools = ToolManager(config)
+    tools = ToolManager()
     notes = NoteManager()
     scheduler = SchedulerManager()
     scheduler.set_tool_manager(tools)
     scheduler.start()
 
-    window = MainWindow(config, sessions, tools, scheduler, notes)
+    window = MainWindow(sessions, tools, scheduler, notes)
     # Re-apply theme after MainWindow init — FluentWindow's constructor
     # resets internal styles which can override the initial apply_theme call.
-    custom_qss = apply_theme(config.theme, font_size=config.font_size)
+    custom_qss = apply_theme(cfg.get(cfg.theme), font_size=cfg.get(cfg.fontSize))
     app.setStyleSheet(custom_qss)
     window.show()
 

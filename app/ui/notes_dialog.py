@@ -30,7 +30,7 @@ from qfluentwidgets import (
     TransparentToolButton,
 )
 
-from app.core.config import NOTES_IMAGES_DIR
+from app.core.config import NOTES_IMAGES_DIR, cfg
 from app.core.note_manager import NoteManager
 from app.models.note import Folder
 from app.ui.components.markdown_editor import MarkdownEditor
@@ -104,13 +104,14 @@ class _NoteItemWidget(QWidget):
         text_col.setSpacing(1)
         text_col.setContentsMargins(0, 0, 0, 0)
 
+        fs = cfg.get(cfg.fontSize)
         self._title_lbl = QLabel(title)
-        self._title_lbl.setStyleSheet("font-size: 13px; font-weight: 500; background: transparent;")
+        self._title_lbl.setStyleSheet(f"font-size: {fs}px; font-weight: 500; background: transparent;")
         self._title_lbl.setWordWrap(False)
         text_col.addWidget(self._title_lbl)
 
         self._date_lbl = QLabel(date_str)
-        self._date_lbl.setStyleSheet("font-size: 10px; color: #9CA3AF; background: transparent;")
+        self._date_lbl.setStyleSheet(f"font-size: {max(fs - 3, 9)}px; color: #9CA3AF; background: transparent;")
         text_col.addWidget(self._date_lbl)
 
         layout.addLayout(text_col, 1)
@@ -144,8 +145,9 @@ class _FolderItem(QWidget):
         icon_lbl.setPixmap(FluentIcon.FOLDER.icon().pixmap(16, 16))
         layout.addWidget(icon_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
+        fs = cfg.get(cfg.fontSize)
         self._name_lbl = QLabel(name)
-        self._name_lbl.setStyleSheet("font-size: 13px; font-weight: 500; background: transparent;")
+        self._name_lbl.setStyleSheet(f"font-size: {fs}px; font-weight: 500; background: transparent;")
         self._name_lbl.setWordWrap(False)
         layout.addWidget(self._name_lbl, 1)
 
@@ -173,8 +175,9 @@ class _UncategorizedSection(QWidget):
         spacer.setStyleSheet("background: transparent;")
         layout.addWidget(spacer, alignment=Qt.AlignmentFlag.AlignVCenter)
 
+        fs = cfg.get(cfg.fontSize)
         name_lbl = QLabel("未分类")
-        name_lbl.setStyleSheet("font-size: 13px; font-weight: 500; color: #9CA3AF; background: transparent;")
+        name_lbl.setStyleSheet(f"font-size: {fs}px; font-weight: 500; color: #9CA3AF; background: transparent;")
         name_lbl.setWordWrap(False)
         layout.addWidget(name_lbl, 1)
 
@@ -293,6 +296,7 @@ class NotesPanel(QWidget):
         list_panel_layout.addLayout(list_header)
 
         self._list = _NoteList()
+        self._list.setObjectName("noteList")
         self._list.setWordWrap(True)
         self._list.setUniformItemSizes(False)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -317,9 +321,7 @@ class NotesPanel(QWidget):
         right_layout.addWidget(self._title_edit)
 
         # Apply note editor font size from config
-        from app.core.config import ConfigManager
-        _cfg = ConfigManager()
-        _note_font_size = _cfg.note_editor_font_size
+        _note_font_size = cfg.get(cfg.noteEditorFontSize)
         from PyQt6.QtGui import QFont
         _editor_font = QFont()
         _editor_font.setPointSize(_note_font_size)
@@ -346,15 +348,23 @@ class NotesPanel(QWidget):
 
         self._set_editor_enabled(False)
         self._splitter.addWidget(self._editor_widget)
+        self._splitter.setStretchFactor(0, 0)  # note list: fixed width
+        self._splitter.setStretchFactor(1, 1)  # editor: take all extra space
+
+        # Custom delegate to respect widget font on list
+        from app.ui.components.font_delegate import FontAwareListDelegate
+        self._list.setItemDelegate(FontAwareListDelegate(self._list))
+        self._apply_list_font_size()
+        cfg.fontSize.valueChanged.connect(self._apply_list_font_size)
+
+        # Live editor font size update
+        cfg.noteEditorFontSize.valueChanged.connect(self._apply_editor_font_size)
 
         # Restore splitter sizes from config
-        from app.core.config import ConfigManager
-        config = ConfigManager()
-        wcfg = config.window_config
-        list_width = wcfg.get("note_list_width", 250)
-        editor_width = wcfg.get("width", 1000) - list_width
+        list_width = cfg.get(cfg.noteListWidth)
+        editor_width = cfg.get(cfg.windowWidth) - list_width
 
-        if not wcfg.get("note_list_visible", True):
+        if not cfg.get(cfg.noteListVisible):
             self._splitter.setSizes([0, list_width + editor_width])
         else:
             self._splitter.setSizes([list_width, editor_width])
@@ -638,6 +648,17 @@ class NotesPanel(QWidget):
         if not has_note_selection:
             self._clear_editor()
 
+    def _apply_list_font_size(self, _value=None):
+        self._load()
+
+    def _apply_editor_font_size(self, _value=None):
+        from PyQt6.QtGui import QFont
+        size = cfg.get(cfg.noteEditorFontSize)
+        font = QFont()
+        font.setPointSize(size)
+        self._md_editor.setFont(font)
+        self._sticky_edit.setFont(font)
+
     def _set_editor_enabled(self, enabled: bool):
         self._title_edit.setEnabled(enabled)
         self._md_editor.setEnabled(enabled)
@@ -835,14 +856,11 @@ class NotesPanel(QWidget):
     def hideEvent(self, event):
         self._auto_save_timer.stop()
         self._flush_current()
-        from app.core.config import ConfigManager
         sizes = self._splitter.sizes()
         list_width = sizes[0] if sizes[0] > 0 else (self._saved_list_width or 250)
         list_visible = sizes[0] > 0
-        ConfigManager().update_window_config(
-            note_list_width=max(list_width, 120),
-            note_list_visible=list_visible,
-        )
+        cfg.set(cfg.noteListWidth, max(list_width, 120))
+        cfg.set(cfg.noteListVisible, list_visible)
         super().hideEvent(event)
 
     # ------------------------------------------------------------------ context menu
@@ -1070,8 +1088,7 @@ class NotesPanel(QWidget):
             self._saved_list_width = list_width
             self._splitter.setSizes([0, total])
         else:
-            from app.core.config import ConfigManager
-            width = self._saved_list_width or ConfigManager().window_config.get("note_list_width", 250)
+            width = self._saved_list_width or cfg.get(cfg.noteListWidth)
             self._splitter.setSizes([width, total - width])
 
     def toggle_list(self):

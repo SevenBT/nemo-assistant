@@ -11,7 +11,14 @@ from dataclasses import dataclass
 from typing import Iterator, Optional
 
 from app.core.ai_client import AIClient
-from app.core.config import ConfigManager
+from app.core.config import (
+    MODEL_TEMPLATES,
+    SHANGDAO_MODELS,
+    cfg,
+    get_api_key,
+    get_litellm_provider_api_key,
+    get_shangdao_api_key,
+)
 
 
 @dataclass
@@ -30,17 +37,16 @@ class ModelOverride:
 
 
 class _ConfigProxy:
-    """Thin wrapper around ConfigManager that overrides api_type and model.
+    """Thin proxy that overrides api_type and model for AIClient.
 
-    Delegates all other attribute access to the real config so AIClient
-    works without modification.
+    AIClient reads from the cfg singleton, so this proxy temporarily
+    patches cfg values during the generation call. Instead, we provide
+    the same attribute interface that AIClient's internal helpers expect.
     """
 
-    def __init__(self, real: ConfigManager, override: ModelOverride):
-        self._real = real
+    def __init__(self, override: ModelOverride):
         self._override = override
 
-    # Overridden fields
     @property
     def api_type(self) -> str:
         return self._override.api_type
@@ -58,34 +64,32 @@ class _ConfigProxy:
         return self._override.model_id
 
     def get_litellm_model_by_id(self, model_id: str) -> dict | None:
-        # Return a synthetic model config for the override
         if model_id == self._override.model_id:
             return {
                 "id": self._override.model_id,
                 "provider": self._override.provider,
                 "enabled": True,
             }
-        return self._real.get_litellm_model_by_id(model_id)
+        return next(
+            (m for m in cfg.get(cfg.litellmModels) if m["id"] == model_id),
+            None,
+        )
 
-    # Delegate everything else to the real config
-    def __getattr__(self, name: str):
-        return getattr(self._real, name)
 
-
-def build_model_options(config: ConfigManager) -> list[ModelOverride]:
+def build_model_options() -> list[ModelOverride]:
     """Build the list of available model options from current config."""
     options: list[ModelOverride] = []
 
     # Current OpenAI-compatible endpoint
+    current_model = cfg.get(cfg.model)
     options.append(ModelOverride(
         api_type="openai",
-        model_id=config.model,
-        label=f"{config.model}  (当前接口)",
+        model_id=current_model,
+        label=f"{current_model}  (当前接口)",
     ))
 
     # Shangdao models
-    if config.shangdao_enabled:
-        from app.core.config import SHANGDAO_MODELS
+    if cfg.get(cfg.shangdaoEnabled):
         for name in SHANGDAO_MODELS:
             options.append(ModelOverride(
                 api_type="shangdao",
@@ -94,14 +98,15 @@ def build_model_options(config: ConfigManager) -> list[ModelOverride]:
             ))
 
     # LiteLLM enabled models
-    if config.litellm_enabled:
-        for m in config.litellm_enabled_models:
-            options.append(ModelOverride(
-                api_type="litellm",
-                model_id=m["id"],
-                label=f"{m['name']}  ({m['provider']})",
-                provider=m["provider"],
-            ))
+    if cfg.get(cfg.litellmEnabled):
+        for m in cfg.get(cfg.litellmModels):
+            if m.get("enabled"):
+                options.append(ModelOverride(
+                    api_type="litellm",
+                    model_id=m["id"],
+                    label=f"{m['name']}  ({m['provider']})",
+                    provider=m["provider"],
+                ))
 
     return options
 
@@ -198,7 +203,6 @@ def _extract_blocks(text: str) -> tuple[str, str]:
 
 def stream_generate(
     requirement: str,
-    config: ConfigManager,
     model_override: Optional[ModelOverride] = None,
 ) -> Iterator[dict]:
     """Stream tool generation from AI.
@@ -221,8 +225,7 @@ def stream_generate(
             ),
         },
     ]
-    effective_config = _ConfigProxy(config, model_override) if model_override else config
-    client = AIClient(effective_config)
+    client = AIClient(config_proxy=_ConfigProxy(model_override)) if model_override else AIClient()
     yield from client.chat_stream(messages)
 
 

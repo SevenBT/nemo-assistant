@@ -441,7 +441,7 @@ SegmentedWidget > QWidget:checked {{
     border-right: 1px solid {theme["border"]};
 }}
 #panelTitle {{
-    font-size: 11px; font-weight: 700; color: {accent};
+    font-size: 13px; font-weight: 700; color: {accent};
     text-transform: uppercase; letter-spacing: 2px;
     padding: 2px 0;
     background: transparent;

@@ -9,15 +9,14 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app.core.config import ConfigManager
+from app.core.config import cfg
 
 
 class LiteLLMModelEditDialog(QDialog):
     """添加自定义模型或编辑现有模型的对话框"""
 
-    def __init__(self, config: ConfigManager, model_id: str | None = None, parent=None):
+    def __init__(self, model_id: str | None = None, parent=None):
         super().__init__(parent)
-        self._config = config
         self._model_id = model_id  # None 表示添加，否则表示编辑
         self._is_edit_mode = model_id is not None
 
@@ -66,7 +65,8 @@ class LiteLLMModelEditDialog(QDialog):
 
     def _load_model(self):
         """加载现有模型数据（编辑模式）"""
-        model = self._config.get_litellm_model_by_id(self._model_id)
+        models = cfg.get(cfg.litellmModels)
+        model = next((m for m in models if m["id"] == self._model_id), None)
         if not model:
             QMessageBox.critical(self, "错误", f"模型 {self._model_id} 不存在")
             self.reject()
@@ -107,22 +107,27 @@ class LiteLLMModelEditDialog(QDialog):
             return
 
         try:
+            models = list(cfg.get(cfg.litellmModels))
             if self._is_edit_mode:
                 # 编辑模式：只更新 name 和 enabled
-                self._config.update_litellm_model(
-                    model_id=model_id,
-                    name=name,
-                    enabled=enabled,
-                )
+                for m in models:
+                    if m["id"] == model_id:
+                        m["name"] = name
+                        m["enabled"] = enabled
+                        break
+                cfg.set(cfg.litellmModels, models)
                 QMessageBox.information(self, "成功", "模型更新成功")
             else:
-                # 添加模式
-                self._config.add_litellm_model(
-                    model_id=model_id,
-                    name=name,
-                    provider=provider,
-                    enabled=enabled,
-                )
+                # 添加模式：检查重复
+                if any(m["id"] == model_id for m in models):
+                    raise ValueError(f"模型 {model_id} 已存在")
+                models.append({
+                    "id": model_id,
+                    "name": name,
+                    "provider": provider,
+                    "enabled": enabled,
+                })
+                cfg.set(cfg.litellmModels, models)
                 QMessageBox.information(self, "成功", "模型添加成功")
 
             self.accept()

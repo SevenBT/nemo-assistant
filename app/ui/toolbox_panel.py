@@ -38,7 +38,6 @@ from qfluentwidgets import (
 if TYPE_CHECKING:
     from app.core.tool_manager import ToolManager
 
-from app.core.config import ConfigManager
 from app.models.tool_def import ToolDefinition
 
 
@@ -269,13 +268,26 @@ class ToolboxPanel(QWidget):
 
     tool_toggled = pyqtSignal(str, bool)
 
-    def __init__(self, tool_mgr: ToolManager, config: ConfigManager, parent=None):
+    def __init__(self, tool_mgr: ToolManager, parent=None):
         super().__init__(parent)
         self._tools = tool_mgr
-        self._config = config
         self._current_tool: ToolDefinition | None = None
         self._saved_list_width: int | None = None
         self._build()
+
+        from app.core.config import cfg
+        from app.ui.components.font_delegate import FontAwareListDelegate
+        self._list.setItemDelegate(FontAwareListDelegate(self._list))
+        self._apply_font_size()
+        cfg.fontSize.valueChanged.connect(self._apply_font_size)
+
+    def _apply_font_size(self, _value=None):
+        from app.core.config import cfg
+        from PyQt6.QtGui import QFont
+        size = cfg.get(cfg.fontSize)
+        font = self._list.font()
+        font.setPixelSize(size)
+        self._list.setFont(font)
 
     def _build(self):
         root = QVBoxLayout(self)
@@ -325,6 +337,7 @@ class ToolboxPanel(QWidget):
         left_layout.setSpacing(0)
 
         self._list = ListWidget()
+        self._list.setObjectName("toolList")
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._list.setFrameShape(QFrame.Shape.NoFrame)
         self._list.setSpacing(2)
@@ -414,7 +427,7 @@ class ToolboxPanel(QWidget):
 
     def _on_generate_tool(self):
         from app.ui.tool_generate_dialog import ToolGenerateDialog
-        dlg = ToolGenerateDialog(self._tools, self._config, parent=self)
+        dlg = ToolGenerateDialog(self._tools, parent=self)
         dlg.tool_saved.connect(lambda _: self.refresh())
         dlg.exec()
 

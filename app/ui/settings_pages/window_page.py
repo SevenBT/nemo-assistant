@@ -1,0 +1,47 @@
+"""窗口设置页 — 吸附、最小化目标、窗口尺寸"""
+
+from qfluentwidgets import FluentIcon
+
+from app.core.config import cfg
+from app.ui.settings_pages.base_auto_page import AutoSettingPage, CardSpec
+
+
+class WindowPage(AutoSettingPage):
+    def __init__(self, parent=None):
+        super().__init__(
+            "窗口",
+            [
+                CardSpec(
+                    cfg.edgeSnap,
+                    FluentIcon.PIN,
+                    "顶栏吸附",
+                    "窗口拖到屏幕边缘时自动吸附",
+                ),
+                CardSpec(
+                    cfg.edgeSnapThreshold,
+                    FluentIcon.CONSTRACT,
+                    "吸附宽度阈值",
+                    "触发吸附的屏幕宽度百分比",
+                ),
+                CardSpec(
+                    cfg.minimizeTo,
+                    FluentIcon.MINIMIZE,
+                    "最小化到",
+                    "关闭窗口时最小化的目标位置",
+                    texts=["系统托盘", "任务栏"],
+                ),
+                CardSpec(
+                    cfg.windowWidth,
+                    FluentIcon.FULL_SCREEN,
+                    "窗口宽度",
+                    "应用窗口的默认宽度",
+                ),
+                CardSpec(
+                    cfg.windowHeight,
+                    FluentIcon.FULL_SCREEN,
+                    "窗口高度",
+                    "应用窗口的默认高度",
+                ),
+            ],
+            parent,
+        )

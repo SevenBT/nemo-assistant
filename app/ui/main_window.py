@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
 
 from app.core.ai_client import AIClient
 from app.core.builtin_tools import BUILTIN_TOOLS, BuiltinToolHandler
-from app.core.config import ConfigManager
+from app.core.config import cfg, get_api_key
 from app.core.note_manager import NoteManager
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
@@ -45,7 +45,7 @@ from app.ui.resize_filter import ResizeFilter
 from app.ui.toolbox_panel import ToolboxPanel
 from app.ui.screenshot_overlay import ScreenshotOverlay
 from app.ui.session_panel import SessionPanel
-from app.ui.settings_dialog import SettingsDialog
+from app.ui.settings_window import SettingsWindow
 from app.ui.style import THEMES, apply_theme, set_dark_titlebar
 from app.ui.title_bar import TitleBar
 from app.ui.toast import show_toast
@@ -65,14 +65,12 @@ class MainWindow(FluentWindow):
 
     def __init__(
         self,
-        config: ConfigManager,
         session_mgr: SessionManager,
         tool_mgr: ToolManager,
         scheduler: SchedulerManager,
         note_mgr: NoteManager,
     ):
         super().__init__()
-        self._config = config
         # Replace FluentWindow's default FluentTitleBar immediately.
         # Disconnect the signal that would re-raise the old titleBar, then
         # forcibly hide any lingering children before our titleBar takes over.
@@ -95,7 +93,7 @@ class MainWindow(FluentWindow):
         self._tools = tool_mgr
         self._scheduler = scheduler
         self._notes = note_mgr
-        self._ai = AIClient(config)
+        self._ai = AIClient()
         self._current_session_id: str | None = None
         self._workers: dict[str, ChatWorker] = {}
         self._session_live: dict[str, dict] = {}  # sid -> {ai_msg, ai_text}
@@ -123,23 +121,25 @@ class MainWindow(FluentWindow):
         self._resize_filter = ResizeFilter(self)
         self._resize_filter.install()
         self._snap_mgr = EdgeSnapManager(self)
-        self._snap_mgr.set_enabled(self._config.window_config.get("edge_snap", True))
+        self._snap_mgr.set_enabled(cfg.get(cfg.edgeSnap))
         self._notify_signal.connect(self._on_notify)
         self._setup_hotkeys()
         self._restore_pinned_notes()
 
+        # Live font size: re-apply theme QSS when fontSize changes
+        cfg.fontSize.valueChanged.connect(self._on_font_size_changed)
+
     # ──────────────────────────────────────────── window setup
     # ──────────────────────────────────────────── window setup
     def _build_window(self):
-        wcfg = self._config.window_config
-        w = wcfg.get("width", 440)
-        h = wcfg.get("height", 700)
+        w = cfg.get(cfg.windowWidth)
+        h = cfg.get(cfg.windowHeight)
         self.resize(w, h)
         # 默认居中屏幕
         sg = QApplication.primaryScreen().availableGeometry()
         default_x = sg.x() + (sg.width() - w) // 2
         default_y = sg.y() + (sg.height() - h) // 2
-        self.move(wcfg.get("x", default_x), wcfg.get("y", default_y))
+        self.move(default_x, default_y)
         # Qt >= 6.10: qframelesswindow uses NoTitleBarBackgroundHint which still
         # renders system close button.  Force FramelessWindowHint to suppress it.
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
@@ -147,7 +147,7 @@ class MainWindow(FluentWindow):
         # handles resize via setGeometry to avoid ghost border artifacts.
         self.setResizeEnabled(False)
         # 任务栏模式下不设置 Tool 标志，让窗口出现在任务栏中
-        if self._config.minimize_to == "tray":
+        if cfg.get(cfg.minimizeTo) == "tray":
             self.setWindowFlag(Qt.WindowType.Tool, True)
         else:
             # taskbar 模式：设置窗口图标，不置顶
@@ -204,13 +204,10 @@ class MainWindow(FluentWindow):
         chat_area.setObjectName("chatArea")
         chat_area.setLayout(chat_col)
         self._chat_splitter.addWidget(chat_area)
+        self._chat_splitter.setStretchFactor(0, 0)  # session panel: fixed width
+        self._chat_splitter.setStretchFactor(1, 1)  # chat area: take all extra space
 
-        wcfg = self._config.window_config
-        session_width = wcfg.get("session_panel_width", 180)
-        chat_width = wcfg.get("width", 440) - session_width
-        self._chat_splitter.setSizes([session_width, chat_width])
-        if not wcfg.get("session_panel_visible", True):
-            self._chat_splitter.setSizes([0, session_width + chat_width])
+        self._chat_splitter.splitterMoved.connect(self._on_splitter_moved)
 
         page_layout.addWidget(self._chat_splitter)
 
@@ -220,7 +217,7 @@ class MainWindow(FluentWindow):
         self._notes_panel.note_updated.connect(self._on_note_updated)
 
         # ── page 2: toolbox panel ─────────────────────────────────────
-        self._toolbox_panel = ToolboxPanel(self._tools, self._config)
+        self._toolbox_panel = ToolboxPanel(self._tools)
         self._toolbox_panel.setObjectName("toolboxInterface")
 
         # Register pages with FluentWindow (required for switchTo to work)
@@ -249,7 +246,7 @@ class MainWindow(FluentWindow):
 
     # ──────────────────────────────────────────── hotkeys
     def _setup_hotkeys(self):
-        self._hotkey_mgr = HotkeyManager(self._config, self)
+        self._hotkey_mgr = HotkeyManager(self)
         self._hotkey_mgr.screenshot_triggered.connect(self._start_screenshot)
         self._hotkey_mgr.new_note_triggered.connect(self._new_note_via_hotkey)
         self._hotkey_mgr.toggle_window_triggered.connect(self._toggle_window_visibility)
@@ -562,7 +559,7 @@ class MainWindow(FluentWindow):
                 user_prompt = preset.system_prompt.strip()
         # 优先级 3: 全局配置 config.system_prompt
         if not user_prompt:
-            user_prompt = self._config.system_prompt.strip()
+            user_prompt = cfg.get(cfg.systemPrompt).strip()
         # 优先级 4: 默认值
         if not user_prompt:
             user_prompt = DEFAULT_USER_PROMPT
@@ -708,7 +705,7 @@ class MainWindow(FluentWindow):
     def _on_bg_error(self, sid: str, message: str):
         hint = ""
         if "404" in message:
-            hint = f"\n\n提示：请在设置中检查 API 地址（当前: {self._config.api_base_url}）和模型名称（当前: {self._config.model}）"
+            hint = f"\n\n提示：请在设置中检查 API 地址（当前: {cfg.get(cfg.apiBaseUrl)}）和模型名称（当前: {cfg.get(cfg.model)}）"
         elif "401" in message or "Unauthorized" in message:
             hint = "\n\n提示：API Key 无效，请在设置中重新填写"
         error_text = f"❌ 请求失败：{message}{hint}"
@@ -745,27 +742,45 @@ class MainWindow(FluentWindow):
 
     @pyqtSlot(str, str)
     def _on_notify(self, title: str, body: str):
-        theme = THEMES.get(self._config.theme, THEMES["morning"])
+        theme = THEMES.get(cfg.get(cfg.theme), THEMES["morning"])
         show_toast(title, body, accent=theme["accent"])
 
     # ──────────────────────────────────────────── dialogs / window actions
     def _open_settings(self):
-        old_theme = self._config.theme
-        dlg = SettingsDialog(self._config, self._hotkey_mgr, self)
+        old_theme = cfg.get(cfg.theme)
+        dlg = SettingsWindow(
+            hotkey_mgr=self._hotkey_mgr,
+            tool_mgr=self._tools,
+            parent=self,
+        )
         if dlg.exec():
-            wcfg = self._config.window_config
             if self._snap_mgr is not None:
-                self._snap_mgr.set_enabled(wcfg.get("edge_snap", True))
-            new_theme = self._config.theme
-            custom_qss = apply_theme(new_theme, font_size=self._config.font_size)
-            self.setStyleSheet(custom_qss)
+                self._snap_mgr.set_enabled(cfg.get(cfg.edgeSnap))
+            self._reapply_theme()
             if not self.isVisible():
                 self.show()
+
+    def _on_font_size_changed(self, _value=None):
+        self._reapply_theme()
+
+    def _reapply_theme(self):
+        theme_name = cfg.get(cfg.theme)
+        custom_qss = apply_theme(theme_name, font_size=cfg.get(cfg.fontSize))
+        self.setStyleSheet(custom_qss)
 
     def _switch_view(self, index: int):
         if 0 <= index < len(self._pages):
             self.switchTo(self._pages[index])
         self._title_bar.set_active_view(index)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not getattr(self, '_splitter_restored', False):
+            self._splitter_restored = True
+            session_width = cfg.get(cfg.sessionPanelWidth)
+            total = self._chat_splitter.width()
+            if total > session_width:
+                self._chat_splitter.setSizes([session_width, total - session_width])
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -776,7 +791,7 @@ class MainWindow(FluentWindow):
             self._title_bar.resize(self.width(), self._title_bar.height())
 
     def _minimize(self):
-        if self._config.minimize_to == "taskbar":
+        if cfg.get(cfg.minimizeTo) == "taskbar":
             self.showMinimized()
         else:
             self.hide()
@@ -879,6 +894,12 @@ class MainWindow(FluentWindow):
         if getattr(self, '_snap_mgr', None) is not None:
             self._snap_mgr.on_leave()
 
+    def _on_splitter_moved(self, pos, index):
+        sizes = self._chat_splitter.sizes()
+        if sizes[0] > 0:
+            cfg.set(cfg.sessionPanelWidth, max(sizes[0], 120))
+            cfg.save()
+
     def _toggle_session_panel(self):
         sizes = self._chat_splitter.sizes()
         total = sum(sizes)
@@ -888,20 +909,17 @@ class MainWindow(FluentWindow):
             self._saved_session_width = session_width
             self._chat_splitter.setSizes([0, total])
         else:
-            width = getattr(self, '_saved_session_width', None) or self._config.window_config.get("session_panel_width", 180)
+            width = getattr(self, '_saved_session_width', None) or cfg.get(cfg.sessionPanelWidth)
             self._chat_splitter.setSizes([width, total - width])
 
     # ──────────────────────────────────────────── intercept close → tray
     def closeEvent(self, event):
         sizes = self._chat_splitter.sizes()
         session_width = sizes[0] if sizes[0] > 0 else getattr(self, '_saved_session_width', 180)
-        session_visible = sizes[0] > 0
-        self._config.update_window_config(
-            x=self.x(), y=self.y(),
-            width=self.width(), height=self.height(),
-            session_panel_width=max(session_width, 120),
-            session_panel_visible=session_visible,
-        )
+        cfg.set(cfg.windowWidth, self.width())
+        cfg.set(cfg.windowHeight, self.height())
+        cfg.set(cfg.sessionPanelWidth, max(session_width, 120))
+        cfg.save()
         event.ignore()
         self.hide()
 
@@ -912,5 +930,13 @@ class MainWindow(FluentWindow):
             self._cancel_worker(sid)
 
     def _on_quit(self):
+        # Save layout only if window is visible (otherwise closeEvent already saved)
+        if self.isVisible():
+            sizes = self._chat_splitter.sizes()
+            session_width = sizes[0] if sizes[0] > 0 else getattr(self, '_saved_session_width', 180)
+            cfg.set(cfg.windowWidth, self.width())
+            cfg.set(cfg.windowHeight, self.height())
+            cfg.set(cfg.sessionPanelWidth, max(session_width, 120))
+        cfg.save()
         self.cleanup()
         QApplication.instance().quit()

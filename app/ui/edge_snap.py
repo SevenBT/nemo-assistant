@@ -182,7 +182,8 @@ class EdgeSnapManager(QObject):
         默认阈值为 40%，用户可在设置中自定义。
         """
         # 获取配置的阈值（默认 0.4 = 40%）
-        threshold = self._window._config.edge_snap_width_threshold
+        from app.core.config import cfg
+        threshold = cfg.get(cfg.edgeSnapThreshold) / 100
 
         window_width = self._window.width()
         screen = self._window.screen()

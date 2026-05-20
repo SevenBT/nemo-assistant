@@ -9,15 +9,14 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app.core.config import ConfigManager
+from app.core.config import MODEL_TEMPLATES, cfg
 
 
 class LiteLLMTemplateDialog(QDialog):
     """从模板快速添加模型的对话框"""
 
-    def __init__(self, config: ConfigManager, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self._config = config
         self.setWindowTitle("从模板添加模型")
         self.setMinimumWidth(400)
         self.setMinimumHeight(350)
@@ -49,8 +48,7 @@ class LiteLLMTemplateDialog(QDialog):
 
     def _load_templates(self):
         """加载模板数据"""
-        templates = self._config.get_model_templates()
-        for provider in templates.keys():
+        for provider in MODEL_TEMPLATES.keys():
             self._provider_combo.addItem(provider.capitalize(), provider)
 
         # 触发第一次加载
@@ -65,11 +63,10 @@ class LiteLLMTemplateDialog(QDialog):
         if not provider:
             return
 
-        templates = self._config.get_model_templates()
-        models = templates.get(provider, [])
+        models = MODEL_TEMPLATES.get(provider, [])
 
         # 获取已存在的模型 ID
-        existing_ids = {m["id"] for m in self._config.litellm_models}
+        existing_ids = {m["id"] for m in cfg.get(cfg.litellmModels)}
 
         # 只显示未添加的模型
         for model in models:
@@ -91,18 +88,23 @@ class LiteLLMTemplateDialog(QDialog):
         added_count = 0
         errors = []
 
+        models = list(cfg.get(cfg.litellmModels))
+        existing_ids = {m["id"] for m in models}
+
         for item in selected_items:
             model_data = item.data(Qt.ItemDataRole.UserRole)
-            try:
-                self._config.add_litellm_model(
-                    model_id=model_data["id"],
-                    name=model_data["name"],
-                    provider=provider,
-                    enabled=False,
-                )
-                added_count += 1
-            except ValueError as e:
-                errors.append(str(e))
+            if model_data["id"] in existing_ids:
+                errors.append(f"模型 {model_data['id']} 已存在")
+                continue
+            models.append({
+                "id": model_data["id"],
+                "name": model_data["name"],
+                "provider": provider,
+                "enabled": False,
+            })
+            added_count += 1
+
+        cfg.set(cfg.litellmModels, models)
 
         if errors:
             QMessageBox.warning(
