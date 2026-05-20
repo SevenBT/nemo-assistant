@@ -333,7 +333,7 @@ class NotesPanel(QWidget):
         self._md_editor.wiki_link_activated.connect(self._on_wiki_link_clicked)
         right_layout.addWidget(self._md_editor, 1)
 
-        # Markdown preview (QWebEngineView, replaces QTextBrowser)
+        # Markdown preview (QTextBrowser)
         self._md_preview = MarkdownPreview()
         self._md_preview.link_clicked.connect(self._on_wiki_link_clicked)
         self._md_preview.hide()
