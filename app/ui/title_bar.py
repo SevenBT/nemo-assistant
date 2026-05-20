@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     FluentIcon,
     SearchLineEdit,
@@ -165,6 +165,9 @@ class TitleBar(QWidget):
 
         self._nav = SegmentedWidget()
         self._nav.setFixedHeight(32)
+        self._nav.setSizePolicy(
+            QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        )
         self._nav.addItem("chat", "聊天", icon=FluentIcon.CHAT)
         self._nav.addItem("notes", "笔记", icon=FluentIcon.EDIT)
         self._nav.addItem("workshop", "工坊", icon=FluentIcon.DEVELOPER_TOOLS)
