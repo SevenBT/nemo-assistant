@@ -125,21 +125,20 @@ def _get_css_vars(dark: bool) -> str:
     return ""
 
 
-def _md_to_html(text: str, base_url: str = "", dark: bool = False) -> str:
-    """将 Markdown 转换为自包含 HTML 文档。"""
+def _render_markdown_body(text: str, base_url: str = "") -> str:
+    """将 Markdown 文本渲染为 HTML body 片段（共用逻辑）。"""
     if _HAS_MARKDOWN:
         body = _markdown_lib.markdown(text, extensions=_MARKDOWN_EXTENSIONS)
     else:
         import html as _html
         body = f"<pre>{_html.escape(text)}</pre>"
 
-    # 将相对图片路径转为绝对 file:// URL（QWebEngineView setHtml 安全策略需要）
+    # 将相对图片路径转为绝对 file:// URL
     if base_url:
         def _abs_img(m):
             src = m.group(1)
             if src.startswith(("http://", "https://", "file://", "data:")):
                 return m.group(0)
-            # base_url is like "file:///D:/path/to/notes/"
             abs_src = base_url.rstrip("/") + "/" + src.replace("\\", "/")
             return f'<img src="{abs_src}"'
         body = re.sub(r'<img src="([^"]+)"', _abs_img, body)
@@ -160,14 +159,70 @@ def _md_to_html(text: str, base_url: str = "", dark: bool = False) -> str:
                 p,
             )
             new_parts.append(p)
-    body = "".join(new_parts)
+    return "".join(new_parts)
 
+
+def _md_to_html(text: str, base_url: str = "", dark: bool = False) -> str:
+    """将 Markdown 转换为自包含 HTML 文档（WebEngine 用）。"""
+    body = _render_markdown_body(text, base_url)
     css_vars = _get_css_vars(dark)
     base_tag = f'<base href="{base_url}">' if base_url else ""
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 {base_tag}
 <style>{_PREVIEW_CSS}{css_vars}</style>
+</head><body>{body}</body></html>"""
+
+
+# QTextBrowser 兼容的简化 CSS（不用变量、rem，只用 px）
+_SIMPLE_CSS = """
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 14pt;
+  line-height: 1.7;
+  color: #24292e;
+  padding: 8px 12px;
+}
+h1 { font-size: 22pt; font-weight: bold; }
+h2 { font-size: 19pt; font-weight: bold; }
+h3 { font-size: 16pt; font-weight: bold; }
+h4 { font-size: 14pt; font-weight: bold; }
+code { font-family: Consolas, monospace; background-color: #f6f8fa; }
+pre { background-color: #f6f8fa; padding: 8px; }
+blockquote { color: #6a737d; border-left: 3px solid #dfe2e5; padding-left: 10px; }
+a { color: #0366d6; }
+a.wikilink { background-color: #EEEDFE; color: #534AB7; }
+"""
+
+_SIMPLE_CSS_DARK = """
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 14pt;
+  line-height: 1.7;
+  color: #d4d4d4;
+  padding: 8px 12px;
+}
+h1 { font-size: 22pt; font-weight: bold; color: #d4d4d4; }
+h2 { font-size: 19pt; font-weight: bold; color: #d4d4d4; }
+h3 { font-size: 16pt; font-weight: bold; color: #d4d4d4; }
+h4 { font-size: 14pt; font-weight: bold; color: #d4d4d4; }
+code { font-family: Consolas, monospace; background-color: #2d2d2d; }
+pre { background-color: #2d2d2d; padding: 8px; }
+blockquote { color: #808080; border-left: 3px solid #4a4a4a; padding-left: 10px; }
+a { color: #4fc1ff; }
+a.wikilink { background-color: #2D2250; color: #A78BFA; }
+"""
+
+
+def _md_to_html_simple(text: str, base_url: str = "", dark: bool = False) -> str:
+    """将 Markdown 转换为 QTextBrowser 兼容的 HTML（不用 CSS 变量和 rem）。"""
+    body = _render_markdown_body(text, base_url)
+    css = _SIMPLE_CSS_DARK if dark else _SIMPLE_CSS
+    base_tag = f'<base href="{base_url}">' if base_url else ""
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+{base_tag}
+<style>{css}</style>
 </head><body>{body}</body></html>"""
 
 
@@ -222,11 +277,16 @@ class MarkdownPreview(QWidget):
             self._use_webengine = True
         else:
             from PyQt6.QtWidgets import QTextBrowser
+            from PyQt6.QtGui import QFont
             self._tb = QTextBrowser()
             self._tb.setOpenExternalLinks(False)
             self._tb.setOpenLinks(False)
             self._tb.anchorClicked.connect(self._on_anchor_click)
             self._tb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            # QTextBrowser 不支持 CSS 变量和 rem，通过 setFont 设置基础字体大小
+            _font = QFont()
+            _font.setPointSize(14)
+            self._tb.setFont(_font)
             layout.addWidget(self._tb)
             self._use_webengine = False
 
@@ -252,4 +312,6 @@ class MarkdownPreview(QWidget):
         if self._use_webengine:
             self._page.setHtml(html, base_url)
         else:
-            self._tb.setHtml(html)
+            # QTextBrowser 不支持 CSS 变量/rem，用简化的内联样式
+            simple_html = _md_to_html_simple(markdown_text, base_url.toString(), dark=dark)
+            self._tb.setHtml(simple_html)

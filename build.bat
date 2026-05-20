@@ -1,19 +1,27 @@
 @echo off
 chcp 65001 >nul
+cd /d "%~dp0"
 echo ============================================================
 echo  AI Agent  ^—  打包构建脚本
 echo ============================================================
 
+REM 优先使用虚拟环境
+if exist ".venv\Scripts\python.exe" (
+    set "PYTHON=.venv\Scripts\python.exe"
+) else (
+    set "PYTHON=python"
+)
+
 echo [1/4] 安装 PyInstaller...
-python -m pip install --quiet --upgrade pyinstaller
+%PYTHON% -m pip install --quiet --upgrade pyinstaller
 if errorlevel 1 ( echo [错误] PyInstaller 安装失败 & pause & exit /b 1 )
 
 echo [2/4] 安装项目依赖...
-python -m pip install --quiet -r requirements.txt
+%PYTHON% -m pip install --quiet -r requirements.txt
 if errorlevel 1 ( echo [错误] 依赖安装失败 & pause & exit /b 1 )
 
 echo [3/4] 打包中，请稍候...
-python -m PyInstaller --clean --noconfirm AI_Agent.spec
+%PYTHON% -m PyInstaller --clean --noconfirm AI_Agent.spec
 if errorlevel 1 ( echo [错误] PyInstaller 打包失败 & pause & exit /b 1 )
 
 echo [4/4] 复制 tools 目录...
