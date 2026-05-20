@@ -24,4 +24,5 @@ PyQt6 无边框透明浮窗桌面应用。
 - **自定义按钮信号**：构造函数分离 `display_text` 和数据，信号只传纯数据不传带装饰字符的显示文本
 - **数据库**：note/todo/daily 共用 notes 表，用 `note_type` 字段区分，待办特有字段设为可选（NULL）
 - **QTextEdit 光标颜色（FluentWindow 环境）**：QSS `color`、palette、viewport stylesheet、setCurrentCharFormat 在 `__init__`/`showEvent` 中设置均无效——FluentWindow 会在后续重新应用内部样式覆盖掉。正确方案：在 `focusInEvent` 中用 `setCurrentCharFormat` + `setTextColor` 强制设置前景色，每次获焦都重新应用，确保不被覆盖。颜色值从 `style.get_text_color()` 获取以跟随主题。
+- **qfluentwidgets MessageBox 不能用在 StackedWidget 内嵌面板中**：`MaskDialogBase` 要求 parent 是真正的顶层窗口，会在 parent 上覆盖遮罩并调用 `self.window().installEventFilter(self)`。当面板嵌在 FluentWindow 的 StackedWidget 中时，parent 链指向 `StackedWidgetClassWindow`（非顶层），连续弹出会卡死。正确方案：嵌入式面板中的确认对话框用标准 `QMessageBox`，不用 qfluentwidgets 的 `MessageBox`。
 

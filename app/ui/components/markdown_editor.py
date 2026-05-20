@@ -1,4 +1,4 @@
-"""MarkdownEditor — QPlainTextEdit with syntax highlighting, line numbers, wiki-links, and context menu."""
+"""MarkdownEditor — QPlainTextEdit with syntax highlighting, wiki-links, and context menu."""
 from __future__ import annotations
 
 import re
@@ -6,12 +6,10 @@ import shutil
 import uuid
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QRect, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
-    QFont,
     QKeySequence,
-    QPainter,
     QPalette,
     QTextCharFormat,
     QTextCursor,
@@ -25,40 +23,17 @@ from PyQt6.QtWidgets import (
     QMenu,
     QPlainTextEdit,
     QTextEdit,
-    QWidget,
 )
 
 from app.ui.components.markdown_highlighter import MarkdownHighlighter
 from app.core.wiki_links import parse_wiki_links
 
 
-# ---------------------------------------------------------------------------
-# Line Number Area (from noteration)
-# ---------------------------------------------------------------------------
-
-class LineNumberArea(QWidget):
-    """行号显示区域。"""
-
-    def __init__(self, editor: "MarkdownEditor") -> None:
-        super().__init__(editor)
-        self._editor = editor
-
-    def sizeHint(self) -> QSize:
-        return QSize(self._editor.line_number_area_width(), 0)
-
-    def paintEvent(self, event) -> None:
-        self._editor.line_number_area_paint_event(event)
-
-
-# ---------------------------------------------------------------------------
-# Editor
-# ---------------------------------------------------------------------------
-
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
 
 
 class MarkdownEditor(QPlainTextEdit):
-    """Markdown editor with syntax highlighting, line numbers, wiki-links, image paste/drop."""
+    """Markdown editor with syntax highlighting, wiki-links, image paste/drop."""
 
     wiki_link_activated = pyqtSignal(str)
 
@@ -72,13 +47,7 @@ class MarkdownEditor(QPlainTextEdit):
         # Syntax highlighter (from noteration)
         self._highlighter = MarkdownHighlighter(self.document())
 
-        # Line numbers (from noteration)
-        self._lnum_area = LineNumberArea(self)
-        self._lnum_visible = True
-        self.blockCountChanged.connect(self._update_line_number_width)
-        self.updateRequest.connect(self._on_update_request)
         self.cursorPositionChanged.connect(self._highlight_current_line)
-        self._update_line_number_width(0)
         self._highlight_current_line()
 
     # ------------------------------------------------------------------ theme
@@ -125,65 +94,6 @@ class MarkdownEditor(QPlainTextEdit):
     # ------------------------------------------------------------------ public
     def set_images_dir(self, path: Path):
         self._images_dir = path
-
-    def set_line_numbers_visible(self, visible: bool):
-        """切换行号显示。"""
-        self._lnum_visible = visible
-        if visible:
-            self._lnum_area.show()
-        else:
-            self._lnum_area.hide()
-        self._update_line_number_width()
-
-    # ------------------------------------------------------------------ line numbers (from noteration)
-    def line_number_area_width(self) -> int:
-        if not self._lnum_visible:
-            return 0
-        digits = max(1, len(str(self.blockCount())))
-        return 8 + self.fontMetrics().horizontalAdvance("9") * digits + 8
-
-    def _update_line_number_width(self, _=0) -> None:
-        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
-
-    def _on_update_request(self, rect: QRect, dy: int) -> None:
-        if dy:
-            self._lnum_area.scroll(0, dy)
-        else:
-            self._lnum_area.update(0, rect.y(), self._lnum_area.width(), rect.height())
-        if rect.contains(self.viewport().rect()):
-            self._update_line_number_width()
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        cr = self.contentsRect()
-        self._lnum_area.setGeometry(
-            QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height())
-        )
-
-    def line_number_area_paint_event(self, event) -> None:
-        painter = QPainter(self._lnum_area)
-        painter.fillRect(event.rect(), self.palette().color(QPalette.ColorRole.Window))
-        block = self.firstVisibleBlock()
-        block_num = block.blockNumber()
-        top = round(
-            self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
-        )
-        bottom = top + round(self.blockBoundingRect(block).height())
-        current = self.textCursor().blockNumber()
-
-        while block.isValid() and top <= event.rect().bottom():
-            if block.isVisible() and bottom >= event.rect().top():
-                color = QColor("#444") if block_num == current else QColor("#bbb")
-                painter.setPen(color)
-                painter.drawText(
-                    0, top, self._lnum_area.width() - 4,
-                    self.fontMetrics().height(),
-                    Qt.AlignmentFlag.AlignRight, str(block_num + 1),
-                )
-            block = block.next()
-            top = bottom
-            bottom = top + round(self.blockBoundingRect(block).height())
-            block_num += 1
 
     # ------------------------------------------------------------------ current line highlight
     def _highlight_current_line(self) -> None:
@@ -286,6 +196,43 @@ class MarkdownEditor(QPlainTextEdit):
                 return
 
         super().keyPressEvent(event)
+
+    # ------------------------------------------------------------------ paste from web (preserve newlines)
+    def insertFromMimeData(self, source):
+        """Override paste to preserve line breaks from clipboard content.
+
+        Priority: plain text (reliable newlines) > HTML parsing > default.
+        Web-copied markdown often has HTML where newlines are expressed via CSS
+        (white-space:pre) or nested spans rather than block-level tags, so HTML
+        parsing loses line breaks. The plain text representation is more reliable.
+        """
+        if source.hasImage():
+            super().insertFromMimeData(source)
+            return
+
+        # Prefer plain text — it preserves newlines reliably
+        if source.hasText():
+            text = source.text()
+            if text.strip():
+                self.textCursor().insertText(text)
+                return
+
+        # Fallback: parse HTML if no usable plain text
+        if source.hasHtml():
+            html = source.html()
+            import html as html_mod
+            # Convert block-level elements to newlines
+            text = re.sub(r'<br\s*/?>', '\n', html)
+            text = re.sub(r'</(?:p|div|h[1-6]|li|tr|blockquote|pre)>', '\n', text, flags=re.IGNORECASE)
+            text = re.sub(r'<[^>]+>', '', text)
+            text = html_mod.unescape(text)
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            text = text.strip()
+            if text:
+                self.textCursor().insertText(text)
+                return
+
+        super().insertFromMimeData(source)
 
     # ------------------------------------------------------------------ drag & drop (image)
     def dragEnterEvent(self, event):
@@ -607,23 +554,27 @@ class MarkdownEditor(QPlainTextEdit):
 
     # ------------------------------------------------------------------ insert helpers
     def _insert_link(self):
-        selected = self.textCursor().selectedText()
+        saved_cursor = self.textCursor()
+        selected = saved_cursor.selectedText()
         text, ok = QInputDialog.getText(self, "新增链接", "链接文字:", text=selected or "")
         if not ok:
             return
         url, ok2 = QInputDialog.getText(self, "新增链接", "URL:")
         if not ok2:
             return
+        self.setTextCursor(saved_cursor)
         self.textCursor().insertText(f"[{text}]({url})")
 
     def _insert_image(self):
         if not self._images_dir:
             return
+        saved_cursor = self.textCursor()
         path, _ = QFileDialog.getOpenFileName(
             self, "选择图片", "", "图片文件 (*.png *.jpg *.jpeg *.gif *.webp *.svg)"
         )
         if not path:
             return
+        self.setTextCursor(saved_cursor)
         self._images_dir.mkdir(parents=True, exist_ok=True)
         ext = Path(path).suffix
         filename = f"{uuid.uuid4().hex}{ext}"
@@ -644,9 +595,12 @@ class MarkdownEditor(QPlainTextEdit):
         self._insert_block("---")
 
     def _insert_code_block(self):
+        # Save cursor position before dialog steals focus
+        saved_cursor = self.textCursor()
         lang, ok = QInputDialog.getText(self, "代码块", "语言（如 python、js，可留空）:")
         if not ok:
             return
+        self.setTextCursor(saved_cursor)
         self._insert_block(f"```{lang}\n\n```")
         cursor = self.textCursor()
         cursor.setPosition(cursor.position() - 4)

@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidgetItem,
+    QMessageBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -22,7 +23,6 @@ from qfluentwidgets import (
     FluentIcon,
     LineEdit,
     ListWidget,
-    MessageBox,
     PushButton,
     RoundMenu,
     TextEdit,
@@ -201,12 +201,10 @@ class NotesPanel(QWidget):
         self._build()
         self._load()
 
-    def _top_window(self):
-        """获取真正的顶层窗口，避免 FluentWindow StackedWidget 内部窗口问题。"""
-        w = self
-        while w.parent():
-            w = w.parent()
-        return w
+    def _confirm(self, title: str, msg: str) -> bool:
+        """显示确认对话框，返回用户是否确认。"""
+        reply = QMessageBox.question(self, title, msg)
+        return reply == QMessageBox.StandardButton.Yes
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -236,11 +234,6 @@ class NotesPanel(QWidget):
         self._preview_btn.hide()
         toolbar.addWidget(self._preview_btn)
 
-        self._line_num_btn = TogglePushButton(FluentIcon.ALIGNMENT, "行号")
-        self._line_num_btn.setChecked(True)
-        self._line_num_btn.clicked.connect(self._on_line_num_toggle)
-        self._line_num_btn.hide()
-        toolbar.addWidget(self._line_num_btn)
 
         # Trash mode buttons (hidden by default)
         self._back_btn = PushButton(FluentIcon.RETURN, "返回")
@@ -402,9 +395,6 @@ class NotesPanel(QWidget):
             self._md_preview.hide()
             self._md_editor.show()
 
-    def _on_line_num_toggle(self):
-        self._md_editor.set_line_numbers_visible(self._line_num_btn.isChecked())
-
     def _on_wiki_link_clicked(self, target: str):
         """Navigate to a wiki-linked note by title match."""
         notes = self._mgr.search_notes(keyword=target, note_types=["note"])
@@ -539,8 +529,7 @@ class NotesPanel(QWidget):
             self._on_folder_renamed(folder_id, name.strip())
 
     def _delete_folder_confirm(self, folder_id: int):
-        w = MessageBox("删除文件夹", "删除文件夹后，其中的笔记将移至顶层。确定继续吗？", self._top_window())
-        if w.exec():
+        if self._confirm("删除文件夹", "删除文件夹后，其中的笔记将移至顶层。确定继续吗？"):
             self._on_folder_deleted(folder_id)
 
     def _on_tag_filter_changed(self, tag_name: str):
@@ -564,7 +553,6 @@ class NotesPanel(QWidget):
             self._md_preview.hide()
             self._sticky_edit.show()
             self._preview_btn.hide()
-            self._line_num_btn.hide()
 
             self._sticky_edit.blockSignals(True)
             content = note.content
@@ -581,7 +569,6 @@ class NotesPanel(QWidget):
             self._sticky_edit.hide()
             self._md_preview.hide()
             self._preview_btn.show()
-            self._line_num_btn.show()
             self._md_editor.blockSignals(True)
             self._md_editor.setPlainText(note.content)
             self._md_editor.blockSignals(False)
@@ -590,7 +577,6 @@ class NotesPanel(QWidget):
             # note type — Markdown
             self._sticky_edit.hide()
             self._preview_btn.show()
-            self._line_num_btn.show()
 
             self._md_editor.blockSignals(True)
             self._md_editor.setPlainText(note.content)
@@ -674,7 +660,6 @@ class NotesPanel(QWidget):
             self._new_sticky_btn.hide()
             self._trash_btn.hide()
             self._preview_btn.hide()
-            self._line_num_btn.hide()
             self._back_btn.show()
             self._restore_btn.show()
             self._restore_btn.setEnabled(selected_n > 0)
@@ -713,8 +698,7 @@ class NotesPanel(QWidget):
         n = len(selected)
         msg = f"确定要将选中的 {n} 条笔记移入回收站吗？" if n > 1 else "确定要将这条笔记移入回收站吗？"
 
-        w = MessageBox("移入回收站", msg, self._top_window())
-        if not w.exec():
+        if not self._confirm("移入回收站", msg):
             return
 
         self._auto_save_timer.stop()
@@ -757,8 +741,7 @@ class NotesPanel(QWidget):
         n = len(selected)
         msg = (f"确定要永久删除选中的 {n} 条笔记吗？此操作不可撤销！"
                if n > 1 else "确定要永久删除这条笔记吗？此操作不可撤销！")
-        w = MessageBox("永久删除", msg, self._top_window())
-        if w.exec():
+        if self._confirm("永久删除", msg):
             for item in selected:
                 self._mgr.purge(item.data(Qt.ItemDataRole.UserRole))
             self._load()
@@ -767,8 +750,7 @@ class NotesPanel(QWidget):
         tc = self._mgr.trash_count()
         if tc == 0:
             return
-        w = MessageBox("清空回收站", f"确定要永久删除回收站中全部 {tc} 条笔记吗？此操作不可撤销！", self._top_window())
-        if w.exec():
+        if self._confirm("清空回收站", f"确定要永久删除回收站中全部 {tc} 条笔记吗？此操作不可撤销！"):
             self._mgr.purge_all()
             self._load()
 
@@ -987,7 +969,7 @@ class NotesPanel(QWidget):
                 f.write(f"{note.title}\n{'─' * 40}\n{body}\n")
             self._show_status("已导出")
         except OSError:
-            MessageBox("导出失败", "无法写入文件，请检查路径权限。", self._top_window()).exec()
+            QMessageBox.warning(self, "导出失败", "无法写入文件，请检查路径权限。")
 
     def _export_note_md(self, note_id: str):
         note = self._mgr.get(note_id)
@@ -1004,11 +986,10 @@ class NotesPanel(QWidget):
                 f.write(f"# {note.title}\n\n{note.content}\n")
             self._show_status("已导出")
         except OSError:
-            MessageBox("导出失败", "无法写入文件，请检查路径权限。", self._top_window()).exec()
+            QMessageBox.warning(self, "导出失败", "无法写入文件，请检查路径权限。")
 
     def _on_delete_by_id(self, note_id: str):
-        w = MessageBox("移入回收站", "确定要将这条笔记移入回收站吗？", self._top_window())
-        if not w.exec():
+        if not self._confirm("移入回收站", "确定要将这条笔记移入回收站吗？"):
             return
         self._auto_save_timer.stop()
         if note_id == self._current_note_id:
@@ -1021,8 +1002,7 @@ class NotesPanel(QWidget):
         n = len(items)
         msg = (f"确定要永久删除选中的 {n} 条笔记吗？此操作不可撤销！"
                if n > 1 else "确定要永久删除这条笔记吗？此操作不可撤销！")
-        w = MessageBox("永久删除", msg, self._top_window())
-        if w.exec():
+        if self._confirm("永久删除", msg):
             for item in items:
                 self._mgr.purge(item.data(Qt.ItemDataRole.UserRole))
             self._load()
