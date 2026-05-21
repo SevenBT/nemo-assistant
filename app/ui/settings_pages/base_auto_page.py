@@ -45,7 +45,7 @@ class AutoSettingPage(QScrollArea):
     Usage:
         page = AutoSettingPage("外观", [
             CardSpec(cfg.theme, FluentIcon.BRUSH, "主题", texts=["暖夜", ...]),
-            CardSpec(cfg.fontSize, FluentIcon.FONT_SIZE, "字体大小"),
+            CardSpec(cfg.contentFontSize, FluentIcon.FONT_SIZE, "内容字体大小"),
         ])
     """
 

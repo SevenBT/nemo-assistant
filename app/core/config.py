@@ -4,9 +4,9 @@ Declarative configuration module based on qfluentwidgets QConfig.
 Usage:
     from app.core.config import cfg, get_api_key, set_api_key
 
-    value = cfg.get(cfg.fontSize)
-    cfg.set(cfg.fontSize, 16)
-    cfg.fontSize.valueChanged.connect(on_font_changed)
+    value = cfg.get(cfg.contentFontSize)
+    cfg.set(cfg.contentFontSize, 16)
+    cfg.contentFontSize.valueChanged.connect(on_font_changed)
 """
 
 import json
@@ -114,13 +114,16 @@ class AppConfig(QConfig):
     theme = OptionsConfigItem(
         "Appearance", "Theme", "morning", OptionsValidator(THEME_OPTIONS)
     )
-    fontSize = RangeConfigItem(
-        "Appearance", "FontSize", 15, RangeValidator(12, 24)
+    contentFontSize = RangeConfigItem(
+        "Appearance", "ContentFontSize", 15, RangeValidator(12, 24)
+    )
+    navigationFontSize = RangeConfigItem(
+        "Appearance", "NavigationFontSize", 13, RangeValidator(10, 20)
     )
 
     # -- Editor --
-    noteEditorFontSize = RangeConfigItem(
-        "Editor", "NoteEditorFontSize", 15, RangeValidator(12, 28)
+    editorFontSize = RangeConfigItem(
+        "Editor", "EditorFontSize", 15, RangeValidator(8, 36)
     )
 
     # -- Window --

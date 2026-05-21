@@ -73,11 +73,13 @@ def _convert_old_to_new(old: dict) -> dict:
     window = old.get("window", {})
     new.setdefault("Appearance", {})
     new["Appearance"]["Theme"] = window.get("theme", "morning")
-    new["Appearance"]["FontSize"] = window.get("font_size", 15)
+    fs = window.get("font_size", 15)
+    new["Appearance"]["ContentFontSize"] = fs
+    new["Appearance"]["NavigationFontSize"] = max(fs - 2, 10)
 
     # Editor
     new.setdefault("Editor", {})
-    new["Editor"]["NoteEditorFontSize"] = window.get("note_editor_font_size", 15)
+    new["Editor"]["EditorFontSize"] = window.get("note_editor_font_size", 15)
 
     # Window
     new.setdefault("Window", {})

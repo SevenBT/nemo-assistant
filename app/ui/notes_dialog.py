@@ -104,7 +104,7 @@ class _NoteItemWidget(QWidget):
         text_col.setSpacing(1)
         text_col.setContentsMargins(0, 0, 0, 0)
 
-        fs = cfg.get(cfg.fontSize)
+        fs = cfg.get(cfg.navigationFontSize)
         self._title_lbl = QLabel(title)
         self._title_lbl.setStyleSheet(f"font-size: {fs}px; font-weight: 500; background: transparent;")
         self._title_lbl.setWordWrap(False)
@@ -145,7 +145,7 @@ class _FolderItem(QWidget):
         icon_lbl.setPixmap(FluentIcon.FOLDER.icon().pixmap(16, 16))
         layout.addWidget(icon_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        fs = cfg.get(cfg.fontSize)
+        fs = cfg.get(cfg.navigationFontSize)
         self._name_lbl = QLabel(name)
         self._name_lbl.setStyleSheet(f"font-size: {fs}px; font-weight: 500; background: transparent;")
         self._name_lbl.setWordWrap(False)
@@ -175,7 +175,7 @@ class _UncategorizedSection(QWidget):
         spacer.setStyleSheet("background: transparent;")
         layout.addWidget(spacer, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        fs = cfg.get(cfg.fontSize)
+        fs = cfg.get(cfg.navigationFontSize)
         name_lbl = QLabel("未分类")
         name_lbl.setStyleSheet(f"font-size: {fs}px; font-weight: 500; color: #9CA3AF; background: transparent;")
         name_lbl.setWordWrap(False)
@@ -325,7 +325,7 @@ class NotesPanel(QWidget):
         right_layout.addWidget(self._title_edit)
 
         # Apply note editor font size from config
-        _note_font_size = cfg.get(cfg.noteEditorFontSize)
+        _note_font_size = cfg.get(cfg.editorFontSize)
         from PyQt6.QtGui import QFont
         _editor_font = QFont()
         _editor_font.setPointSize(_note_font_size)
@@ -362,10 +362,10 @@ class NotesPanel(QWidget):
         from app.ui.components.font_delegate import FontAwareListDelegate
         self._list.setItemDelegate(FontAwareListDelegate(self._list))
         self._apply_list_font_size()
-        cfg.fontSize.valueChanged.connect(self._apply_list_font_size)
+        cfg.navigationFontSize.valueChanged.connect(self._apply_list_font_size)
 
         # Live editor font size update
-        cfg.noteEditorFontSize.valueChanged.connect(self._apply_editor_font_size)
+        cfg.editorFontSize.valueChanged.connect(self._apply_editor_font_size)
 
         # Restore splitter sizes from config
         list_width = cfg.get(cfg.noteListWidth)
@@ -660,7 +660,7 @@ class NotesPanel(QWidget):
 
     def _apply_editor_font_size(self, _value=None):
         from PyQt6.QtGui import QFont
-        size = cfg.get(cfg.noteEditorFontSize)
+        size = cfg.get(cfg.editorFontSize)
         font = QFont()
         font.setPointSize(size)
         self._md_editor.setFont(font)

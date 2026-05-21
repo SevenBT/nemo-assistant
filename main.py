@@ -72,7 +72,7 @@ def main():
     app.setApplicationName("AI Agent")
     app.setQuitOnLastWindowClosed(False)  # keep alive in tray
 
-    custom_qss = apply_theme(cfg.get(cfg.theme), font_size=cfg.get(cfg.fontSize))
+    custom_qss = apply_theme(cfg.get(cfg.theme), content_font_size=cfg.get(cfg.contentFontSize), editor_font_size=cfg.get(cfg.editorFontSize))
     app.setStyleSheet(custom_qss)
     sessions = SessionManager()
     tools = ToolManager()
@@ -84,7 +84,7 @@ def main():
     window = MainWindow(sessions, tools, scheduler, notes)
     # Re-apply theme after MainWindow init — FluentWindow's constructor
     # resets internal styles which can override the initial apply_theme call.
-    custom_qss = apply_theme(cfg.get(cfg.theme), font_size=cfg.get(cfg.fontSize))
+    custom_qss = apply_theme(cfg.get(cfg.theme), content_font_size=cfg.get(cfg.contentFontSize), editor_font_size=cfg.get(cfg.editorFontSize))
     app.setStyleSheet(custom_qss)
     window.show()
 

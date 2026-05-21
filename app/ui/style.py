@@ -284,7 +284,12 @@ _filter_instance: _DarkTitleBarFilter | None = None
 
 # ── Public API ────────────────────────────────────────────────────────
 
-def apply_theme(theme_name: str, opacity: float = 1.0, font_size: int = 15) -> str:
+def apply_theme(
+    theme_name: str,
+    opacity: float = 1.0,
+    content_font_size: int = 15,
+    editor_font_size: int = 15,
+) -> str:
     """Apply Fluent theme globally and return custom QSS for app-specific elements."""
     global _current_dark_mode, _filter_instance, _current_text_color
     theme = THEMES.get(theme_name, THEMES[DEFAULT_THEME])
@@ -301,7 +306,7 @@ def apply_theme(theme_name: str, opacity: float = 1.0, font_size: int = 15) -> s
         app.installEventFilter(_filter_instance)
     # Apply dark title bar to all existing top-level windows
     _apply_dark_titlebar_to_all(dark)
-    return _build_custom_qss(theme, font_size)
+    return _build_custom_qss(theme, content_font_size, editor_font_size)
 
 
 def _apply_dark_titlebar_to_all(dark: bool) -> None:
@@ -386,7 +391,7 @@ def enable_mica(hwnd: int, dark: bool = False) -> bool:
 
 # ── Internal ──────────────────────────────────────────────────────────
 
-def _build_custom_qss(theme: dict, font_size: int = 15) -> str:
+def _build_custom_qss(theme: dict, content_font_size: int = 15, editor_font_size: int = 15) -> str:
     dark = theme["mode"] == Theme.DARK
     accent = theme["accent"]
     accent_light = theme["accent_light"]
@@ -400,7 +405,7 @@ def _build_custom_qss(theme: dict, font_size: int = 15) -> str:
     accent_text = "#FFFFFF"
     dialog_btn_text = "#FFFFFF" if dark else "#FFFFFF"
 
-    code_size = max(font_size - 2, 10)
+    code_size = max(content_font_size - 2, 10)
 
     return f"""
 /* ═══════════════════════════════════════════════════════════════════
@@ -561,7 +566,7 @@ QSplitter::handle:hover {{ background: {accent}; }}
     border: 2px solid transparent;
     border-radius: 10px;
     padding: 8px 14px;
-    font-size: {font_size}px;
+    font-size: {editor_font_size}px;
     color: {theme["text"]};
 }}
 #inputWidget QTextEdit:focus {{
@@ -674,7 +679,7 @@ QSplitter::handle:hover {{ background: {accent}; }}
    Markdown rendered content in chat bubbles
    ═══════════════════════════════════════════════════════════════════ */
 #userBubble, #aiBubble {{
-    color: {theme["text"]}; font-size: {font_size}px; line-height: 1.65;
+    color: {theme["text"]}; font-size: {content_font_size}px; line-height: 1.65;
     background: transparent; border: none;
     selection-background-color: {accent_light};
 }}

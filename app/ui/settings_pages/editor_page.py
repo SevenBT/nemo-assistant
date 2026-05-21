@@ -1,4 +1,4 @@
-"""编辑器设置页 — 笔记编辑区字体"""
+"""编辑器设置页 — 输入/编辑区字体"""
 
 from qfluentwidgets import FluentIcon
 
@@ -12,10 +12,10 @@ class EditorPage(AutoSettingPage):
             "编辑器",
             [
                 CardSpec(
-                    cfg.noteEditorFontSize,
+                    cfg.editorFontSize,
                     FluentIcon.EDIT,
-                    "笔记编辑区字体大小",
-                    "Markdown 编辑器的字体大小",
+                    "编辑器字体大小",
+                    "聊天输入框、笔记编辑器、便利贴编辑器的字体大小",
                 ),
             ],
             parent,

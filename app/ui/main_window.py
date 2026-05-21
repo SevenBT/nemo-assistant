@@ -126,8 +126,9 @@ class MainWindow(FluentWindow):
         self._setup_hotkeys()
         self._restore_pinned_notes()
 
-        # Live font size: re-apply theme QSS when fontSize changes
-        cfg.fontSize.valueChanged.connect(self._on_font_size_changed)
+        # Live font size: re-apply theme QSS when content/editor fontSize changes
+        cfg.contentFontSize.valueChanged.connect(self._on_font_size_changed)
+        cfg.editorFontSize.valueChanged.connect(self._on_font_size_changed)
 
     # ──────────────────────────────────────────── window setup
     # ──────────────────────────────────────────── window setup
@@ -765,7 +766,11 @@ class MainWindow(FluentWindow):
 
     def _reapply_theme(self):
         theme_name = cfg.get(cfg.theme)
-        custom_qss = apply_theme(theme_name, font_size=cfg.get(cfg.fontSize))
+        custom_qss = apply_theme(
+            theme_name,
+            content_font_size=cfg.get(cfg.contentFontSize),
+            editor_font_size=cfg.get(cfg.editorFontSize),
+        )
         self.setStyleSheet(custom_qss)
 
     def _switch_view(self, index: int):

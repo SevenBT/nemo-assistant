@@ -279,12 +279,12 @@ class ToolboxPanel(QWidget):
         from app.ui.components.font_delegate import FontAwareListDelegate
         self._list.setItemDelegate(FontAwareListDelegate(self._list))
         self._apply_font_size()
-        cfg.fontSize.valueChanged.connect(self._apply_font_size)
+        cfg.navigationFontSize.valueChanged.connect(self._apply_font_size)
 
     def _apply_font_size(self, _value=None):
         from app.core.config import cfg
         from PyQt6.QtGui import QFont
-        size = cfg.get(cfg.fontSize)
+        size = cfg.get(cfg.navigationFontSize)
         font = self._list.font()
         font.setPixelSize(size)
         self._list.setFont(font)

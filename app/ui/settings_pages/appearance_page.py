@@ -1,4 +1,4 @@
-"""外观设置页 — 主题、全局字体大小"""
+"""外观设置页 — 主题、内容字体、导航字体"""
 
 from qfluentwidgets import FluentIcon
 
@@ -23,10 +23,16 @@ class AppearancePage(AutoSettingPage):
                     texts=_THEME_TEXTS,
                 ),
                 CardSpec(
-                    cfg.fontSize,
+                    cfg.contentFontSize,
                     FluentIcon.FONT_SIZE,
-                    "全局字体大小",
-                    "聊天、笔记列表、工具列表等所有界面的字体大小",
+                    "内容字体大小",
+                    "聊天气泡中的文字大小",
+                ),
+                CardSpec(
+                    cfg.navigationFontSize,
+                    FluentIcon.FONT,
+                    "导航字体大小",
+                    "会话列表、工具箱、笔记列表等侧栏文字大小",
                 ),
             ],
             parent,
