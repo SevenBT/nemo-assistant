@@ -595,6 +595,81 @@ QSplitter::handle:hover {{ background: {accent}; }}
 }}
 '''}
 
+/* Note editor panel — transparent so side margins blend with window bg */
+#noteEditorPanel {{
+    background: transparent;
+}}
+
+/* Markdown editor — transparent bg, thin hover-only scrollbar at right edge */
+#noteMarkdownEditor {{
+    background: transparent;
+    border: none;
+    color: {theme["text"]};
+}}
+#noteMarkdownEditor QScrollBar:vertical {{
+    width: 4px; background: transparent; margin: 0;
+}}
+#noteMarkdownEditor QScrollBar::handle:vertical {{
+    background: transparent; border-radius: 2px; min-height: 28px;
+}}
+#noteMarkdownEditor QScrollBar::handle:vertical:hover {{
+    background: {theme["scrollbar_hover"]};
+}}
+#noteMarkdownEditor:hover QScrollBar::handle:vertical {{
+    background: {theme["scrollbar"]};
+}}
+#noteMarkdownEditor QScrollBar::add-line:vertical,
+#noteMarkdownEditor QScrollBar::sub-line:vertical {{ height: 0; }}
+#noteMarkdownEditor QScrollBar::add-page:vertical,
+#noteMarkdownEditor QScrollBar::sub-page:vertical {{ background: transparent; }}
+
+/* Markdown preview browser — same treatment */
+#noteMarkdownPreview {{
+    background: transparent;
+}}
+#notePreviewBrowser {{
+    background: transparent;
+    border: none;
+}}
+#notePreviewBrowser QScrollBar:vertical {{
+    width: 4px; background: transparent; margin: 0;
+}}
+#notePreviewBrowser QScrollBar::handle:vertical {{
+    background: transparent; border-radius: 2px; min-height: 28px;
+}}
+#notePreviewBrowser QScrollBar::handle:vertical:hover {{
+    background: {theme["scrollbar_hover"]};
+}}
+#noteMarkdownPreview:hover #notePreviewBrowser QScrollBar::handle:vertical {{
+    background: {theme["scrollbar"]};
+}}
+#notePreviewBrowser QScrollBar::add-line:vertical,
+#notePreviewBrowser QScrollBar::sub-line:vertical {{ height: 0; }}
+#notePreviewBrowser QScrollBar::add-page:vertical,
+#notePreviewBrowser QScrollBar::sub-page:vertical {{ background: transparent; }}
+
+/* Sticky note editor — same treatment */
+#noteStickyEdit {{
+    background: transparent;
+    border: none;
+}}
+#noteStickyEdit QScrollBar:vertical {{
+    width: 4px; background: transparent; margin: 0;
+}}
+#noteStickyEdit QScrollBar::handle:vertical {{
+    background: transparent; border-radius: 2px; min-height: 28px;
+}}
+#noteStickyEdit QScrollBar::handle:vertical:hover {{
+    background: {theme["scrollbar_hover"]};
+}}
+#noteStickyEdit:hover QScrollBar::handle:vertical {{
+    background: {theme["scrollbar"]};
+}}
+#noteStickyEdit QScrollBar::add-line:vertical,
+#noteStickyEdit QScrollBar::sub-line:vertical {{ height: 0; }}
+#noteStickyEdit QScrollBar::add-page:vertical,
+#noteStickyEdit QScrollBar::sub-page:vertical {{ background: transparent; }}
+
 /* ═══════════════════════════════════════════════════════════════════
    Markdown rendered content in chat bubbles
    ═══════════════════════════════════════════════════════════════════ */

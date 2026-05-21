@@ -46,6 +46,12 @@ class MarkdownEditor(QPlainTextEdit):
 
         # Syntax highlighter (from noteration)
         self._highlighter = MarkdownHighlighter(self.document())
+        # Set initial default text color from theme
+        try:
+            from app.ui.style import get_text_color
+            self._highlighter.set_default_text_color(get_text_color())
+        except Exception:
+            pass
 
         self.cursorPositionChanged.connect(self._highlight_current_line)
         self._highlight_current_line()
@@ -59,8 +65,14 @@ class MarkdownEditor(QPlainTextEdit):
 
     def _update_highlighter_palette(self):
         """Update highlighter palette based on current theme."""
-        bg = self.palette().window().color()
-        dark = bg.lightness() < 128
+        try:
+            from app.ui.style import _current_dark_mode, get_text_color
+            dark = _current_dark_mode
+            text_color = get_text_color()
+        except Exception:
+            bg = self.palette().window().color()
+            dark = bg.lightness() < 128
+            text_color = "#E8E0D6" if dark else "#1E293B"
         if dark:
             palette = {
                 "heading": "#E5E7EB",
@@ -89,6 +101,7 @@ class MarkdownEditor(QPlainTextEdit):
                 "quote": ("#888", "#FAFAFA"),
                 "code_block": ("#888", "#F5F5F5"),
             }
+        self._highlighter.set_default_text_color(text_color)
         self._highlighter.set_palette(palette)
 
     # ------------------------------------------------------------------ public
@@ -112,20 +125,14 @@ class MarkdownEditor(QPlainTextEdit):
     def _apply_text_color(self):
         """Force text color to follow theme (FluentWindow overrides palette)."""
         try:
-            from app.ui.style import get_text_color, _current_dark_mode
+            from app.ui.style import get_text_color
             color = get_text_color()
-            placeholder_color = "rgba(255,255,255,0.35)" if _current_dark_mode else "rgba(0,0,0,0.35)"
         except Exception:
             color = "#000000"
-            placeholder_color = "rgba(0,0,0,0.35)"
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(color))
         self.setCurrentCharFormat(fmt)
-        self.viewport().setStyleSheet(f"color: {color}; background: transparent;")
-        self.setStyleSheet(
-            f"QPlainTextEdit {{ color: {color}; }}"
-            f"QPlainTextEdit[placeholderText] {{ color: {placeholder_color}; }}"
-        )
+        self._highlighter.set_default_text_color(color)
 
     def focusInEvent(self, event):
         super().focusInEvent(event)

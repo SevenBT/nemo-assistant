@@ -126,6 +126,7 @@ class MarkdownPreview(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._tb = QTextBrowser()
+        self._tb.setObjectName("notePreviewBrowser")
         self._tb.setOpenExternalLinks(False)
         self._tb.setOpenLinks(False)
         self._tb.anchorClicked.connect(self._on_anchor_click)

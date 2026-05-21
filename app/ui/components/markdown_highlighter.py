@@ -26,6 +26,8 @@ class MarkdownHighlighter(QSyntaxHighlighter):
     def __init__(self, document: QTextDocument, palette: dict | None = None) -> None:
         super().__init__(document)
         self._palette = palette or {}
+        self._default_text_color: str | None = None
+        self._default_fmt = QTextCharFormat()
         self._rules: list[tuple[re.Pattern, QTextCharFormat]] = []
         self._setext_rules: list[tuple[re.Pattern, QTextCharFormat]] = []
         self._code_fence_fmt = QTextCharFormat()
@@ -36,8 +38,21 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         self._build_rules()
         self.rehighlight()
 
-    @staticmethod
+    def set_default_text_color(self, color: str) -> None:
+        """Set default foreground color for non-highlighted text.
+
+        Also rebuilds rules so that formats without explicit color
+        inherit this default (Qt setFormat replaces, not merges).
+        """
+        if color != self._default_text_color:
+            self._default_text_color = color
+            self._default_fmt = QTextCharFormat()
+            self._default_fmt.setForeground(QColor(color))
+            self._build_rules()
+            self.rehighlight()
+
     def _make_format(
+        self,
         color: str | None = None,
         bg: str | None = None,
         bold: bool = False,
@@ -46,8 +61,11 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         underline: bool = False,
     ) -> QTextCharFormat:
         fmt = QTextCharFormat()
+        # Always set foreground: explicit color > default text color > nothing
         if color:
             fmt.setForeground(QColor(color))
+        elif self._default_text_color:
+            fmt.setForeground(QColor(self._default_text_color))
         if bg:
             fmt.setBackground(QColor(bg))
         if bold:
@@ -149,6 +167,10 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
     def highlightBlock(self, text: str) -> None:
         prev_state = self.previousBlockState()
+
+        # Apply default text color as baseline (syntax rules override on top)
+        if self._default_text_color and text:
+            self.setFormat(0, len(text), self._default_fmt)
 
         # Fenced code block (``` ... ```)
         stripped = text.strip()

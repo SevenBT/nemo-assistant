@@ -190,6 +190,8 @@ class NotesPanel(QWidget):
 
     note_updated = pyqtSignal(int, str, str)
 
+    _MAX_EDITOR_WIDTH = 760  # content column max width; centered when editor is wider
+
     def __init__(self, note_mgr: NoteManager, parent=None):
         super().__init__(parent)
         self._mgr = note_mgr
@@ -311,9 +313,11 @@ class NotesPanel(QWidget):
 
         # Right: editor
         self._editor_widget = QWidget()
+        self._editor_widget.setObjectName("noteEditorPanel")
         self._editor_widget.setMinimumWidth(300)
+        self._editor_widget.installEventFilter(self)
         right_layout = QVBoxLayout(self._editor_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setContentsMargins(16, 12, 0, 12)
         right_layout.setSpacing(6)
 
         self._title_edit = LineEdit()
@@ -328,6 +332,7 @@ class NotesPanel(QWidget):
 
         # Markdown editor (for note type)
         self._md_editor = MarkdownEditor(images_dir=NOTES_IMAGES_DIR)
+        self._md_editor.setObjectName("noteMarkdownEditor")
         self._md_editor.setPlaceholderText("在此输入 Markdown 内容…")
         self._md_editor.setFont(_editor_font)
         self._md_editor.wiki_link_activated.connect(self._on_wiki_link_clicked)
@@ -335,12 +340,14 @@ class NotesPanel(QWidget):
 
         # Markdown preview (QTextBrowser)
         self._md_preview = MarkdownPreview()
+        self._md_preview.setObjectName("noteMarkdownPreview")
         self._md_preview.link_clicked.connect(self._on_wiki_link_clicked)
         self._md_preview.hide()
         right_layout.addWidget(self._md_preview, 1)
 
         # Rich text editor (for sticky type — HTML with images)
         self._sticky_edit = TextEdit()
+        self._sticky_edit.setObjectName("noteStickyEdit")
         self._sticky_edit.setPlaceholderText("在此输入便签内容…")
         self._sticky_edit.setFont(_editor_font)
         self._sticky_edit.hide()
@@ -775,9 +782,17 @@ class NotesPanel(QWidget):
             self._mgr.purge_all()
             self._load()
 
+    def _update_editor_margins(self, width: int):
+        """Keep editor content centered with equal side margins when wider than max width.
+        Right margin stays 0 so the scrollbar sits at the panel's right edge."""
+        side = max(16, (width - self._MAX_EDITOR_WIDTH) // 2)
+        self._editor_widget.layout().setContentsMargins(side, 12, 0, 12)
+
     # ------------------------------------------------------------------ save
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent
+        if obj is self._editor_widget and event.type() == QEvent.Type.Resize:
+            self._update_editor_margins(event.size().width())
         if event.type() == QEvent.Type.FocusOut:
             if obj is self._md_editor or obj is self._sticky_edit:
                 self._auto_save_timer.stop()
