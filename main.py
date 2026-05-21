@@ -56,6 +56,7 @@ def _setup_crash_log():
 
 _setup_crash_log()
 
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 from app.core.config import cfg
@@ -72,6 +73,10 @@ def main():
     app.setApplicationName("AI Agent")
     app.setQuitOnLastWindowClosed(False)  # keep alive in tray
 
+    icon_path = Path(__file__).parent / "assets" / "AI助手.png"
+    icon = QIcon(str(icon_path))
+    app.setWindowIcon(icon)
+
     custom_qss = apply_theme(cfg.get(cfg.theme), content_font_size=cfg.get(cfg.contentFontSize), editor_font_size=cfg.get(cfg.editorFontSize))
     app.setStyleSheet(custom_qss)
     sessions = SessionManager()
@@ -82,6 +87,7 @@ def main():
     scheduler.start()
 
     window = MainWindow(sessions, tools, scheduler, notes)
+    window.setWindowIcon(icon)
     # Re-apply theme after MainWindow init — FluentWindow's constructor
     # resets internal styles which can override the initial apply_theme call.
     custom_qss = apply_theme(cfg.get(cfg.theme), content_font_size=cfg.get(cfg.contentFontSize), editor_font_size=cfg.get(cfg.editorFontSize))

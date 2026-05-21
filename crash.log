@@ -1,8 +1,11 @@
 Traceback (most recent call last):
-  File "D:\claudecode-projects\assistant\main.py", line 66, in <module>
-    from app.ui.main_window import MainWindow
-  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 50, in <module>
-    from app.ui.title_bar import TitleBar
-  File "D:\claudecode-projects\assistant\app\ui\title_bar.py", line 13, in <module>
-    from PyQt6.QtCore import Qt, QSizePolicy, QTimer, pyqtSignal
-ImportError: cannot import name 'QSizePolicy' from 'PyQt6.QtCore' (C:\Users\usirs\.pyenv\pyenv-win\versions\3.12.7\Lib\site-packages\PyQt6\QtCore.pyd)
+  File "D:\claudecode-projects\assistant\main.py", line 103, in <module>
+    main()
+  File "D:\claudecode-projects\assistant\main.py", line 89, in main
+    window = MainWindow(sessions, tools, scheduler, notes)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 111, in __init__
+    self._build_window()
+  File "D:\claudecode-projects\assistant\app\ui\main_window.py", line 155, in _build_window
+    from app.ui.tray_manager import _make_icon
+ImportError: cannot import name '_make_icon' from 'app.ui.tray_manager' (D:\claudecode-projects\assistant\app\ui\tray_manager.py)

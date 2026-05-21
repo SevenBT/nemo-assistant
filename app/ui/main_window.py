@@ -152,8 +152,9 @@ class MainWindow(FluentWindow):
             self.setWindowFlag(Qt.WindowType.Tool, True)
         else:
             # taskbar 模式：设置窗口图标，不置顶
-            from app.ui.tray_manager import _make_icon
-            self.setWindowIcon(_make_icon())
+            from app.ui.tray_manager import _ICON_PATH
+            from PyQt6.QtGui import QIcon
+            self.setWindowIcon(QIcon(_ICON_PATH))
 
     def _build_ui(self):
         # Hide the left sidebar — navigation lives in the title bar
