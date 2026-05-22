@@ -1,8 +1,8 @@
-"""Global hotkey registration using the keyboard library.
+"""
+全局热键管理器。
 
-Hotkey callbacks fire on the keyboard hook thread.  Because HotkeyManager
-lives on the Qt main thread, PyQt6 automatically queues signal delivery back
-to the main thread — no extra marshalling needed.
+使用 keyboard 库注册系统级热键，回调通过 PyQt6 信号自动
+从 keyboard hook 线程 marshal 回 Qt 主线程。
 """
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -28,6 +28,8 @@ _ACTION_LABELS: dict[str, str] = {
 
 
 class HotkeyManager(QObject):
+    """全局热键管理器，注册/注销热键并通过信号通知 UI。"""
+
     screenshot_triggered    = pyqtSignal()
     new_note_triggered      = pyqtSignal()
     toggle_window_triggered = pyqtSignal()

@@ -1,3 +1,9 @@
+"""
+AI 对话客户端。
+
+封装 OpenAI、商道、LiteLLM 三种 API 的流式调用，
+统一输出 text/tool_call/done/error 事件流。
+"""
 import json
 from typing import Iterator, Optional
 
@@ -16,8 +22,10 @@ _TIMEOUT = httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0)
 
 
 class AIClient:
+    """AI 对话客户端，支持 OpenAI / 商道 / LiteLLM 三种后端。"""
+
     def __init__(self, config_proxy=None):
-        """Optional config_proxy overrides cfg singleton for model/api_type reads."""
+        """初始化客户端，可选 config_proxy 覆盖全局配置读取。"""
         self._proxy = config_proxy
 
     def _openai_client(self) -> OpenAI:
@@ -33,14 +41,15 @@ class AIClient:
         tools: Optional[list[dict]] = None,
     ) -> Iterator[dict]:
         """
-        Streaming chat. Yields:
-          {"type": "text",      "delta": str}
-          {"type": "tool_call", "id": str, "name": str, "arguments": dict}
-          {"type": "done"}
-          {"type": "error",     "message": str}
+        流式对话，根据 apiType 分发到对应后端。
 
-        Note: messages should already have attachment content merged
-        via merge_attachments_to_content() before calling this method.
+        Yields:
+          {"type": "text",      "delta": str}              — 文本片段
+          {"type": "tool_call", "id", "name", "arguments"} — 工具调用
+          {"type": "done",      "reasoning_content"}       — 完成
+          {"type": "error",     "message": str}            — 错误
+
+        调用前需先通过 merge_attachments_to_content() 合并附件。
         """
         api_type = self._proxy.api_type if self._proxy else cfg.get(cfg.apiType)
         if api_type == "shangdao":
@@ -55,8 +64,8 @@ class AIClient:
         messages: list[dict],
         tools: Optional[list[dict]] = None,
     ) -> Iterator[dict]:
+        """通过 OpenAI SDK 进行流式调用。"""
         kwargs: dict = {
-            "model": self._proxy.model if self._proxy else cfg.get(cfg.model),
             "messages": messages,
             "max_tokens": cfg.get(cfg.maxTokens),
             "temperature": cfg.get(cfg.temperature),
@@ -122,6 +131,7 @@ class AIClient:
         messages: list[dict],
         tools: Optional[list[dict]] = None,
     ) -> Iterator[dict]:
+        """通过商道网关 HTTP SSE 进行流式调用。"""
         model_name = self._proxy.shangdao_model if self._proxy else cfg.get(cfg.shangdaoModel)
         model_meta = SHANGDAO_MODELS.get(model_name)
         if not model_meta:
@@ -293,27 +303,12 @@ class AIClient:
 
     @staticmethod
     def merge_attachments_to_content(messages: list) -> list[dict]:
-        """Merge attachment content into message content for API calls.
-
-        For each message with attachments, prepend file content to the
-        original content in the format:
-
-            [文件: filename.txt]
-            <parsed_content>
-
-            <original_content>
-
-        Args:
-            messages: List of Message objects
-
-        Returns:
-            List of API-ready message dicts with merged content
-        """
+        """将消息中的附件内容合并到 content 字段，供 API 调用使用。"""
         api_messages = []
         for msg in messages:
             api_dict = msg.to_api_dict()
 
-            # Only merge attachments for user messages
+            # 仅对用户消息合并附件
             if msg.role == "user" and msg.attachments:
                 attachment_texts = []
                 for att in msg.attachments:

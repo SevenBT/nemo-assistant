@@ -1,3 +1,8 @@
+"""
+会话管理器。
+
+负责会话的 CRUD、消息追加、置顶排序，数据以 JSON 文件持久化到 SESSIONS_DIR。
+"""
 import json
 import time
 from pathlib import Path
@@ -9,12 +14,15 @@ from app.models.session import Session
 
 
 class SessionManager:
+    """会话管理器，管理所有聊天会话的生命周期和持久化。"""
+
     def __init__(self):
         self._sessions: dict[str, Session] = {}
         self._load_all()
 
-    # ------------------------------------------------------------------ load
+    # ------------------------------------------------------------------ 加载/保存
     def _load_all(self):
+        """从磁盘加载所有会话 JSON 文件。"""
         for path in SESSIONS_DIR.glob("*.json"):
             try:
                 with open(path, encoding="utf-8") as f:
@@ -31,7 +39,7 @@ class SessionManager:
         with open(self._path(session.id), "w", encoding="utf-8") as f:
             json.dump(session.to_dict(), f, ensure_ascii=False, indent=2)
 
-    # ------------------------------------------------------------------ crud
+    # ------------------------------------------------------------------ CRUD
     def get_sessions(self) -> list[Session]:
         """返回会话列表：置顶的在前（按 sort_order），其余按 updated_at 降序。"""
         pinned = sorted(
@@ -87,8 +95,9 @@ class SessionManager:
             session.title = title
             self._save(session)
 
-    # ------------------------------------------------------------------ messages
+    # ------------------------------------------------------------------ 消息
     def add_message(self, session_id: str, message: Message):
+        """向会话追加消息，首条用户消息自动设为会话标题。"""
         session = self._sessions.get(session_id)
         if not session:
             return

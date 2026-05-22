@@ -16,7 +16,7 @@ from app.ui.file_card_widget import FileCardWidget
 
 
 class TypingIndicator(QWidget):
-    """Fluent-style progress bar indicating AI is thinking."""
+    """Fluent 风格进度条，表示 AI 正在思考。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38,7 +38,7 @@ class TypingIndicator(QWidget):
 
 
 class _MessageText(QTextBrowser):
-    """Auto-height read-only text area. Replaces QLabel for reliable word-wrap."""
+    """自适应高度的只读文本区域，替代 QLabel 以实现可靠的自动换行。"""
 
     _MAX_USER_WIDTH = 420  # max content width for user bubbles
 
@@ -99,12 +99,11 @@ class _MessageText(QTextBrowser):
 
 class MessageBubble(QFrame):
     """
-    Renders one message (user or assistant).
+    渲染单条消息（用户或 AI）。
 
-    AI bubbles support a compact tool summary (collapsed by default):
-      [AI label]
-      [ToolSummary]  <- single line "已调用 N 个工具", expandable
-      [answer text]  <- only the final response text
+    AI 气泡支持折叠的工具摘要：
+      [工具摘要]  ← 单行 "已调用 N 个工具"，可展开
+      [回复文本]  ← 最终回复内容
     """
 
     def __init__(self, message: Message, parent=None):
@@ -158,43 +157,43 @@ class MessageBubble(QFrame):
 
         self._content = _MessageText(self._is_user)
         self._content.set_text(message.content or "")
-        # Hide empty AI content; shown when text actually arrives
+        # 空的 AI 内容先隐藏，有文本到达时再显示
         if not self._is_user and not message.content:
             self._content.hide()
         layout.addWidget(self._content)
 
-    # -- internal --------------------------------------------------------
+    # -- 内部 --------------------------------------------------------
 
-    # -- public API -------------------------------------------------------
+    # -- 公开 API -------------------------------------------------------
 
     def add_tool_card(self, call_id: str, name: str, params: dict):
-        """Append a pending tool call to the summary widget."""
+        """向摘要组件添加一个待处理的工具调用。"""
         if self._is_user or not self._tool_summary:
             return
         self._tool_summary.add_tool(call_id, name)
         self._tool_summary.show()
 
     def update_tool_card(self, call_id: str, result: dict):
-        """Update an existing tool call with its final result."""
+        """更新工具调用的最终结果。"""
         if self._tool_summary:
             self._tool_summary.update_tool(call_id, result)
 
     def clear_text(self):
-        """Hide and clear the text area (called when a tool call starts)."""
+        """清空并隐藏文本区域（工具调用开始时调用）。"""
         if self._is_user:
             return
         self._content.set_text("")
         self._content.hide()
 
     def set_content(self, text: str):
-        """Set the main answer text; shows or hides the widget accordingly."""
+        """设置回复文本内容，根据是否有内容自动显示/隐藏。"""
         self._content.set_text(text)
         if not self._is_user:
             self._content.setVisible(bool(text))
 
 
 class ChatWidget(QWidget):
-    """Scrollable message list with drag-and-drop file support."""
+    """可滚动的消息列表，支持拖放文件附件。"""
 
     file_attached = pyqtSignal(list)  # Emits list[Attachment]
 
@@ -269,14 +268,11 @@ class ChatWidget(QWidget):
 
     def load_session(self, messages: list[Message]):
         """
-        Rebuild the chat from session messages.
+        从会话消息重建聊天界面。
 
-        Consecutive assistant messages (produced by multi-turn tool loops) are
-        merged into ONE bubble:
-          - Tool calls from every message in the chain -> tool cards
-          - Content of the LAST message with text -> answer text
-        This prevents intermediate "thinking" text and empty tool-call
-        placeholders from appearing as separate reply boxes.
+        连续的 assistant 消息（多轮工具循环产生）合并为一个气泡：
+          - 链中所有消息的工具调用 → 工具卡片
+          - 最后一条有文本的消息 → 回复内容
         """
         self.clear()
         i = 0
@@ -297,11 +293,7 @@ class ChatWidget(QWidget):
         QTimer.singleShot(80, self._scroll_bottom)
 
     def _add_assistant_group(self, group: list[Message]):
-        """
-        Collapse a run of consecutive assistant messages into a single bubble.
-        Collects all tool_calls across the chain; uses only the last non-empty
-        content as the answer text.
-        """
+        """将连续的 assistant 消息合并为单个气泡，收集所有工具调用。"""
         if not group:
             return
         all_tool_calls = []
@@ -334,18 +326,18 @@ class ChatWidget(QWidget):
         sb.setValue(sb.maximum())
 
     def start_typing(self):
-        """Show typing indicator and scroll to bottom."""
+        """显示输入指示器并滚动到底部。"""
         self._typing.start()
         QTimer.singleShot(30, self._scroll_bottom)
 
     def stop_typing(self):
-        """Hide typing indicator."""
+        """隐藏输入指示器。"""
         self._typing.stop()
 
-    # -- drag and drop ---------------------------------------------------
+    # -- 拖放 ---------------------------------------------------
 
     def dragEnterEvent(self, event):
-        """Accept drag events with file URLs."""
+        """接受包含文件 URL 的拖放事件。"""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:

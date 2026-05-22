@@ -1,10 +1,11 @@
 """
-ChatWorker runs the full agentic loop in a background thread:
-  1. Send messages to AI (streaming)
-  2. Collect tool calls from AI response
-  3. Execute tools via ToolManager
-  4. Feed results back to AI
-  5. Repeat until no more tool calls (or max iterations)
+聊天工作线程，运行完整的 Agent 循环：
+
+1. 向 AI 发送消息（流式）
+2. 收集 AI 返回的工具调用
+3. 通过 ToolManager 执行工具
+4. 将结果反馈给 AI
+5. 重复直到无工具调用或达到最大轮次
 """
 import json
 import queue
@@ -18,20 +19,22 @@ MAX_TURNS = 10
 
 
 class ChatWorker(QThread):
-    # ── Streaming text ─────────────────────────────────────────────────
+    """后台聊天线程，处理流式响应和工具调用循环。"""
+
+    # ── 流式文本 ──────────────────────────────────────────────────────
     text_chunk = pyqtSignal(str)
 
-    # ── Tool lifecycle ─────────────────────────────────────────────────
+    # ── 工具生命周期 ──────────────────────────────────────────────────
     tool_started = pyqtSignal(str, str, dict)   # call_id, tool_name, params
     tool_done = pyqtSignal(str, dict)           # call_id, result
 
-    # ── Needs manual input from UI before executing a tool ─────────────
+    # ── 需要用户手动输入参数后才能执行工具 ────────────────────────────
     need_manual_params = pyqtSignal(str, str, list)  # call_id, tool_name, [param_names]
 
-    # ── Turn boundary (AI started a new response after tool results) ───
+    # ── 轮次边界（AI 在工具结果后开始新一轮回复）────────────────────
     new_ai_turn = pyqtSignal()
 
-    # ── Completion / error ─────────────────────────────────────────────
+    # ── 完成 / 错误 ──────────────────────────────────────────────────
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
@@ -53,16 +56,16 @@ class ChatWorker(QThread):
         self._manual_queue: queue.Queue = queue.Queue()
         self._cancelled = False
 
-    # ── Called from main thread to cancel the worker ───────────────────
+    # ── 主线程调用：取消工作线程 ────────────────────────────────────
     def stop(self):
         self._cancelled = True
         self._manual_queue.put({})  # unblock any waiting get()
 
-    # ── Called from main thread to supply manual params ────────────────
+    # ── 主线程调用：提供手动参数 ────────────────────────────────────
     def supply_manual_params(self, params: dict):
         self._manual_queue.put(params)
 
-    # ── Main loop ──────────────────────────────────────────────────────
+    # ── Agent 主循环 ───────────────────────────────────────────────────
     def run(self):
         messages = list(self._messages)
 

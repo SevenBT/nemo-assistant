@@ -1,9 +1,8 @@
 """
-Fluent Design theme system.
+Fluent Design 主题系统。
 
-Bridges app themes to qfluentwidgets' built-in theming, with a thin
-custom QSS layer for app-specific elements (message bubbles, containers, etc.).
-Fluent Widgets auto-style their own components — no QSS needed for them.
+将应用主题桥接到 qfluentwidgets 内置主题，并提供一层自定义 QSS
+用于应用特有元素（消息气泡、容器等）。Fluent 组件自身由库自动样式化。
 """
 
 import ctypes
@@ -248,17 +247,17 @@ THEMES: Dict[str, Dict[str, Any]] = {
 }
 # fmt: on
 
-# Default theme key (used as fallback throughout the app)
+# 默认主题（应用各处的 fallback）
 DEFAULT_THEME = "morning"
 
-# Track current dark mode state for the event filter
+# 当前深色模式状态，供事件过滤器使用
 _current_dark_mode = False
-# Track current text color for cursor sync (QSS doesn't propagate to cursor)
+# 当前文本颜色，用于光标同步（QSS 不会传播到光标）
 _current_text_color: str = "#E8E0D6"
 
 
 class _DarkTitleBarFilter(QObject):
-    """Event filter that sets DWM dark title bar on newly shown QDialogs."""
+    """事件过滤器：对新显示的 QDialog 设置 DWM 深色标题栏。"""
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if (
@@ -282,7 +281,7 @@ class _DarkTitleBarFilter(QObject):
 _filter_instance: _DarkTitleBarFilter | None = None
 
 
-# ── Public API ────────────────────────────────────────────────────────
+# ── 公开 API ────────────────────────────────────────────────────────
 
 def apply_theme(
     theme_name: str,
@@ -290,7 +289,7 @@ def apply_theme(
     content_font_size: int = 15,
     editor_font_size: int = 15,
 ) -> str:
-    """Apply Fluent theme globally and return custom QSS for app-specific elements."""
+    """应用 Fluent 主题并返回应用特有元素的自定义 QSS。"""
     global _current_dark_mode, _filter_instance, _current_text_color
     theme = THEMES.get(theme_name, THEMES[DEFAULT_THEME])
     dark = theme["mode"] == Theme.DARK
@@ -299,18 +298,18 @@ def apply_theme(
     setTheme(theme["mode"])
     setThemeColor(QColor(theme["accent"]))
     _apply_palette(theme)
-    # Install event filter once to handle future dialogs
+    # 安装事件过滤器，处理后续弹出的对话框
     app = QApplication.instance()
     if app is not None and _filter_instance is None:
         _filter_instance = _DarkTitleBarFilter(app)
         app.installEventFilter(_filter_instance)
-    # Apply dark title bar to all existing top-level windows
+    # 对所有已存在的顶层窗口应用深色标题栏
     _apply_dark_titlebar_to_all(dark)
     return _build_custom_qss(theme, content_font_size, editor_font_size)
 
 
 def _apply_dark_titlebar_to_all(dark: bool) -> None:
-    """Set DWM dark title bar attribute on all top-level windows (Windows 11)."""
+    """对所有顶层窗口设置 DWM 深色标题栏属性（Windows 11）。"""
     if sys.platform != "win32":
         return
     app = QApplication.instance()
@@ -332,7 +331,7 @@ def _apply_dark_titlebar_to_all(dark: bool) -> None:
 
 
 def set_dark_titlebar(widget, dark: bool) -> None:
-    """Set DWM dark title bar on a single widget. Call after widget.show()."""
+    """对单个窗口设置 DWM 深色标题栏，需在 widget.show() 之后调用。"""
     if sys.platform != "win32":
         return
     try:
@@ -348,7 +347,7 @@ def set_dark_titlebar(widget, dark: bool) -> None:
 
 
 def _apply_palette(theme: dict) -> None:
-    """Set QPalette so QScrollArea viewports and plain QWidgets inherit the right bg."""
+    """设置 QPalette，使 QScrollArea 视口和普通 QWidget 继承正确的背景色。"""
     app = QApplication.instance()
     if app is None:
         return
@@ -365,17 +364,17 @@ def _apply_palette(theme: dict) -> None:
 
 
 def get_theme(theme_name: str) -> Dict[str, Any]:
-    """Return full theme dict (identity + palette merged)."""
+    """返回完整的主题字典（身份信息 + 调色板合并）。"""
     return THEMES.get(theme_name, THEMES[DEFAULT_THEME])
 
 
 def get_text_color() -> str:
-    """Return current theme's text color hex string."""
+    """返回当前主题的文本颜色十六进制字符串。"""
     return _current_text_color
 
 
 def enable_mica(hwnd: int, dark: bool = False) -> bool:
-    """Enable Windows 11 Mica backdrop effect on *hwnd*."""
+    """为指定窗口句柄启用 Windows 11 Mica 背景效果。"""
     if sys.platform != "win32":
         return False
     try:
@@ -389,7 +388,7 @@ def enable_mica(hwnd: int, dark: bool = False) -> bool:
         return False
 
 
-# ── Internal ──────────────────────────────────────────────────────────
+# ── 内部实现 ─────────────────────────────────────────────────────────
 
 def _build_custom_qss(theme: dict, content_font_size: int = 15, editor_font_size: int = 15) -> str:
     dark = theme["mode"] == Theme.DARK
@@ -870,7 +869,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: tran
 """
 
 
-# ── Legacy compatibility ─────────────────────────────────────────────
+# ── 兼容旧接口 ─────────────────────────────────────────────────────────
 def generate_stylesheet(theme_name: str) -> str:
-    """Legacy wrapper; prefer ``apply_theme`` for new code."""
+    """旧接口兼容；新代码请使用 ``apply_theme``。"""
     return apply_theme(theme_name)

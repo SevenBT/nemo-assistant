@@ -1,4 +1,9 @@
-"""Tool discovery, parameter resolution, and subprocess-based execution."""
+"""
+工具管理器。
+
+负责工具发现（内置 + 用户自定义）、参数解析、子进程隔离执行。
+工具脚本通过 stdin 接收 JSON 参数，stdout 最后一行输出 JSON 结果。
+"""
 import json
 import os
 import subprocess
@@ -14,16 +19,18 @@ _TOOL_TIMEOUT = 60  # seconds
 
 
 class ToolManager:
+    """工具管理器，管理工具的发现、参数解析和执行。"""
+
     def __init__(self):
         self._tools: dict[str, ToolDefinition] = {}
         self._deps = ToolDependencyManager()
         self._discover()
 
-    # ------------------------------------------------------------------ discovery
+    # ------------------------------------------------------------------ 工具发现
     def _discover(self):
-        # Builtin tools: tools/ (read-only, always enabled)
+        # 内置工具：tools/（只读，始终启用）
         self._discover_dir(TOOLS_DIR, is_builtin=True)
-        # User tools: data/user_tools/ (editable, can be toggled)
+        # 用户工具：data/user_tools/（可编辑，可开关）
         self._discover_dir(USER_TOOLS_DIR, is_builtin=False)
 
     def _discover_dir(self, base: Path, is_builtin: bool):
@@ -84,7 +91,7 @@ class ToolManager:
         self._tools.clear()
         self._discover()
 
-    # ------------------------------------------------------------------ queries
+    # ------------------------------------------------------------------ 查询
     def get_tools(self) -> list[ToolDefinition]:
         return list(self._tools.values())
 
@@ -95,14 +102,14 @@ class ToolManager:
         return [t.to_openai_function() for t in self._tools.values() if t.enabled]
 
     def get_manual_params(self, tool_name: str) -> list[str]:
-        """Return parameter names that require manual user input."""
+        """获取需要用户手动输入的参数名列表。"""
         tool = self._tools.get(tool_name)
         if not tool:
             return []
         return [n for n, p in tool.parameters.items() if p.source == "manual"]
 
     def set_tool_enabled(self, tool_name: str, enabled: bool):
-        """Toggle tool enabled state and persist."""
+        """切换工具启用状态并持久化。"""
         tool = self._tools.get(tool_name)
         if tool:
             tool.enabled = enabled
@@ -111,7 +118,7 @@ class ToolManager:
         cfg.set(cfg.toolStates, states)
 
     def get_config_params(self, tool_name: str) -> dict:
-        """Return config-source parameter values for the given tool."""
+        """获取工具的配置来源参数值（如搜索 provider、保存目录等）。"""
         if tool_name == "web_search":
             return {"provider": cfg.get(cfg.searchProvider), "api_key": get_search_api_key()}
         if tool_name == "save_file":
@@ -122,14 +129,14 @@ class ToolManager:
     def deps_manager(self) -> ToolDependencyManager:
         return self._deps
 
-    # ------------------------------------------------------------------ param resolution
+    # ------------------------------------------------------------------ 参数解析
     def resolve_params(
         self,
         tool_name: str,
         ai_params: dict,
         manual_overrides: Optional[dict] = None,
     ) -> dict:
-        """Merge params: manual > ai > config > default."""
+        """合并参数，优先级：手动输入 > AI 生成 > 配置项 > 默认值。"""
         tool = self._tools.get(tool_name)
         if not tool:
             return ai_params
@@ -147,13 +154,9 @@ class ToolManager:
                 resolved[pname] = pdef.default
         return resolved
 
-    # ------------------------------------------------------------------ execution
+    # ------------------------------------------------------------------ 执行
     def execute(self, tool_name: str, params: dict) -> dict:
-        """Run the tool script in a subprocess for isolation.
-
-        The script receives JSON on stdin and must print a JSON result as its
-        last stdout line.  Same protocol as before — existing tools need no changes.
-        """
+        """在子进程中运行工具脚本，确保隔离性。"""
         tool = self._tools.get(tool_name)
         if not tool:
             return {"status": "error", "data": {"message": f"Tool not found: {tool_name}"}}
@@ -167,7 +170,7 @@ class ToolManager:
         return self._exec_subprocess(tool, params)
 
     def _exec_subprocess(self, tool: ToolDefinition, params: dict) -> dict:
-        """Execute tool script in an isolated subprocess."""
+        """执行工具脚本子进程，解析 stdout 最后一行 JSON 作为结果。"""
         stdin_payload = json.dumps(
             {"params": params, "context": {}}, ensure_ascii=False
         )

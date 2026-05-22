@@ -1,7 +1,8 @@
-"""Built-in tools: schema definitions and handler implementations.
+"""
+内置工具定义与处理器。
 
-Extracted from main_window.py to keep UI code focused on UI.
-BuiltinToolHandler is instantiated in MainWindow and passed to ChatWorker.
+包含定时任务、笔记操作、计算器、剪贴板等内置工具的 schema 和执行逻辑。
+从 main_window.py 中抽离，保持 UI 代码专注于界面。
 """
 import math
 from typing import Callable
@@ -139,12 +140,7 @@ BUILTIN_TOOLS = [
 
 
 class BuiltinToolHandler:
-    """Handles execution of all built-in tools.
-
-    Decoupled from MainWindow so it can be used and tested independently.
-    on_note_created is called (on the worker thread) after a note is created,
-    to notify the UI — same behaviour as the original code.
-    """
+    """内置工具执行器，与 UI 解耦，可独立测试。"""
 
     _CALC_ALLOWED: dict = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
     _CALC_ALLOWED.update({"abs": abs, "round": round, "int": int, "float": float,

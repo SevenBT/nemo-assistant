@@ -1,3 +1,8 @@
+"""
+应用程序入口。
+
+启动流程：检查依赖 → 配置崩溃日志 → 初始化 Qt 应用 → 创建主窗口。
+"""
 import subprocess
 import sys
 import traceback
@@ -69,9 +74,10 @@ from app.ui.style import apply_theme
 
 
 def main():
+    """初始化各管理器并启动主窗口。"""
     app = QApplication(sys.argv)
     app.setApplicationName("AI Agent")
-    app.setQuitOnLastWindowClosed(False)  # keep alive in tray
+    app.setQuitOnLastWindowClosed(False)  # 保持托盘常驻
 
     icon_path = Path(__file__).parent / "assets" / "AI助手.png"
     icon = QIcon(str(icon_path))
@@ -88,8 +94,7 @@ def main():
 
     window = MainWindow(sessions, tools, scheduler, notes)
     window.setWindowIcon(icon)
-    # Re-apply theme after MainWindow init — FluentWindow's constructor
-    # resets internal styles which can override the initial apply_theme call.
+    # FluentWindow 构造函数会重置内部样式，需要重新应用主题
     custom_qss = apply_theme(cfg.get(cfg.theme), content_font_size=cfg.get(cfg.contentFontSize), editor_font_size=cfg.get(cfg.editorFontSize))
     app.setStyleSheet(custom_qss)
     window.show()

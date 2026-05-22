@@ -1,7 +1,7 @@
 """
-Declarative configuration module based on qfluentwidgets QConfig.
+声明式配置模块，基于 qfluentwidgets QConfig。
 
-Usage:
+用法:
     from app.core.config import cfg, get_api_key, set_api_key
 
     value = cfg.get(cfg.contentFontSize)
@@ -108,7 +108,7 @@ _ACCOUNT_SEARCH_KEY = "web_search_api_key"
 
 
 class AppConfig(QConfig):
-    """Declarative app configuration. All items are class attributes."""
+    """应用配置类，所有配置项为类属性，支持信号通知变更。"""
 
     # -- Appearance --
     theme = OptionsConfigItem(
@@ -200,7 +200,7 @@ class AppConfig(QConfig):
     settingsPage = ConfigItem("Layout", "SettingsPage", 0)
 
     def save(self):
-        """Atomic write: write to temp file then os.replace."""
+        """原子写入：先写临时文件再 os.replace，防止写入中断导致配置损坏。"""
         cfg_file = Path(self.file) if not isinstance(self.file, Path) else self.file
         cfg_file.parent.mkdir(parents=True, exist_ok=True)
         tmp = cfg_file.with_suffix(".tmp")

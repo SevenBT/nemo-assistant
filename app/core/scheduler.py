@@ -1,3 +1,9 @@
+"""
+定时任务调度器。
+
+基于 APScheduler，支持 cron/interval/date 三种触发方式。
+任务配置持久化到 jobs.json，执行时调用 ToolManager 运行对应工具脚本。
+"""
 import json
 import uuid
 from datetime import datetime
@@ -15,13 +21,15 @@ JOBS_FILE = DATA_DIR / "jobs.json"
 
 
 class SchedulerManager:
+    """定时任务管理器，封装 APScheduler 的生命周期和任务持久化。"""
+
     def __init__(self):
         self._scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
         self._jobs: dict[str, dict] = {}
         self._tool_manager = None
         self._on_result: Optional[Callable] = None  # (job_id, name, result) -> None
 
-    # ------------------------------------------------------------------ lifecycle
+    # ------------------------------------------------------------------ 生命周期
     def set_tool_manager(self, tm):
         self._tool_manager = tm
 
@@ -35,7 +43,7 @@ class SchedulerManager:
     def stop(self):
         self._scheduler.shutdown(wait=False)
 
-    # ------------------------------------------------------------------ job management
+    # ------------------------------------------------------------------ 任务管理
     def add_job(
         self,
         name: str,
@@ -84,7 +92,7 @@ class SchedulerManager:
     def get_jobs(self) -> list[dict]:
         return list(self._jobs.values())
 
-    # ------------------------------------------------------------------ internals
+    # ------------------------------------------------------------------ 内部实现
     def _make_trigger(self, trigger_type: str, config: dict):
         try:
             if trigger_type == "cron":
