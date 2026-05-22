@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from qfluentwidgets import (
-    Action,
     BodyLabel,
     CaptionLabel,
     FluentIcon,
@@ -31,8 +30,6 @@ from qfluentwidgets import (
     SubtitleLabel,
     SwitchButton,
     TransparentToolButton,
-    ToolTipFilter,
-    ToolTipPosition,
 )
 
 if TYPE_CHECKING:
@@ -294,52 +291,53 @@ class ToolboxPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Toolbar
-        toolbar_widget = QWidget()
-        toolbar = QHBoxLayout(toolbar_widget)
-        toolbar.setContentsMargins(12, 8, 12, 8)
-        toolbar.setSpacing(8)
-
-        new_btn = PushButton(FluentIcon.ADD, "新建")
-        new_btn.setFixedHeight(32)
-        new_btn.clicked.connect(self._on_new_tool)
-        toolbar.addWidget(new_btn)
-
-        gen_btn = PrimaryPushButton(FluentIcon.ROBOT, "AI 生成")
-        gen_btn.setFixedHeight(32)
-        gen_btn.clicked.connect(self._on_generate_tool)
-        toolbar.addWidget(gen_btn)
-
-        toolbar.addStretch()
-
-        refresh_btn = TransparentToolButton(FluentIcon.SYNC)
-        refresh_btn.setFixedSize(32, 32)
-        refresh_btn.setToolTip("刷新")
-        refresh_btn.installEventFilter(
-            ToolTipFilter(refresh_btn, showDelay=400, position=ToolTipPosition.BOTTOM)
-        )
-        refresh_btn.clicked.connect(self.refresh)
-        toolbar.addWidget(refresh_btn)
-
-        root.addWidget(toolbar_widget)
-
         # Body: splitter
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
         self._splitter.setHandleWidth(1)
         self._splitter.setChildrenCollapsible(False)
 
-        # Left panel
+        # Left panel — styled to match session/notes panel
         left = QWidget()
+        left.setObjectName("toolListPanel")
         left.setMinimumWidth(160)
         left.setMaximumWidth(260)
         left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
+        left_layout.setContentsMargins(8, 10, 8, 8)
+        left_layout.setSpacing(8)
+
+        # Header row — matches session panel pattern
+        header = QHBoxLayout()
+        header.setSpacing(6)
+        title = CaptionLabel("工具")
+        title.setObjectName("panelTitle")
+        header.addWidget(title)
+        header.addStretch()
+
+        new_btn = TransparentToolButton(FluentIcon.ADD)
+        new_btn.setFixedSize(30, 30)
+        new_btn.setToolTip("新建工具")
+        new_btn.clicked.connect(self._on_new_tool)
+        header.addWidget(new_btn)
+
+        gen_btn = TransparentToolButton(FluentIcon.ROBOT)
+        gen_btn.setFixedSize(30, 30)
+        gen_btn.setToolTip("AI 生成工具")
+        gen_btn.clicked.connect(self._on_generate_tool)
+        header.addWidget(gen_btn)
+
+        refresh_btn = TransparentToolButton(FluentIcon.SYNC)
+        refresh_btn.setFixedSize(30, 30)
+        refresh_btn.setToolTip("刷新")
+        refresh_btn.clicked.connect(self.refresh)
+        header.addWidget(refresh_btn)
+
+        left_layout.addLayout(header)
 
         self._list = ListWidget()
         self._list.setObjectName("toolList")
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._list.setFrameShape(QFrame.Shape.NoFrame)
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list.setSpacing(2)
         self._list.currentRowChanged.connect(self._on_select)
         left_layout.addWidget(self._list)

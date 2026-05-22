@@ -600,6 +600,15 @@ QSplitter::handle:hover {{ background: {accent}; }}
 }}
 '''}
 
+/* ═══════════════════════════════════════════════════════════════════
+   Toolbox Panel
+   ═══════════════════════════════════════════════════════════════════ */
+#toolListPanel {{
+    background: {theme["surface_solid"]};
+    border-right: 1px solid {theme["border"]};
+    border-radius: 10px 0 0 10px;
+}}
+
 /* Note editor panel — transparent so side margins blend with window bg */
 #noteEditorPanel {{
     background: transparent;

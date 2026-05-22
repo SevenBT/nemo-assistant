@@ -445,7 +445,6 @@ class NotesPanel(QWidget):
                 f_item = QListWidgetItem()
                 f_item.setData(Qt.ItemDataRole.UserRole, folder.id)
                 f_item.setData(Qt.ItemDataRole.UserRole + 1, "folder")
-                f_item.setToolTip(folder.name)
                 f_item.setFlags(
                     (f_item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsDragEnabled)
                     | Qt.ItemFlag.ItemIsDropEnabled
