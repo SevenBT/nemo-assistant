@@ -103,7 +103,7 @@ class SessionManager:
             return
         session.messages.append(message)
         session.updated_at = time.time()
-        # Auto-title from first user message
+        # 从第一条用户消息自动生成标题
         if len(session.messages) == 1 and message.role == "user" and message.content:
             session.title = message.content[:25].strip()
         self._save(session)

@@ -168,9 +168,10 @@ class BuiltinToolHandler:
             "clipboard": self._handle_clipboard,
         }
 
-    # ── scheduler tools ───────────────────────────────────────────────
+    # ── 定时任务工具 ───────────────────────────────────────────────
 
     def _handle_create_task(self, args: dict) -> dict:
+        """创建定时任务，支持 cron/interval/date 三种触发方式。"""
         try:
             job_id = self._scheduler.add_job(
                 name=args.get("name", "未命名任务"),
@@ -185,6 +186,7 @@ class BuiltinToolHandler:
             return {"status": "error", "data": {"message": str(e)}}
 
     def _handle_list_tasks(self, _args: dict) -> dict:
+        """列出所有当前定时任务。"""
         jobs = self._scheduler.get_jobs()
         return {
             "status": "success",
@@ -197,17 +199,20 @@ class BuiltinToolHandler:
         }
 
     def _handle_delete_task(self, args: dict) -> dict:
+        """删除指定 ID 的定时任务。"""
         job_id = args.get("job_id", "")
         self._scheduler.remove_job(job_id)
         return {"status": "success", "data": {"deleted": job_id}}
 
-    # ── note tools ────────────────────────────────────────────────────
+    # ── 笔记工具 ────────────────────────────────────────────────────
 
     def _handle_read_notes(self, _args: dict) -> dict:
+        """读取用户所有笔记的预览列表，包含标题和内容预览。"""
         previews = self._notes.get_preview_list()
         return {"status": "success", "data": {"notes": previews, "count": len(previews)}}
 
     def _handle_create_note(self, args: dict) -> dict:
+        """创建新笔记，保存标题和正文内容。"""
         try:
             note = self._notes.create(
                 title=args.get("title", "新笔记"),
@@ -219,6 +224,7 @@ class BuiltinToolHandler:
             return {"status": "error", "data": {"message": str(e)}}
 
     def _handle_summarize_as_note(self, args: dict) -> dict:
+        """将当前会话对话内容总结，保存为笔记。"""
         try:
             note = self._notes.create(
                 title=args.get("title", "会话总结"),
@@ -229,9 +235,10 @@ class BuiltinToolHandler:
         except Exception as e:
             return {"status": "error", "data": {"message": str(e)}}
 
-    # ── utility tools ─────────────────────────────────────────────────
+    # ── 实用工具 ─────────────────────────────────────────────────
 
     def _handle_calculator(self, args: dict) -> dict:
+        """安全计算数学表达式，支持四则运算、三角函数、对数等。"""
         expr = args.get("expression", "").strip()
         if not expr:
             return {"status": "error", "data": {"message": "expression is required"}}
@@ -246,6 +253,7 @@ class BuiltinToolHandler:
             return {"status": "error", "data": {"message": str(e), "expression": expr}}
 
     def _handle_clipboard(self, args: dict) -> dict:
+        """读取或写入系统剪贴板。action=get 读取，action=set 写入。"""
         action = args.get("action", "get")
         content = args.get("content", "")
         try:

@@ -31,9 +31,11 @@ class SchedulerManager:
 
     # ------------------------------------------------------------------ 生命周期
     def set_tool_manager(self, tm):
+        """设置工具管理器，用于执行任务关联的工具脚本。"""
         self._tool_manager = tm
 
     def set_result_callback(self, cb: Callable):
+        """设置任务执行结果的回调函数。"""
         self._on_result = cb
 
     def start(self):
@@ -53,6 +55,7 @@ class SchedulerManager:
         trigger_config: dict,
         description: str = "",
     ) -> str:
+        """添加定时任务，返回任务 ID。trigger_type 支持 cron/interval/date。"""
         trigger = self._make_trigger(trigger_type, trigger_config)
         if trigger is None:
             raise ValueError(f"Invalid trigger: {trigger_type} / {trigger_config}")
@@ -81,15 +84,17 @@ class SchedulerManager:
         return job_id
 
     def remove_job(self, job_id: str):
+        """移除指定任务（从内存和持久化文件中删除）。"""
         self._jobs.pop(job_id, None)
         self._save_jobs()
-        # Remove from APScheduler; JobLookupError is fine (already gone)
+        # 从 APScheduler 中移除；JobLookupError 可忽略（任务已不存在）
         try:
             self._scheduler.remove_job(job_id)
         except Exception:
             pass
 
     def get_jobs(self) -> list[dict]:
+        """返回所有任务列表。"""
         return list(self._jobs.values())
 
     # ------------------------------------------------------------------ 内部实现
@@ -108,7 +113,7 @@ class SchedulerManager:
     def _run_job(self, job_id: str):
         job = self._jobs.get(job_id)
         if not job:
-            # Job was deleted but APScheduler still fired it — clean up
+            # 任务已删除但 APScheduler 仍触发了 — 清理残留
             try:
                 self._scheduler.remove_job(job_id)
             except Exception:

@@ -129,7 +129,7 @@ class PresetManager:
             temp_file.replace(PRESETS_FILE)
 
             elapsed = time.time() - start
-            print(f"[PresetManager] Save completed in {elapsed:.3f}s")
+            print(f"[PresetManager] Save completed in {elapsed: .3f}s")
 
         except PermissionError as e:
             print(f"[PresetManager] Permission error: {e}")
@@ -259,4 +259,3 @@ class PresetManager:
             if preset.id not in self._presets:
                 self._presets[preset.id] = preset
         self._save()
-

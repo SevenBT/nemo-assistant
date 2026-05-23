@@ -263,7 +263,7 @@ _ensure_dirs()
 
 cfg = AppConfig()
 
-# Run migration before loading (converts old format if needed)
+# 加载前先执行迁移（如需要则转换旧格式）
 from app.core.config_migrate import migrate_config  # noqa: E402
 migrate_config(CONFIG_DIR)
 

@@ -45,24 +45,25 @@ class HotkeyManager(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-    # ------------------------------------------------------------------ public
+    # ------------------------------------------------------------------ 公开接口
     def start(self):
+        """启动热键监听，注册所有已配置的热键。"""
         if _KB_OK:
             self._register_all()
 
     def reload(self):
-        """Re-register all hotkeys — call after config change or capture end."""
+        """重新注册所有热键 — 配置变更或截图结束后调用。"""
         if not _KB_OK:
             return
         self._unhook()
         self._register_all()
 
     def stop(self):
-        """Unregister all hotkeys (e.g. during capture mode or app quit)."""
+        """注销所有热键（截图模式或应用退出时调用）。"""
         if _KB_OK:
             self._unhook()
 
-    # ------------------------------------------------------------------ private
+    # ------------------------------------------------------------------ 内部实现
     def _unhook(self):
         try:
             _kb.unhook_all_hotkeys()

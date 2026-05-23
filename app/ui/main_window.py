@@ -56,11 +56,11 @@ from qfluentwidgets import FluentWindow, FluentIcon
 
 # ─────────────────────────────────────────────────────────────────────
 class MainWindow(FluentWindow):
-    # Used to marshal scheduler callbacks from background threads to the main thread
-    _notify_signal = pyqtSignal(str, str)  # title, body
-    # Signal for note content updates (note_id, title, content)
+    # 将调度器后台回调 marshal 到主线程
+    _notify_signal = pyqtSignal(str, str)  # 标题, 正文
+    # 笔记内容更新信号 (note_id, title, content)
     note_updated = pyqtSignal(int, str, str)
-    # Marshals note-created callback from worker thread to main thread
+    # 将 worker 线程的笔记创建回调 marshal 到主线程
     _note_created_signal = pyqtSignal()
 
     def __init__(
@@ -71,18 +71,17 @@ class MainWindow(FluentWindow):
         note_mgr: NoteManager,
     ):
         super().__init__()
-        # Replace FluentWindow's default FluentTitleBar immediately.
-        # Disconnect the signal that would re-raise the old titleBar, then
-        # forcibly hide any lingering children before our titleBar takes over.
+        # 替换 FluentWindow 默认的 FluentTitleBar。
+        # 先断开旧标题栏的显示信号，再强制隐藏残留子控件。
         old_title_bar = self.titleBar
         self.navigationInterface.displayModeChanged.disconnect()
         self._title_bar = TitleBar(self)
         self.setTitleBar(self._title_bar)
-        # setTitleBar calls deleteLater (async) — force-hide now so it never shows
+        # setTitleBar 内部调用 deleteLater（异步），立即隐藏防止闪烁
         old_title_bar.hide()
         for child in old_title_bar.findChildren(QWidget):
             child.hide()
-        # Kill any lingering TitleBarButton from qframelesswindow (e.g. red CloseButton)
+        # 清除 qframelesswindow 残留的 TitleBarButton（如红色关闭按钮）
         from qframelesswindow import TitleBarButton
         for btn in self.findChildren(TitleBarButton):
             btn.setFixedSize(0, 0)
@@ -100,7 +99,7 @@ class MainWindow(FluentWindow):
         self._current_ai_bubble: MessageBubble | None = None
         self._current_ai_msg: Message | None = None
         self._current_ai_text = ""
-        self._pending_attachments: list = []  # Temporary storage for dropped files
+        self._pending_attachments: list = []  # 暂存拖放的附件
         self._snap_mgr: EdgeSnapManager | None = None
         self._sticky_windows: list = []
 
@@ -126,7 +125,7 @@ class MainWindow(FluentWindow):
         self._setup_hotkeys()
         self._restore_pinned_notes()
 
-        # Live font size: re-apply theme QSS when content/editor fontSize changes
+        # 实时字体大小：内容/编辑器字号变化时重新应用主题 QSS
         cfg.contentFontSize.valueChanged.connect(self._on_font_size_changed)
         cfg.editorFontSize.valueChanged.connect(self._on_font_size_changed)
 
@@ -141,11 +140,11 @@ class MainWindow(FluentWindow):
         default_x = sg.x() + (sg.width() - w) // 2
         default_y = sg.y() + (sg.height() - h) // 2
         self.move(default_x, default_y)
-        # Qt >= 6.10: qframelesswindow uses NoTitleBarBackgroundHint which still
-        # renders system close button.  Force FramelessWindowHint to suppress it.
+        # Qt >= 6.10: qframelesswindow 使用 NoTitleBarBackgroundHint 仍会渲染系统关闭按钮，
+        # 强制设置 FramelessWindowHint 来抑制它。
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        # Disable qframelesswindow's native resize (WM_NCHITTEST) — our ResizeFilter
-        # handles resize via setGeometry to avoid ghost border artifacts.
+        # 禁用 qframelesswindow 原生调整大小（WM_NCHITTEST），
+        # 由 ResizeFilter 通过 setGeometry 处理，避免幽灵边框。
         self.setResizeEnabled(False)
         # 任务栏模式下不设置 Tool 标志，让窗口出现在任务栏中
         if cfg.get(cfg.minimizeTo) == "tray":
@@ -157,14 +156,14 @@ class MainWindow(FluentWindow):
             self.setWindowIcon(QIcon(_ICON_PATH))
 
     def _build_ui(self):
-        # Hide the left sidebar — navigation lives in the title bar
+        # 隐藏左侧导航栏 — 导航已集成到标题栏中
         self.navigationInterface.hide()
         self.navigationInterface.setFixedWidth(0)
-        # Reconnect raise_ to our titleBar (was disconnected during __init__)
+        # 重新连接 raise_ 到我们的标题栏（在 __init__ 中已断开）
         self.navigationInterface.displayModeChanged.connect(self._title_bar.raise_)
-        # Adjust content top margin to match our taller title bar (default is 48)
+        # 调整内容区顶部边距以匹配自定义标题栏高度（默认为 48）
         self.widgetLayout.setContentsMargins(0, self._title_bar.height(), 0, 0)
-        # Remove any border/background from stacked widget that FluentStyleSheet adds
+        # 移除 FluentStyleSheet 添加的 stackedWidget 边框/背景
         self.stackedWidget.setStyleSheet("border: none; background: transparent;")
 
         # ── page 0: chat view ─────────────────────────────────────────
@@ -206,8 +205,8 @@ class MainWindow(FluentWindow):
         chat_area.setObjectName("chatArea")
         chat_area.setLayout(chat_col)
         self._chat_splitter.addWidget(chat_area)
-        self._chat_splitter.setStretchFactor(0, 0)  # session panel: fixed width
-        self._chat_splitter.setStretchFactor(1, 1)  # chat area: take all extra space
+        self._chat_splitter.setStretchFactor(0, 0)  # 会话面板：固定宽度
+        self._chat_splitter.setStretchFactor(1, 1)  # 聊天区域：占据剩余空间
 
         self._chat_splitter.splitterMoved.connect(self._on_splitter_moved)
 
@@ -222,15 +221,15 @@ class MainWindow(FluentWindow):
         self._toolbox_panel = ToolboxPanel(self._tools)
         self._toolbox_panel.setObjectName("toolboxInterface")
 
-        # Register pages with FluentWindow (required for switchTo to work)
+        # 注册页面到 FluentWindow（switchTo 需要）
         self.addSubInterface(chat_page, FluentIcon.CHAT, "聊天")
         self.addSubInterface(self._notes_panel, FluentIcon.EDIT, "笔记")
         self.addSubInterface(self._toolbox_panel, FluentIcon.DEVELOPER_TOOLS, "工坊")
 
-        # Keep page references for _switch_view
+        # 保存页面引用供 _switch_view 使用
         self._pages = [chat_page, self._notes_panel, self._toolbox_panel]
 
-        # Wire title bar search → panel filters
+        # 连接标题栏搜索框到各面板的过滤器
         self._title_bar.session_search_changed.connect(self._session_panel.apply_search)
         self._title_bar.notes_search_changed.connect(self._notes_panel.apply_search)
         self._title_bar.workshop_search_changed.connect(self._toolbox_panel.apply_search)
@@ -246,7 +245,7 @@ class MainWindow(FluentWindow):
         self._tray.quit_requested.connect(self._on_quit)
         self._scheduler.set_result_callback(self._on_scheduler_result)
 
-    # ──────────────────────────────────────────── hotkeys
+    # ──────────────────────────────────────────── 快捷键
     def _setup_hotkeys(self):
         self._hotkey_mgr = HotkeyManager(self)
         self._hotkey_mgr.screenshot_triggered.connect(self._start_screenshot)
@@ -258,11 +257,11 @@ class MainWindow(FluentWindow):
     def _new_note_via_hotkey(self):
         from app.ui.sticky_note_window import StickyNoteWindow
         note = self._notes.create()
-        # Get screen center position
+        # 获取屏幕中心位置
         sg = QApplication.primaryScreen().availableGeometry()
         x = (sg.width() - 240) // 2 + sg.x()
         y = (sg.height() - 200) // 2 + sg.y()
-        # Pin note to desktop at center position
+        # 将笔记固定到桌面中心位置
         self._notes.pin_note(note.id, x, y)
         win = StickyNoteWindow(
             note_id=note.id,
@@ -276,7 +275,7 @@ class MainWindow(FluentWindow):
         win.closed.connect(
             lambda w=win: self._on_sticky_closed(w)
         )
-        # Connect content change signal
+        # 连接内容变更信号
         win.content_changed.connect(self._on_note_updated)
         win.delete_requested.connect(lambda _: self._notes_panel.refresh())
 
@@ -312,7 +311,7 @@ class MainWindow(FluentWindow):
                     content=note.content,
                     note_mgr=self._notes,
                 )
-                # Restore position with boundary check
+                # 恢复位置并进行边界检查
                 x = note.pin_position_x or 100
                 y = note.pin_position_y or 100
                 sg = QApplication.primaryScreen().availableGeometry()
@@ -322,7 +321,7 @@ class MainWindow(FluentWindow):
                 win.show()
                 self._sticky_windows.append(win)
                 win.closed.connect(lambda w=win: self._on_sticky_closed(w))
-                # Connect content change signal
+                # 连接内容变更信号
                 win.content_changed.connect(self._on_note_updated)
                 win.delete_requested.connect(lambda _: self._notes_panel.refresh())
             except Exception as e:
@@ -332,7 +331,7 @@ class MainWindow(FluentWindow):
         """浮窗关闭时取消固定并从列表移除。"""
         if win in self._sticky_windows:
             self._sticky_windows.remove(win)
-        # Unpin note if it has note_id
+        # 取消笔记固定
         if hasattr(win, '_note_id') and win._note_id:
             try:
                 self._notes.unpin_note(win._note_id)
@@ -341,16 +340,16 @@ class MainWindow(FluentWindow):
 
     def _on_note_updated(self, note_id: int, title: str, content: str):
         """笔记内容更新时，通知所有相关浮窗和面板。"""
-        # Update all sticky windows with this note_id
+        # 更新所有对应 note_id 的浮窗
         for win in self._sticky_windows:
             if hasattr(win, '_note_id') and win._note_id == note_id:
                 win.update_content(title, content)
-        # Update notes panel if the note is being edited elsewhere
+        # 如果笔记在其他地方被编辑，更新笔记面板
         self._notes_panel.refresh_note(note_id)
-        # Broadcast to main signal
+        # 广播到主信号
         self.note_updated.emit(note_id, title, content)
 
-    # ──────────────────────────────────────────── sessions
+    # ──────────────────────────────────────────── 会话管理
     def _init_sessions(self):
         sessions = self._sessions.get_sessions()
         if not sessions:
@@ -414,7 +413,7 @@ class MainWindow(FluentWindow):
             self._switch_session(sid)
 
     def _cancel_worker(self, sid: str | None = None):
-        """Stop and discard the worker for the given session (default: current)."""
+        """停止并丢弃指定会话的 worker（默认为当前会话）。"""
         if sid is None:
             sid = self._current_session_id
         if not sid:
@@ -430,7 +429,7 @@ class MainWindow(FluentWindow):
             pass
 
     def _switch_session(self, sid: str):
-        # Don't stop any running worker — let it continue in the background.
+        # 不停止正在运行的 worker — 让它在后台继续执行。
         self._current_ai_bubble = None
         self._current_ai_msg = None
         self._current_ai_text = ""
@@ -442,7 +441,7 @@ class MainWindow(FluentWindow):
         if session:
             self._chat.load_session(session.messages)
 
-        # Show role greeting when session has a preset/role but no messages yet
+        # 会话有预设/角色但无消息时显示角色问候语
         if session and not session.messages:
             greeting = self._get_role_greeting(session)
             if greeting:
@@ -488,26 +487,26 @@ class MainWindow(FluentWindow):
 
     @pyqtSlot(list)
     def _on_files_attached(self, attachments: list):
-        """Handle files dropped into chat area."""
+        """处理拖放到聊天区域的文件。"""
         self._pending_attachments.extend(attachments)
-        # TODO: Show visual feedback of attached files in input area
+        # TODO: 在输入区域显示附件可视化反馈
 
-    # ──────────────────────────────────────────── chat
+    # ──────────────────────────────────────────── 聊天
     @pyqtSlot(str)
     def _on_submit(self, text: str):
         sid = self._current_session_id
         if not sid:
             return
         if sid in self._workers:
-            return  # already running for this session
+            return  # 该会话已有任务运行中
 
-        # Create user message with attachments
+        # 创建带附件的用户消息
         user_msg = Message(
             role=MessageRole.USER,
             content=text,
             attachments=self._pending_attachments.copy()
         )
-        self._pending_attachments.clear()  # Clear after use
+        self._pending_attachments.clear()  # 使用后清空
 
         self._sessions.add_message(sid, user_msg)
         self._chat.add_message(user_msg)
@@ -571,13 +570,13 @@ class MainWindow(FluentWindow):
 
         result = [{"role": "system", "content": full_system_prompt}]
 
-        # Use AIClient.merge_attachments_to_content to handle attachments
+        # 使用 AIClient.merge_attachments_to_content 处理附件
         merged_messages = self._ai.merge_attachments_to_content(messages)
 
         for i, m in enumerate(messages):
             result.append(merged_messages[i])
-            # Every assistant message with tool_calls MUST be immediately followed
-            # by a tool result message for each call_id, otherwise the API returns 400.
+            # 每条带 tool_calls 的 assistant 消息后必须紧跟对应的 tool result，
+            # 否则 API 会返回 400 错误。
             if m.role == MessageRole.ASSISTANT and m.tool_calls:
                 all_done = all(tc.result is not None for tc in m.tool_calls)
                 if all_done:
@@ -591,7 +590,7 @@ class MainWindow(FluentWindow):
                     result.pop()
         return result
 
-    # ── worker wiring ───────────────────────────────────────────────────
+    # ── Worker 信号连接 ───────────────────────────────────────────────────
     def _connect_worker(self, sid: str, worker: ChatWorker):
         worker.text_chunk.connect(lambda d, s=sid: self._on_bg_text_chunk(s, d))
         worker.tool_started.connect(lambda cid, tn, p, s=sid: self._on_bg_tool_started(s, cid, tn, p))
@@ -601,7 +600,7 @@ class MainWindow(FluentWindow):
         worker.finished.connect(lambda s=sid: self._on_bg_finished(s))
         worker.error.connect(lambda msg, s=sid: self._on_bg_error(s, msg))
 
-    # ── session-aware signal handlers ───────────────────────────────────
+    # ── 会话感知的信号处理 ───────────────────────────────────────────────
     def _on_bg_text_chunk(self, sid: str, delta: str):
         live = self._session_live.get(sid)
         if live is None:
@@ -733,7 +732,7 @@ class MainWindow(FluentWindow):
         self._current_ai_bubble = None
         self._tool_status.hide()
 
-    # ──────────────────────────────────────────── scheduler callback
+    # ──────────────────────────────────────────── 调度器回调
     def _on_scheduler_result(self, job_id: str, job_name: str, result: dict):
         data = result.get("data", {})
         if result.get("status") == "success":
@@ -747,7 +746,7 @@ class MainWindow(FluentWindow):
         theme = THEMES.get(cfg.get(cfg.theme), THEMES["morning"])
         show_toast(title, body, accent=theme["accent"])
 
-    # ──────────────────────────────────────────── dialogs / window actions
+    # ──────────────────────────────────────────── 对话框 / 窗口操作
     def _open_settings(self):
         old_theme = cfg.get(cfg.theme)
         dlg = SettingsWindow(
@@ -790,13 +789,14 @@ class MainWindow(FluentWindow):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        # FluentWindow offsets titleBar to leave room for the nav panel expand button.
-        # Since the sidebar is hidden, keep the title bar full-width.
+        # FluentWindow 会偏移 titleBar 为导航面板展开按钮留空间，
+        # 但由于侧栏已隐藏，需要保持标题栏全宽。
         if hasattr(self, '_title_bar'):
             self._title_bar.move(0, 0)
             self._title_bar.resize(self.width(), self._title_bar.height())
 
     def _minimize(self):
+        """最小化窗口：根据配置选择隐藏到托盘或任务栏。"""
         if cfg.get(cfg.minimizeTo) == "taskbar":
             self.showMinimized()
         else:
@@ -818,7 +818,7 @@ class MainWindow(FluentWindow):
             # 当前是正常窗口，最大化
             self.showMaximized()
 
-    # ──────────────────────────────────────────── screenshot
+    # ──────────────────────────────────────────── 截图
     def _start_screenshot(self):
         if hasattr(self, '_overlay') and self._overlay is not None:
             return
@@ -872,11 +872,10 @@ class MainWindow(FluentWindow):
             self.raise_()
             self.activateWindow()
 
-    # ──────────────────────────────────────────── window events
+    # ──────────────────────────────────────────── 窗口事件
     def nativeEvent(self, eventType, message):
-        # Suppress Windows system context menu on title bar right-click.
-        # FluentWindow returns HTCAPTION for the title bar area, which causes
-        # Windows to show its own system menu alongside our custom RoundMenu.
+        # 抑制标题栏右键的系统上下文菜单。
+        # FluentWindow 对标题栏区域返回 HTCAPTION，导致 Windows 弹出系统菜单与自定义菜单重叠。
         if eventType == b"windows_generic_MSG":
             import ctypes.wintypes
             msg = ctypes.wintypes.MSG.from_address(int(message))
@@ -918,7 +917,7 @@ class MainWindow(FluentWindow):
             width = getattr(self, '_saved_session_width', None) or cfg.get(cfg.sessionPanelWidth)
             self._chat_splitter.setSizes([width, total - width])
 
-    # ──────────────────────────────────────────── intercept close → tray
+    # ──────────────────────────────────────────── 拦截关闭 → 隐藏到托盘
     def closeEvent(self, event):
         sizes = self._chat_splitter.sizes()
         session_width = sizes[0] if sizes[0] > 0 else getattr(self, '_saved_session_width', 180)
@@ -930,13 +929,13 @@ class MainWindow(FluentWindow):
         self.hide()
 
     def cleanup(self):
-        """Stop all background workers. Call before app quit."""
+        """停止所有后台 worker，在应用退出前调用。"""
         self._hotkey_mgr.stop()
         for sid in list(self._workers):
             self._cancel_worker(sid)
 
     def _on_quit(self):
-        # Save layout only if window is visible (otherwise closeEvent already saved)
+        # 仅当窗口可见时保存布局（否则 closeEvent 已保存）
         if self.isVisible():
             sizes = self._chat_splitter.sizes()
             session_width = sizes[0] if sizes[0] > 0 else getattr(self, '_saved_session_width', 180)

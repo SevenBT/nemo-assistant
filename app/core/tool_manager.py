@@ -69,7 +69,7 @@ class ToolManager:
                 items=pdata.get("items"),
             )
 
-        # Builtin tools are always enabled; user tools respect saved state
+        # 内置工具始终启用；用户工具遵循保存的开关状态
         enabled = True if is_builtin else cfg.get(cfg.toolStates).get(manifest["name"], True)
 
         tool = ToolDefinition(
@@ -161,7 +161,7 @@ class ToolManager:
         if not tool:
             return {"status": "error", "data": {"message": f"Tool not found: {tool_name}"}}
 
-        # Ensure dependencies are installed
+        # 确保依赖已安装
         if tool.dependencies:
             ok, err = self._deps.ensure_deps(tool.dependencies)
             if not ok:
@@ -176,7 +176,7 @@ class ToolManager:
         )
 
         env = os.environ.copy()
-        # Build PYTHONPATH: isolated site-packages + tool's own directory
+        # 构建 PYTHONPATH：隔离的 site-packages + 工具自身目录
         extra_paths = [
             str(self._deps.site_packages_path),
             tool.tool_dir,
@@ -207,7 +207,7 @@ class ToolManager:
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
 
-        # Non-zero exit with no stdout — report stderr
+        # 非零退出且无 stdout — 报告 stderr
         if result.returncode != 0 and not stdout:
             return {
                 "status": "error",
@@ -220,7 +220,7 @@ class ToolManager:
         last_line = stdout.splitlines()[-1]
         try:
             parsed = json.loads(last_line)
-            # Attach stderr as debug info if present
+            # 若有 stderr 则附加为调试信息
             if stderr and isinstance(parsed.get("data"), dict):
                 parsed["data"].setdefault("_stderr", stderr)
             return parsed

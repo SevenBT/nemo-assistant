@@ -74,7 +74,7 @@ class _MessageText(QTextBrowser):
 
     def _fit(self):
         if self._is_user:
-            # Let document flow without constraint to get ideal width
+            # 让文档自由流动以获取理想宽度
             self.document().setTextWidth(-1)
             ideal_w = int(self.document().idealWidth()) + 4
             use_w = min(ideal_w, self._MAX_USER_WIDTH)
@@ -130,7 +130,7 @@ class MessageBubble(QFrame):
             layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
 
-        # Attachments section -- user bubbles only
+        # 附件区域 — 仅用户消息显示
         if self._is_user and message.attachments:
             attachments_widget = QWidget()
             attachments_widget.setObjectName("attachmentsContainer")
@@ -144,11 +144,11 @@ class MessageBubble(QFrame):
 
             layout.addWidget(attachments_widget)
 
-        # Tool summary section -- AI bubbles only
+        # 工具摘要区域 — 仅 AI 消息显示
         if not self._is_user:
             self._tool_summary = ToolSummaryWidget()
             layout.addWidget(self._tool_summary)
-            # Populate existing tool calls (used by load_session)
+            # 填充已有的工具调用（load_session 使用）
             for tc in message.tool_calls:
                 self._tool_summary.add_tool(tc.id, tc.name)
                 if tc.result is not None:
@@ -195,7 +195,7 @@ class MessageBubble(QFrame):
 class ChatWidget(QWidget):
     """可滚动的消息列表，支持拖放文件附件。"""
 
-    file_attached = pyqtSignal(list)  # Emits list[Attachment]
+    file_attached = pyqtSignal(list)  # 发射 Attachment 列表
 
     _MAX_CONTENT_WIDTH = 760  # content column max width; centered when viewport is wider
 
@@ -225,7 +225,7 @@ class ChatWidget(QWidget):
         self._scroll.viewport().installEventFilter(self)
         root.addWidget(self._scroll)
 
-        # Typing indicator at bottom (outside scroll area)
+        # 打字指示器在底部（滚动区域外）
         self._typing = TypingIndicator()
         root.addWidget(self._typing)
         self._typing.hide()
@@ -238,7 +238,7 @@ class ChatWidget(QWidget):
         return super().eventFilter(obj, event)
 
     def _update_inner_margins(self, viewport_width: int):
-        """Keep content centered with equal side margins when viewport > max width."""
+        """当视口宽度超过最大内容宽度时，用等距侧边距保持内容居中。"""
         side = max(16, (viewport_width - self._MAX_CONTENT_WIDTH) // 2)
         self._layout.setContentsMargins(side, 20, side, 20)
 
@@ -304,7 +304,7 @@ class ChatWidget(QWidget):
             if msg.content:
                 final_content = msg.content
                 break
-        # Skip entirely empty groups
+        # 跳过完全空的组
         if not final_content and not all_tool_calls:
             return
         combined = Message(
@@ -344,7 +344,7 @@ class ChatWidget(QWidget):
             event.ignore()
 
     def dropEvent(self, event):
-        """Handle dropped files."""
+        """处理拖放的文件，解析后附加到聊天。"""
         from app.core.file_parser import FileParser, FileParseError
         import logging
 

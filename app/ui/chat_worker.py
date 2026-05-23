@@ -90,12 +90,12 @@ class ChatWorker(QThread):
                     break
 
             if not tool_calls:
-                # Conversation complete
+                # 对话完成
                 self.finished.emit()
                 return
 
-            # Build assistant message (with tool_calls) for history
-            # reasoning_content must be passed back for models that use thinking mode
+            # 构建 assistant 消息（含 tool_calls）添加到历史记录
+            # 对于使用思考模式的模型，必须回传 reasoning_content
             assistant_msg: dict = {
                 "role": "assistant",
                 "content": full_text or None,
@@ -115,13 +115,13 @@ class ChatWorker(QThread):
                 assistant_msg["reasoning_content"] = reasoning_content
             messages.append(assistant_msg)
 
-            # Execute every tool call
+            # 执行每个工具调用
             for tc in tool_calls:
                 call_id = tc["id"]
                 tool_name = tc["name"]
                 ai_args = tc["arguments"]
 
-                # Resolve params (manual > ai > config > default)
+                # 解析参数（优先级：手动 > AI > 配置 > 默认值）
                 manual_overrides: dict = {}
                 manual_params = self._tm.get_manual_params(tool_name)
                 if manual_params:
@@ -132,7 +132,7 @@ class ChatWorker(QThread):
                         manual_overrides = {}
 
                 if tool_name in self._builtins:
-                    # Built-in tool (e.g. create_scheduled_task)
+                    # 内置工具（如 create_scheduled_task）
                     resolved = {**ai_args, **manual_overrides}
                     self.tool_started.emit(call_id, tool_name, resolved)
                     result = self._builtins[tool_name](resolved)
@@ -143,7 +143,7 @@ class ChatWorker(QThread):
 
                 self.tool_done.emit(call_id, result)
 
-                # Add tool result to history
+                # 将工具结果添加到历史记录
                 messages.append(
                     {
                         "role": "tool",
@@ -152,7 +152,7 @@ class ChatWorker(QThread):
                     }
                 )
 
-            # Signal UI that AI is about to respond again
+            # 通知 UI 新一轮 AI 回复即将开始
             self.new_ai_turn.emit()
 
         self.finished.emit()
