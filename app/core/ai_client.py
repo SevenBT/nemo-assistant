@@ -66,6 +66,7 @@ class AIClient:
     ) -> Iterator[dict]:
         """通过 OpenAI SDK 进行流式调用。"""
         kwargs: dict = {
+            "model": self._proxy.model if self._proxy else cfg.get(cfg.model),
             "messages": messages,
             "max_tokens": cfg.get(cfg.maxTokens),
             "temperature": cfg.get(cfg.temperature),

@@ -34,7 +34,7 @@ from app.core.session_manager import SessionManager
 from app.core.tool_manager import ToolManager
 from app.models.message import Message, MessageRole, ToolCall
 from app.ui.chat_widget import ChatWidget, MessageBubble
-from app.ui.chat_worker import ChatWorker
+from app.core.agent_loop import AgentLoop
 from app.ui.edge_snap import EdgeSnapManager
 from app.ui.input_widget import InputWidget
 from app.ui.manual_params_dialog import ManualParamsDialog
@@ -94,7 +94,7 @@ class MainWindow(FluentWindow):
         self._notes = note_mgr
         self._ai = AIClient()
         self._current_session_id: str | None = None
-        self._workers: dict[str, ChatWorker] = {}
+        self._workers: dict[str, AgentLoop] = {}
         self._session_live: dict[str, dict] = {}  # sid -> {ai_msg, ai_text}
         self._current_ai_bubble: MessageBubble | None = None
         self._current_ai_msg: Message | None = None
@@ -422,7 +422,7 @@ class MainWindow(FluentWindow):
         self._session_live.pop(sid, None)
         if worker is None:
             return
-        worker.stop()
+        worker.cancel()
         try:
             worker.disconnect()
         except RuntimeError:
@@ -527,12 +527,13 @@ class MainWindow(FluentWindow):
         api_msgs = self._build_api_messages(session.messages[:-1])  # exclude placeholder
         all_tools = self._tools.get_openai_functions() + BUILTIN_TOOLS
 
-        worker = ChatWorker(
+        worker = AgentLoop(
             ai_client=self._ai,
             tool_manager=self._tools,
             api_messages=api_msgs,
             tools=all_tools,
             builtin_handlers=self._builtin_handler.get_handlers(),
+            session_id=sid,
         )
         self._workers[sid] = worker
         self._connect_worker(sid, worker)
@@ -591,14 +592,12 @@ class MainWindow(FluentWindow):
         return result
 
     # ── Worker 信号连接 ───────────────────────────────────────────────────
-    def _connect_worker(self, sid: str, worker: ChatWorker):
+    def _connect_worker(self, sid: str, worker: AgentLoop):
         worker.text_chunk.connect(lambda d, s=sid: self._on_bg_text_chunk(s, d))
-        worker.tool_started.connect(lambda cid, tn, p, s=sid: self._on_bg_tool_started(s, cid, tn, p))
-        worker.tool_done.connect(lambda cid, r, s=sid: self._on_bg_tool_done(s, cid, r))
-        worker.need_manual_params.connect(lambda cid, tn, ps, s=sid: self._on_bg_need_manual(s, cid, tn, ps))
-        worker.new_ai_turn.connect(lambda s=sid: self._on_bg_new_ai_turn(s))
-        worker.finished.connect(lambda s=sid: self._on_bg_finished(s))
-        worker.error.connect(lambda msg, s=sid: self._on_bg_error(s, msg))
+        worker.tool_event.connect(lambda cid, phase, payload, s=sid: self._on_bg_tool_event(s, cid, phase, payload))
+        worker.need_input.connect(lambda cid, tn, ps, s=sid: self._on_bg_need_input(s, cid, tn, ps))
+        worker.new_turn.connect(lambda tc, s=sid: self._on_bg_new_turn(s, tc))
+        worker.done.connect(lambda info, s=sid: self._on_bg_done(s, info))
 
     # ── 会话感知的信号处理 ───────────────────────────────────────────────
     def _on_bg_text_chunk(self, sid: str, delta: str):
@@ -623,36 +622,39 @@ class MainWindow(FluentWindow):
             self._current_ai_bubble = None
         self._chat.scroll_bottom()
 
-    def _on_bg_tool_started(self, sid: str, call_id: str, tool_name: str, params: dict):
+    def _on_bg_tool_event(self, sid: str, call_id: str, phase: str, payload: dict):
+        """统一处理工具事件（start / done / error）。"""
         session = self._sessions.get(sid)
-        if session and session.messages:
-            tc = ToolCall(id=call_id, name=tool_name, arguments=params, status="running")
-            session.messages[-1].tool_calls.append(tc)
-        if sid != self._current_session_id:
-            return
-        self._chat.stop_typing()
-        if self._current_ai_bubble is None and self._current_ai_msg:
-            self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
-        if self._current_ai_bubble:
-            self._current_ai_bubble.clear_text()
-            self._current_ai_bubble.add_tool_card(call_id, tool_name, params)
-        self._chat.scroll_bottom()
+        if phase == "start":
+            tool_name = payload["name"]
+            params = payload["params"]
+            if session and session.messages:
+                tc = ToolCall(id=call_id, name=tool_name, arguments=params, status="running")
+                session.messages[-1].tool_calls.append(tc)
+            if sid != self._current_session_id:
+                return
+            self._chat.stop_typing()
+            if self._current_ai_bubble is None and self._current_ai_msg:
+                self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
+            if self._current_ai_bubble:
+                self._current_ai_bubble.clear_text()
+                self._current_ai_bubble.add_tool_card(call_id, tool_name, params)
+            self._chat.scroll_bottom()
+        elif phase == "done":
+            result = payload["result"]
+            if session:
+                for msg in reversed(session.messages):
+                    for tc in msg.tool_calls:
+                        if tc.id == call_id:
+                            tc.result = result
+                            tc.status = result.get("status", "success")
+                            break
+            if sid != self._current_session_id:
+                return
+            if self._current_ai_bubble:
+                self._current_ai_bubble.update_tool_card(call_id, result)
 
-    def _on_bg_tool_done(self, sid: str, call_id: str, result: dict):
-        session = self._sessions.get(sid)
-        if session:
-            for msg in reversed(session.messages):
-                for tc in msg.tool_calls:
-                    if tc.id == call_id:
-                        tc.result = result
-                        tc.status = result.get("status", "success")
-                        break
-        if sid != self._current_session_id:
-            return
-        if self._current_ai_bubble:
-            self._current_ai_bubble.update_tool_card(call_id, result)
-
-    def _on_bg_need_manual(self, sid: str, call_id: str, tool_name: str, param_names: list):
+    def _on_bg_need_input(self, sid: str, call_id: str, tool_name: str, param_names: list):
         worker = self._workers.get(sid)
         if worker is None:
             return
@@ -661,9 +663,9 @@ class MainWindow(FluentWindow):
             params = dlg.get_values() if dlg.exec() else {}
         else:
             params = {}
-        worker.supply_manual_params(params)
+        worker.supply_input(params)
 
-    def _on_bg_new_ai_turn(self, sid: str):
+    def _on_bg_new_turn(self, sid: str, turn_count: int):
         ai_msg = Message(role=MessageRole.ASSISTANT, content="")
         self._sessions.add_message(sid, ai_msg)
         live = self._session_live.get(sid)
@@ -679,58 +681,54 @@ class MainWindow(FluentWindow):
             self._current_ai_bubble.clear_text()
         self._chat.start_typing()
 
-    def _on_bg_finished(self, sid: str):
+    def _on_bg_done(self, sid: str, info: dict):
+        """统一处理完成和错误。"""
         live = self._session_live.get(sid)
-        if live and live["ai_msg"] and not live["ai_msg"].content:
-            live["ai_msg"].content = live["ai_text"]
-            if live["ai_text"] and sid == self._current_session_id and self._current_ai_bubble is None:
-                self._current_ai_bubble = self._chat.add_message(live["ai_msg"])
-        session = self._sessions.get(sid)
-        if session:
-            session.messages = [
-                m for m in session.messages
-                if not (m.role == "assistant" and not m.content and not m.tool_calls)
-            ]
-        self._sessions.save_session(sid)
-        self._workers.pop(sid, None)
-        self._session_live.pop(sid, None)
-        if sid != self._current_session_id:
-            return
-        self._chat.stop_typing()
-        self._tool_status.hide()
-        self._input.set_enabled(True)
-        self._input.focus()
-        self._current_ai_msg = None
-        self._current_ai_bubble = None
+        ok = info.get("ok", True)
+        error_msg = info.get("error")
 
-    def _on_bg_error(self, sid: str, message: str):
-        hint = ""
-        if "404" in message:
-            hint = f"\n\n提示：请在设置中检查 API 地址（当前: {cfg.get(cfg.apiBaseUrl)}）和模型名称（当前: {cfg.get(cfg.model)}）"
-        elif "401" in message or "Unauthorized" in message:
-            hint = "\n\n提示：API Key 无效，请在设置中重新填写"
-        error_text = f"❌ 请求失败：{message}{hint}"
-        live = self._session_live.get(sid)
-        if live and live["ai_msg"]:
-            live["ai_msg"].content = error_text
+        if ok:
+            # 正常完成
+            if live and live["ai_msg"] and not live["ai_msg"].content:
+                live["ai_msg"].content = live["ai_text"]
+                if live["ai_text"] and sid == self._current_session_id and self._current_ai_bubble is None:
+                    self._current_ai_bubble = self._chat.add_message(live["ai_msg"])
+            session = self._sessions.get(sid)
+            if session:
+                session.messages = [
+                    m for m in session.messages
+                    if not (m.role == "assistant" and not m.content and not m.tool_calls)
+                ]
+        else:
+            # 错误
+            hint = ""
+            if error_msg and "404" in error_msg:
+                hint = f"\n\n提示：请在设置中检查 API 地址（当前: {cfg.get(cfg.apiBaseUrl)}）和模型名称（当前: {cfg.get(cfg.model)}）"
+            elif error_msg and ("401" in error_msg or "Unauthorized" in error_msg):
+                hint = "\n\n提示：API Key 无效，请在设置中重新填写"
+            error_text = f"❌ 请求失败：{error_msg}{hint}"
+            if live and live["ai_msg"]:
+                live["ai_msg"].content = error_text
+            if sid == self._current_session_id:
+                if self._current_ai_bubble is None and self._current_ai_msg:
+                    self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
+                if self._current_ai_bubble:
+                    try:
+                        self._current_ai_bubble.set_content(error_text)
+                    except RuntimeError:
+                        pass
+
         self._sessions.save_session(sid)
         self._workers.pop(sid, None)
         self._session_live.pop(sid, None)
         if sid != self._current_session_id:
             return
         self._chat.stop_typing()
-        if self._current_ai_bubble is None and self._current_ai_msg:
-            self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
-        if self._current_ai_bubble:
-            try:
-                self._current_ai_bubble.set_content(error_text)
-            except RuntimeError:
-                pass
+        self._tool_status.hide()
         self._input.set_enabled(True)
         self._input.focus()
         self._current_ai_msg = None
         self._current_ai_bubble = None
-        self._tool_status.hide()
 
     # ──────────────────────────────────────────── 调度器回调
     def _on_scheduler_result(self, job_id: str, job_name: str, result: dict):
