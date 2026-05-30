@@ -33,9 +33,9 @@ from qfluentwidgets import (
 )
 
 if TYPE_CHECKING:
-    from app.core.tool_manager import ToolManager
+    from app.tools.registry import ToolRegistry
 
-from app.models.tool_def import ToolDefinition
+from app.tools.script_adapter import ScriptToolAdapter
 
 
 class _ToolCard(QWidget):
@@ -43,7 +43,7 @@ class _ToolCard(QWidget):
 
     toggled = pyqtSignal(str, bool)
 
-    def __init__(self, tool: ToolDefinition, parent=None):
+    def __init__(self, tool: ScriptToolAdapter, parent=None):
         super().__init__(parent)
         self._name = tool.name
         self.setMinimumHeight(56)
@@ -221,7 +221,7 @@ class _DetailPane(QWidget):
         return w
 
     # ------------------------------------------------------------------ update
-    def load(self, tool: ToolDefinition):
+    def load(self, tool: ScriptToolAdapter):
         self._name_lbl.setText(tool.name)
 
         meta = []
@@ -235,13 +235,17 @@ class _DetailPane(QWidget):
 
         # Parameters
         params_lbl = self._params_section.findChildren(BodyLabel)[0]
-        if tool.parameters:
+        properties = tool.parameters.get("properties", {})
+        required_list = tool.parameters.get("required", [])
+        if properties:
             lines = []
-            for pname, pdef in tool.parameters.items():
-                req = " *" if pdef.required else ""
+            for pname, pdata in properties.items():
+                req = " *" if pname in required_list else ""
+                ptype = pdata.get("type", "string")
+                pdesc = pdata.get("description", "")
                 lines.append(
-                    f"<b>{pname}</b>{req}  <span style='color:#9CA3AF'>({pdef.type})</span><br>"
-                    f"<span style='color:#6B7280;font-size:11px'>{pdef.description}</span>"
+                    f"<b>{pname}</b>{req}  <span style='color:#9CA3AF'>({ptype})</span><br>"
+                    f"<span style='color:#6B7280;font-size:11px'>{pdesc}</span>"
                 )
             params_lbl.setText("<br>".join(lines))
             params_lbl.setTextFormat(Qt.TextFormat.RichText)
@@ -265,10 +269,10 @@ class ToolboxPanel(QWidget):
 
     tool_toggled = pyqtSignal(str, bool)
 
-    def __init__(self, tool_mgr: ToolManager, parent=None):
+    def __init__(self, registry: "ToolRegistry", parent=None):
         super().__init__(parent)
-        self._tools = tool_mgr
-        self._current_tool: ToolDefinition | None = None
+        self._registry = registry
+        self._current_tool: ScriptToolAdapter | None = None
         self._saved_list_width: int | None = None
         self._build()
 
@@ -370,22 +374,34 @@ class ToolboxPanel(QWidget):
 
     # ------------------------------------------------------------------ data
     def refresh(self):
-        self._tools.reload()
+        self._reload_user_tools()
         self._load_list()
+
+    def _reload_user_tools(self):
+        """重新加载用户脚本工具（保留内置工具）。"""
+        from app.core.config import USER_TOOLS_DIR
+        from app.tools.loader import load_user_script_tools
+        # 移除已有的 ScriptToolAdapter
+        for tool in list(self._registry.get_all()):
+            if isinstance(tool, ScriptToolAdapter):
+                self._registry.unregister(tool.name)
+        load_user_script_tools(USER_TOOLS_DIR, self._registry)
 
     def _load_list(self):
         self._list.clear()
-        all_tools = self._tools.get_tools()
-        user = sorted([t for t in all_tools if not t.is_builtin], key=lambda t: t.name)
+        user_tools = sorted(
+            [t for t in self._registry.get_all() if isinstance(t, ScriptToolAdapter)],
+            key=lambda t: t.name,
+        )
 
-        if not user:
+        if not user_tools:
             self._empty_state.show()
             self._detail_pane.hide()
             return
 
         self._empty_state.hide()
 
-        for tool in user:
+        for tool in user_tools:
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, tool.name)
             card = _ToolCard(tool)
@@ -404,8 +420,8 @@ class ToolboxPanel(QWidget):
         if not item:
             return
         name = item.data(Qt.ItemDataRole.UserRole)
-        tool = self._tools.get(name)
-        if not tool:
+        tool = self._registry.get(name)
+        if not tool or not isinstance(tool, ScriptToolAdapter):
             return
         self._current_tool = tool
         self._detail_pane.load(tool)
@@ -413,19 +429,25 @@ class ToolboxPanel(QWidget):
         self._empty_state.hide()
 
     def _on_tool_toggled(self, name: str, enabled: bool):
-        self._tools.set_tool_enabled(name, enabled)
+        from app.core.config import cfg
+        tool = self._registry.get(name)
+        if tool and isinstance(tool, ScriptToolAdapter):
+            tool.enabled = enabled
+        states = dict(cfg.get(cfg.toolStates))
+        states[name] = enabled
+        cfg.set(cfg.toolStates, states)
         self.tool_toggled.emit(name, enabled)
 
     # ------------------------------------------------------------------ actions
     def _on_new_tool(self):
         from app.ui.tool_editor_dialog import ToolEditorDialog
-        dlg = ToolEditorDialog(self._tools, parent=self)
+        dlg = ToolEditorDialog(self._registry, parent=self)
         if dlg.exec():
             self.refresh()
 
     def _on_generate_tool(self):
         from app.ui.tool_generate_dialog import ToolGenerateDialog
-        dlg = ToolGenerateDialog(self._tools, parent=self)
+        dlg = ToolGenerateDialog(self._registry, parent=self)
         dlg.tool_saved.connect(lambda _: self.refresh())
         dlg.exec()
 
@@ -433,7 +455,7 @@ class ToolboxPanel(QWidget):
         if not self._current_tool:
             return
         from app.ui.tool_editor_dialog import ToolEditorDialog
-        dlg = ToolEditorDialog(self._tools, tool=self._current_tool, parent=self)
+        dlg = ToolEditorDialog(self._registry, tool=self._current_tool, parent=self)
         if dlg.exec():
             self.refresh()
 
@@ -441,7 +463,7 @@ class ToolboxPanel(QWidget):
         if not self._current_tool:
             return
         from app.ui.tool_test_dialog import ToolTestDialog
-        dlg = ToolTestDialog(self._current_tool, self._tools, parent=self)
+        dlg = ToolTestDialog(self._current_tool, self._registry, parent=self)
         dlg.exec()
 
     def _on_open_folder(self):

@@ -1,0 +1,1 @@
+cls 和 @classmethod

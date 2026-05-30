@@ -251,7 +251,7 @@ def set_litellm_provider_api_key(provider: str, key: str) -> None:
 def _ensure_dirs() -> None:
     for d in [
         CONFIG_DIR, DATA_DIR, SESSIONS_DIR, NOTES_DIR, NOTES_IMAGES_DIR,
-        TRASH_DIR, TOOLS_DIR, USER_TOOLS_DIR, TOOL_RUNTIME_DIR,
+        TRASH_DIR, USER_TOOLS_DIR, TOOL_RUNTIME_DIR,
         TOOL_SITE_PACKAGES,
     ]:
         d.mkdir(parents=True, exist_ok=True)

@@ -8,7 +8,7 @@ Layout:
   │ FluentWindow stackedWidget                                   │
   │  page 0: SessionPanel | ChatWidget + InputWidget             │
   │  page 1: NotesPanel                                          │
-  │  page 2: ToolboxPanel                                         │
+  │  page 2: ToolboxPanel                                        │
   └──────────────────────────────────────────────────────────────┘
 """
 import json
@@ -26,12 +26,13 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.ai_client import AIClient
-from app.core.builtin_tools import BUILTIN_TOOLS, BuiltinToolHandler
-from app.core.config import cfg, get_api_key
+from app.core.config import cfg, USER_TOOLS_DIR
 from app.core.note_manager import NoteManager
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
-from app.core.tool_manager import ToolManager
+from app.tools.context import ToolContext, ToolEvents
+from app.tools.loader import load_builtin_tools, load_user_script_tools
+from app.tools.registry import ToolRegistry
 from app.models.message import Message, MessageRole, ToolCall
 from app.ui.chat_widget import ChatWidget, MessageBubble
 from app.core.agent_loop import AgentLoop
@@ -66,7 +67,6 @@ class MainWindow(FluentWindow):
     def __init__(
         self,
         session_mgr: SessionManager,
-        tool_mgr: ToolManager,
         scheduler: SchedulerManager,
         note_mgr: NoteManager,
     ):
@@ -89,9 +89,9 @@ class MainWindow(FluentWindow):
             btn.deleteLater()
 
         self._sessions = session_mgr
-        self._tools = tool_mgr
         self._scheduler = scheduler
         self._notes = note_mgr
+        self._registry = ToolRegistry()
         self._ai = AIClient()
         self._current_session_id: str | None = None
         self._workers: dict[str, AgentLoop] = {}
@@ -109,11 +109,8 @@ class MainWindow(FluentWindow):
 
         self._build_window()
         self._build_ui()
-        self._builtin_handler = BuiltinToolHandler(
-            scheduler=scheduler,
-            note_mgr=note_mgr,
-            on_note_created=self._note_created_signal.emit,
-        )
+        self._init_tools()
+        self._scheduler.set_tool_manager(self._registry)
         self._note_created_signal.connect(self._notes_panel.refresh)
         self._setup_tray()
         self._init_sessions()
@@ -131,6 +128,20 @@ class MainWindow(FluentWindow):
 
     # ──────────────────────────────────────────── window setup
     # ──────────────────────────────────────────── window setup
+    def _init_tools(self):
+        """初始化工具系统：自动发现内置工具 + 加载用户脚本工具。"""
+        ctx = ToolContext(
+            config=cfg,
+            note_mgr=self._notes,
+            scheduler=self._scheduler,
+            ai_client=self._ai,
+            events=ToolEvents(
+                note_created=self._note_created_signal.emit,
+            ),
+        )
+        load_builtin_tools(ctx, self._registry)
+        load_user_script_tools(USER_TOOLS_DIR, self._registry)
+
     def _build_window(self):
         w = cfg.get(cfg.windowWidth)
         h = cfg.get(cfg.windowHeight)
@@ -218,7 +229,7 @@ class MainWindow(FluentWindow):
         self._notes_panel.note_updated.connect(self._on_note_updated)
 
         # ── page 2: toolbox panel ─────────────────────────────────────
-        self._toolbox_panel = ToolboxPanel(self._tools)
+        self._toolbox_panel = ToolboxPanel(self._registry)
         self._toolbox_panel.setObjectName("toolboxInterface")
 
         # 注册页面到 FluentWindow（switchTo 需要）
@@ -525,14 +536,11 @@ class MainWindow(FluentWindow):
 
         session = self._sessions.get(sid)
         api_msgs = self._build_api_messages(session.messages[:-1])  # exclude placeholder
-        all_tools = self._tools.get_openai_functions() + BUILTIN_TOOLS
 
         worker = AgentLoop(
             ai_client=self._ai,
-            tool_manager=self._tools,
+            registry=self._registry,
             api_messages=api_msgs,
-            tools=all_tools,
-            builtin_handlers=self._builtin_handler.get_handlers(),
             session_id=sid,
         )
         self._workers[sid] = worker
@@ -749,7 +757,7 @@ class MainWindow(FluentWindow):
         old_theme = cfg.get(cfg.theme)
         dlg = SettingsWindow(
             hotkey_mgr=self._hotkey_mgr,
-            tool_mgr=self._tools,
+            registry=self._registry,
             parent=self,
         )
         if dlg.exec():

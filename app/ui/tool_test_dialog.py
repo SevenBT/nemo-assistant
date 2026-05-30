@@ -16,8 +16,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.tool_manager import ToolManager
-from app.models.tool_def import ToolDefinition
+from app.tools.registry import ToolRegistry
+from app.tools.script_adapter import ScriptToolAdapter
 
 
 class _ExecWorker(QThread):
@@ -25,15 +25,15 @@ class _ExecWorker(QThread):
 
     finished = pyqtSignal(dict, float)  # result, elapsed_seconds
 
-    def __init__(self, tool_mgr: ToolManager, tool_name: str, params: dict):
+    def __init__(self, registry: ToolRegistry, tool_name: str, params: dict):
         super().__init__()
-        self._tm = tool_mgr
+        self._registry = registry
         self._tool_name = tool_name
         self._params = params
 
     def run(self):
         t0 = time.time()
-        result = self._tm.execute(self._tool_name, self._params)
+        result = self._registry.execute(self._tool_name, self._params)
         elapsed = time.time() - t0
         self.finished.emit(result, elapsed)
 
@@ -43,13 +43,13 @@ class ToolTestDialog(QDialog):
 
     def __init__(
         self,
-        tool: ToolDefinition,
-        tool_mgr: ToolManager,
+        tool: ScriptToolAdapter,
+        registry: ToolRegistry,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self._tool = tool
-        self._tool_mgr = tool_mgr
+        self._registry = registry
         self._worker: _ExecWorker | None = None
         self.setWindowTitle(f"测试工具 — {tool.name}")
         self.setMinimumSize(520, 500)
@@ -71,49 +71,26 @@ class ToolTestDialog(QDialog):
         layout.addWidget(params_label)
 
         self._param_inputs: dict[str, QLineEdit] = {}
-        ai_params = {
-            n: p for n, p in self._tool.parameters.items()
-            if p.source in ("ai", "manual")
-        }
-        config_params = {
-            n: p for n, p in self._tool.parameters.items()
-            if p.source == "config"
-        }
+        properties = self._tool.parameters.get("properties", {})
+        required_list = self._tool.parameters.get("required", [])
 
-        if ai_params:
-            for pname, pdef in ai_params.items():
+        if properties:
+            for pname, pdata in properties.items():
                 row = QHBoxLayout()
-                req_mark = " *" if pdef.required else ""
+                req_mark = " *" if pname in required_list else ""
                 label = QLabel(f"{pname}{req_mark}:")
                 label.setFixedWidth(120)
-                label.setToolTip(pdef.description)
+                label.setToolTip(pdata.get("description", ""))
                 row.addWidget(label)
                 edit = QLineEdit()
-                edit.setPlaceholderText(f"{pdef.type} — {pdef.description}")
-                if pdef.default:
-                    edit.setText(str(pdef.default))
+                ptype = pdata.get("type", "string")
+                pdesc = pdata.get("description", "")
+                edit.setPlaceholderText(f"{ptype} — {pdesc}")
                 row.addWidget(edit)
                 layout.addLayout(row)
                 self._param_inputs[pname] = edit
         else:
             layout.addWidget(QLabel("  此工具无需输入参数"))
-
-        # Show config params as read-only
-        if config_params:
-            cfg_label = QLabel("配置参数 (来自设置，只读)")
-            cfg_label.setStyleSheet("font-size: 11px; color: #9CA3AF; margin-top: 4px;")
-            layout.addWidget(cfg_label)
-            cfg_values = self._tool_mgr.get_config_params(self._tool.name)
-            for pname, pdef in config_params.items():
-                row = QHBoxLayout()
-                label = QLabel(f"{pname}:")
-                label.setFixedWidth(120)
-                row.addWidget(label)
-                val = cfg_values.get(pname, pdef.default or "")
-                val_label = QLabel(str(val) if val else "(未配置)")
-                val_label.setStyleSheet("color: #6B7280;")
-                row.addWidget(val_label)
-                layout.addLayout(row)
 
         # ── Run button ───────────────────────────────────────────────
         btn_row = QHBoxLayout()
@@ -145,17 +122,18 @@ class ToolTestDialog(QDialog):
     def _on_run(self):
         # Collect params
         params = {}
+        properties = self._tool.parameters.get("properties", {})
         for pname, edit in self._param_inputs.items():
             val = edit.text().strip()
-            pdef = self._tool.parameters.get(pname)
-            if pdef and pdef.type == "number" and val:
+            ptype = properties.get(pname, {}).get("type", "string")
+            if ptype == "number" and val:
                 try:
                     params[pname] = float(val) if "." in val else int(val)
                 except ValueError:
                     params[pname] = val
-            elif pdef and pdef.type == "boolean" and val:
+            elif ptype == "boolean" and val:
                 params[pname] = val.lower() in ("true", "1", "yes")
-            elif pdef and pdef.type in ("array", "object") and val:
+            elif ptype in ("array", "object") and val:
                 try:
                     params[pname] = json.loads(val)
                 except json.JSONDecodeError:
@@ -163,14 +141,11 @@ class ToolTestDialog(QDialog):
             elif val:
                 params[pname] = val
 
-        # Resolve with config params
-        resolved = self._tool_mgr.resolve_params(self._tool.name, params)
-
         self._run_btn.setEnabled(False)
         self._status_label.setText("执行中...")
         self._output.setPlainText("")
 
-        self._worker = _ExecWorker(self._tool_mgr, self._tool.name, resolved)
+        self._worker = _ExecWorker(self._registry, self._tool.name, params)
         self._worker.finished.connect(self._on_result)
         self._worker.start()
 

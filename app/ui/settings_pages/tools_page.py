@@ -40,9 +40,9 @@ _KEY_HINTS = {
 
 
 class ToolsPage(QScrollArea):
-    def __init__(self, tool_mgr=None, parent=None):
+    def __init__(self, registry=None, parent=None):
         super().__init__(parent)
-        self._tool_mgr = tool_mgr
+        self._registry = registry
         self._tool_switches: dict[str, SwitchButton] = {}
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -90,11 +90,14 @@ class ToolsPage(QScrollArea):
         layout.addLayout(form)
 
         # Tool enable/disable switches
-        if self._tool_mgr:
+        if self._registry:
+            from app.tools.script_adapter import ScriptToolAdapter
             layout.addWidget(QLabel("工具开关:"))
             tool_form = QFormLayout()
             states = cfg.get(cfg.toolStates)
-            for tool in self._tool_mgr.get_tools():
+            for tool in self._registry.get_all():
+                if not isinstance(tool, ScriptToolAdapter):
+                    continue
                 name = tool.name
                 label = name
                 sw = SwitchButton()

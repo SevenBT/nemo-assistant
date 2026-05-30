@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 
 from app.core.config import USER_TOOLS_DIR
 from app.core.tool_generator import ModelOverride, build_model_options, parse_result, stream_generate
-from app.core.tool_manager import ToolManager
+from app.tools.registry import ToolRegistry
 
 
 class _GenerateWorker(QThread):
@@ -66,11 +66,11 @@ class ToolGenerateDialog(QDialog):
 
     def __init__(
         self,
-        tool_mgr: ToolManager,
+        registry: ToolRegistry,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
-        self._tool_mgr = tool_mgr
+        self._registry = registry
         self._worker: _GenerateWorker | None = None
         self._full_text = ""
         self._manifest_str = ""
@@ -278,7 +278,7 @@ class ToolGenerateDialog(QDialog):
         manifest["name"] = name
 
         # Check duplicate
-        if self._tool_mgr.get(name):
+        if self._registry.get(name):
             reply = QMessageBox.question(
                 self,
                 "工具已存在",
@@ -298,7 +298,6 @@ class ToolGenerateDialog(QDialog):
         with open(tool_dir / "tool.py", "w", encoding="utf-8") as f:
             f.write(script_str)
 
-        self._tool_mgr.reload()
         self.tool_saved.emit(name)
         self.accept()
 

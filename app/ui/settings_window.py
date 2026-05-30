@@ -30,10 +30,10 @@ class SettingsWindow(QDialog):
         ("窗口", "window"),
     ]
 
-    def __init__(self, hotkey_mgr=None, tool_mgr=None, parent=None):
+    def __init__(self, hotkey_mgr=None, registry=None, parent=None):
         super().__init__(parent)
         self._hotkey_mgr = hotkey_mgr
-        self._tool_mgr = tool_mgr
+        self._registry = registry
         self.setWindowTitle("设置")
         self.setMinimumSize(640, 480)
         self.resize(cfg.get(cfg.settingsWidth), cfg.get(cfg.settingsHeight))
@@ -88,7 +88,7 @@ class SettingsWindow(QDialog):
         self._stack.addWidget(EditorPage(self))
         self._stack.addWidget(ChatPage(self))
         self._stack.addWidget(ApiPage(self))
-        self._stack.addWidget(ToolsPage(self._tool_mgr, self))
+        self._stack.addWidget(ToolsPage(self._registry, self))
         self._stack.addWidget(HotkeysPage(self._hotkey_mgr, self))
         self._stack.addWidget(WindowPage(self))
 

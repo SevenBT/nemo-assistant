@@ -68,7 +68,6 @@ from app.core.config import cfg
 from app.core.note_manager import NoteManager
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
-from app.core.tool_manager import ToolManager
 from app.ui.main_window import MainWindow
 from app.ui.style import apply_theme
 
@@ -86,13 +85,11 @@ def main():
     custom_qss = apply_theme(cfg.get(cfg.theme), content_font_size=cfg.get(cfg.contentFontSize), editor_font_size=cfg.get(cfg.editorFontSize))
     app.setStyleSheet(custom_qss)
     sessions = SessionManager()
-    tools = ToolManager()
     notes = NoteManager()
     scheduler = SchedulerManager()
-    scheduler.set_tool_manager(tools)
     scheduler.start()
 
-    window = MainWindow(sessions, tools, scheduler, notes)
+    window = MainWindow(sessions, scheduler, notes)
     window.setWindowIcon(icon)
     # FluentWindow 构造函数会重置内部样式，需要重新应用主题
     custom_qss = apply_theme(cfg.get(cfg.theme), content_font_size=cfg.get(cfg.contentFontSize), editor_font_size=cfg.get(cfg.editorFontSize))
