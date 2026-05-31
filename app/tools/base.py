@@ -101,6 +101,16 @@ class BuiltinTool(ABC):
         return False
 
     @property
+    def retry_safe(self) -> bool:
+        """
+        工具是否允许自动重试。
+
+        默认沿用 read_only：只读工具一般无副作用，可以安全重试；有副作用工具
+        必须显式覆盖为 True 才会自动重试，避免重复写文件、创建笔记或任务。
+        """
+        return bool(getattr(self, "_retry_safe", self.read_only))
+
+    @property
     def enabled(self) -> bool:
         """工具是否启用。禁用的工具不会出现在 LLM 的可用工具列表中。"""
         return True

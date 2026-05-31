@@ -30,6 +30,7 @@ from typing import Any
 
 from app.tools.base import BuiltinTool
 from app.core.tool_deps import ToolDependencyManager
+from app.tools.registry import ToolErrorType
 
 # 脚本执行超时时间（秒）
 _TOOL_TIMEOUT = 60
@@ -48,6 +49,7 @@ class ScriptToolAdapter(BuiltinTool):
       - tool_dir: 工具所在目录路径
       - dependencies: pip 依赖列表
       - enabled: 可读写，支持用户在设置中开关工具
+      - retry_safe: 是否允许注册中心自动重试（默认 False，需 manifest 显式声明）
     """
 
     def __init__(
@@ -61,6 +63,7 @@ class ScriptToolAdapter(BuiltinTool):
         dependencies: list[str] | None = None,
         version: str = "",
         author: str = "",
+        retry_safe: bool = False,
     ):
         self._name = tool_name
         self._description = tool_description
@@ -72,6 +75,7 @@ class ScriptToolAdapter(BuiltinTool):
         self._enabled = True
         self._version = version
         self._author = author
+        self._retry_safe = retry_safe
         # 依赖管理器：负责将工具声明的 pip 包安装到隔离的 site-packages
         self._deps_mgr = ToolDependencyManager()
 
@@ -92,6 +96,16 @@ class ScriptToolAdapter(BuiltinTool):
     @property
     def read_only(self) -> bool:
         return self._read_only
+
+    @property
+    def retry_safe(self) -> bool:
+        """
+        用户脚本默认不自动重试。
+
+        外置脚本是黑盒，即使 read_only=True 也无法保证失败前没有副作用。
+        只有 manifest 显式声明 retry_safe 或 retry_policy.enabled 时才允许重试。
+        """
+        return self._retry_safe
 
     @property
     def enabled(self) -> bool:
@@ -135,7 +149,14 @@ class ScriptToolAdapter(BuiltinTool):
         if self._dependencies:
             ok, err = self._deps_mgr.ensure_deps(self._dependencies)
             if not ok:
-                return {"status": "error", "data": {"message": f"依赖安装失败: {err}"}}
+                return {
+                    "status": "error",
+                    "data": {
+                        "message": f"依赖安装失败: {err}",
+                        "error_type": ToolErrorType.RUNTIME.value,
+                        "retryable": False,
+                    },
+                }
 
         # 构造传给脚本的 JSON 输入
         stdin_payload = json.dumps({"params": params, "context": {}}, ensure_ascii=False)
@@ -157,16 +178,37 @@ class ScriptToolAdapter(BuiltinTool):
                 cwd=self._tool_dir,  # 工作目录设为工具所在目录
             )
         except subprocess.TimeoutExpired:
-            return {"status": "error", "data": {"message": f"执行超时 ({_TOOL_TIMEOUT}s)"}}
+            return {
+                "status": "error",
+                "data": {
+                    "message": f"执行超时 ({_TOOL_TIMEOUT}s)",
+                    "error_type": ToolErrorType.TIMEOUT.value,
+                    "retryable": True,
+                },
+            }
         except Exception as e:
-            return {"status": "error", "data": {"message": str(e)}}
+            return {
+                "status": "error",
+                "data": {
+                    "message": str(e),
+                    "error_type": ToolErrorType.RUNTIME.value,
+                    "retryable": False,
+                },
+            }
 
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
 
         # 非零退出码且无 stdout → 视为执行失败
         if result.returncode != 0 and not stdout:
-            return {"status": "error", "data": {"message": stderr or f"Exit code {result.returncode}"}}
+            return {
+                "status": "error",
+                "data": {
+                    "message": stderr or f"Exit code {result.returncode}",
+                    "error_type": ToolErrorType.RUNTIME.value,
+                    "retryable": True,
+                },
+            }
         if not stdout:
             return {"status": "success", "data": {}}
 
@@ -179,7 +221,15 @@ class ScriptToolAdapter(BuiltinTool):
                 parsed["data"].setdefault("_stderr", stderr)
             return parsed
         except json.JSONDecodeError as e:
-            return {"status": "error", "data": {"message": f"Invalid JSON: {e}", "raw": stdout[-500:]}}
+            return {
+                "status": "error",
+                "data": {
+                    "message": f"Invalid JSON: {e}",
+                    "raw": stdout[-500:],
+                    "error_type": ToolErrorType.RUNTIME.value,
+                    "retryable": False,
+                },
+            }
 
     @classmethod
     def from_manifest(cls, manifest_path: Path) -> "ScriptToolAdapter":
@@ -195,6 +245,7 @@ class ScriptToolAdapter(BuiltinTool):
             "author": "作者",
             "read_only": false,
             "dependencies": ["requests>=2.28"],
+            "retry_safe": false,
             "parameters": {
                 "query": {
                     "type": "string",
@@ -208,7 +259,10 @@ class ScriptToolAdapter(BuiltinTool):
             }
         }
 
-        注意：source="config" 的参数会被过滤掉，不出现在 JSON Schema 中。
+        注意：
+          - source="config" 的参数会被过滤掉，不出现在 JSON Schema 中。
+          - 用户脚本默认不自动重试；如确认脚本幂等且无副作用，可设置
+            retry_safe=true，或 retry_policy.enabled=true。
         """
         with open(manifest_path, encoding="utf-8") as f:
             manifest = json.load(f)
@@ -239,6 +293,11 @@ class ScriptToolAdapter(BuiltinTool):
         if required:
             parameters["required"] = required
 
+        retry_policy = manifest.get("retry_policy", {})
+        retry_safe = bool(manifest.get("retry_safe", False))
+        if isinstance(retry_policy, dict):
+            retry_safe = retry_safe or bool(retry_policy.get("enabled", False))
+
         return cls(
             tool_name=manifest["name"],
             tool_description=manifest["description"],
@@ -249,4 +308,5 @@ class ScriptToolAdapter(BuiltinTool):
             dependencies=manifest.get("dependencies", []),
             version=manifest.get("version", ""),
             author=manifest.get("author", ""),
+            retry_safe=retry_safe,
         )

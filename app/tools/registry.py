@@ -11,10 +11,10 @@
 错误分类：
   TOOL_NOT_FOUND  工具不存在，不可重试
   PARAM_INVALID   参数校验失败，不可重试（LLM 传参有误，让 LLM 自行修正）
-  TIMEOUT         执行超时，可重试
-  NETWORK         网络/外部服务错误，可重试
+  TIMEOUT         执行超时，可重试（仅 retry_safe 工具）
+  NETWORK         网络/外部服务错误，可重试（仅 retry_safe 工具）
   PERMISSION      权限/安全错误，不可重试，致命
-  RUNTIME         其他运行时异常，可重试（有上限）
+  RUNTIME         其他运行时异常，可谨慎重试（仅 retry_safe 工具）
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ class ToolErrorType(Enum):
 # 不可重试的类型不在此表中
 _RETRY_CONFIG: dict[ToolErrorType, tuple[int, float]] = {
     ToolErrorType.TIMEOUT:  (3, 1.0),
-    ToolErrorType.NETWORK:  (3, 2.0),
+    ToolErrorType.NETWORK:  (2, 1.0),
     ToolErrorType.RUNTIME:  (2, 0.5),
 }
 
@@ -92,6 +92,38 @@ def _make_error(error_type: ToolErrorType, message: str) -> dict[str, Any]:
             "retryable": error_type in _RETRY_CONFIG,
         },
     }
+
+
+def _coerce_error_type(value: Any) -> ToolErrorType:
+    try:
+        return ToolErrorType(value)
+    except ValueError:
+        return ToolErrorType.RUNTIME
+
+
+def _normalize_result(result: Any) -> dict[str, Any]:
+    """Normalize arbitrary tool output into the standard result shape."""
+    if not isinstance(result, dict):
+        return {"status": "success", "data": {"result": result}}
+
+    status = result.get("status")
+    if status == "success":
+        result.setdefault("data", {})
+        return result
+
+    if status != "error":
+        return {"status": "success", "data": result}
+
+    data = result.get("data")
+    if not isinstance(data, dict):
+        data = {"message": str(data)}
+        result["data"] = data
+
+    error_type = _coerce_error_type(data.get("error_type", ToolErrorType.RUNTIME.value))
+    data["error_type"] = error_type.value
+    data.setdefault("message", "")
+    data.setdefault("retryable", error_type in _RETRY_CONFIG)
+    return result
 
 
 class ToolRegistry:
@@ -153,31 +185,50 @@ class ToolRegistry:
         return self._execute_with_retry(tool, params)
 
     def _execute_with_retry(self, tool: BuiltinTool, params: dict[str, Any]) -> dict[str, Any]:
-        """执行工具，对可重试错误按配置自动重试。"""
+        """
+        执行工具，对明确可重试的瞬态错误按配置重试。
+
+        借鉴 nanobot 的保守策略：重试不是所有工具的默认行为，而是同时要求
+        错误类型可重试、结果未禁止重试、工具声明 retry_safe。内置只读工具默认
+        retry_safe=True；用户脚本工具默认 False，需 manifest 显式声明。
+        """
         last_result: dict[str, Any] | None = None
 
-        for attempt in range(1, 10):  # 上限足够大，由 _RETRY_CONFIG 控制实际次数
+        max_attempts = 1
+        delay = 0.0
+
+        for attempt in range(1, 10):  # 上限足够大，由每次错误类型控制实际次数
             try:
-                result = tool.execute(params)
-                # 工具内部已捕获异常并返回错误 dict 的情况
-                if result.get("status") == "error":
-                    error_type = ToolErrorType(
-                        result["data"].get("error_type", ToolErrorType.RUNTIME.value)
-                    ) if "error_type" in result.get("data", {}) else ToolErrorType.RUNTIME
-                    result["data"].setdefault("retryable", error_type in _RETRY_CONFIG)
-                return result
+                result = _normalize_result(tool.execute(params))
             except Exception as e:
                 error_type = _classify(e)
                 logger.warning(
                     "[Registry] %s attempt %d failed (%s): %s",
                     tool.name, attempt, error_type.value, e,
                 )
-                last_result = _make_error(error_type, str(e))
+                result = _make_error(error_type, str(e))
 
-                max_attempts, delay = _RETRY_CONFIG.get(error_type, (1, 0))
-                if attempt >= max_attempts:
+            if result.get("status") != "error":
+                return result
+
+            result = _normalize_result(result)
+            last_result = result
+            data = result.get("data", {})
+            error_type = _coerce_error_type(data.get("error_type", ToolErrorType.RUNTIME.value))
+            max_attempts, delay = _RETRY_CONFIG.get(error_type, (1, 0.0))
+            retryable = bool(data.get("retryable", error_type in _RETRY_CONFIG))
+            retry_safe = bool(getattr(tool, "retry_safe", tool.read_only))
+
+            if not (retryable and retry_safe and attempt < max_attempts):
+                if attempt >= max_attempts and max_attempts > 1:
                     logger.error("[Registry] %s exhausted retries (%d)", tool.name, max_attempts)
-                    break
+                return result
+
+            logger.warning(
+                "[Registry] %s retrying after %s error (%d/%d)",
+                tool.name, error_type.value, attempt, max_attempts,
+            )
+            if delay > 0:
                 time.sleep(delay)
 
         return last_result  # type: ignore[return-value]
