@@ -108,10 +108,6 @@ class MainWindow(FluentWindow):
         self._snap_mgr: EdgeSnapManager | None = None
         self._sticky_windows: list = []
 
-        # 初始化 PresetManager
-        from app.core.preset_manager import PresetManager
-        self._preset_mgr = PresetManager()
-
         self._build_window()
         self._build_ui()
         self._init_tools()
@@ -445,15 +441,11 @@ class MainWindow(FluentWindow):
         if not session:
             return
 
-        dialog = SessionSettingsDialog(session, self._preset_mgr, self)
+        dialog = SessionSettingsDialog(session, self)
         if dialog.exec():
             # 保存会话设置
-            self._sessions.update_system_prompt(
-                sid,
-                session.system_prompt,
-                session.preset_id
-            )
-            # 刷新会话列表（更新 ⚙️ 图标）
+            self._sessions.update_system_prompt(sid, session.system_prompt)
+            # 刷新会话列表
             sessions = self._sessions.get_sessions()
             self._session_panel.load(sessions, sid)
 
@@ -500,13 +492,6 @@ class MainWindow(FluentWindow):
         if session:
             self._chat.load_session(session.messages)
 
-        # 会话有预设/角色但无消息时显示角色问候语
-        if session and not session.messages:
-            greeting = self._get_role_greeting(session)
-            if greeting:
-                greeting_msg = Message(role=MessageRole.ASSISTANT, content=greeting)
-                self._chat.add_message(greeting_msg)
-
         live = self._session_live.get(sid)
         if live:
             self._current_ai_msg = live["ai_msg"]
@@ -523,26 +508,6 @@ class MainWindow(FluentWindow):
             self._input.set_enabled(True)
 
         self._input.focus()
-
-    def _get_role_greeting(self, session) -> str:
-        """返回会话角色的打招呼语句，无角色时返回空字符串。"""
-        preset = None
-        if session.preset_id:
-            preset = self._preset_mgr.get(session.preset_id)
-        if preset:
-            return f"你好！我是{preset.icon} {preset.name}，{self._greeting_for_preset(preset.id)}有什么可以帮你的？"
-        if session.system_prompt and session.system_prompt.strip():
-            return "你好！我已按照自定义角色设置就绪，有什么可以帮你的？"
-        return ""
-
-    def _greeting_for_preset(self, preset_id: str) -> str:
-        greetings = {
-            "translator": "擅长中英互译，",
-            "coder": "擅长代码生成与调试，",
-            "writer": "擅长文案创作与润色，",
-            "summarizer": "擅长提炼内容摘要，",
-        }
-        return greetings.get(preset_id, "")
 
     @pyqtSlot(list)
     def _on_files_attached(self, attachments: list):
@@ -599,10 +564,9 @@ class MainWindow(FluentWindow):
         """
         构建 API 消息列表，System Prompt 优先级：
         1. 会话级 system_prompt（最高优先级）
-        2. 预设角色 preset_id
-        3. 全局配置 config.system_prompt
-        4. 默认值 DEFAULT_USER_PROMPT
-        5. 追加 BUILTIN_TOOLS_INSTRUCTION
+        2. 全局配置 config.system_prompt
+        3. 默认值 DEFAULT_USER_PROMPT
+        4. 追加 BUILTIN_TOOLS_INSTRUCTION
         """
         session = self._sessions.get(self._current_session_id)
         user_prompt = ""
@@ -610,19 +574,14 @@ class MainWindow(FluentWindow):
         # 优先级 1: 会话级 system_prompt（非空且非纯空白）
         if session and session.system_prompt and session.system_prompt.strip():
             user_prompt = session.system_prompt.strip()
-        # 优先级 2: 预设角色 preset_id
-        elif session and session.preset_id:
-            preset = self._preset_mgr.get(session.preset_id)
-            if preset:
-                user_prompt = preset.system_prompt.strip()
-        # 优先级 3: 全局配置 config.system_prompt
+        # 优先级 2: 全局配置 config.system_prompt
         if not user_prompt:
             user_prompt = cfg.get(cfg.systemPrompt).strip()
-        # 优先级 4: 默认值
+        # 优先级 3: 默认值
         if not user_prompt:
             user_prompt = DEFAULT_USER_PROMPT
 
-        # 优先级 5: 追加当前时间信息和内置工具说明
+        # 优先级 4: 追加当前时间信息和内置工具说明
         full_system_prompt = user_prompt + "\n" + get_current_datetime_info() + "\n" + BUILTIN_TOOLS_INSTRUCTION
 
         result = [{"role": "system", "content": full_system_prompt}]

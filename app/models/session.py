@@ -1,7 +1,6 @@
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -12,7 +11,6 @@ class Session:
     updated_at: float = field(default_factory=time.time)
     messages: list = field(default_factory=list)  # list[Message]
     system_prompt: str = ""
-    preset_id: str = ""  # 预设角色 ID
     pinned: bool = False  # 是否置顶
     sort_order: int = 0   # 自定义排序序号（越小越靠前）
 
@@ -24,7 +22,6 @@ class Session:
             "updated_at": self.updated_at,
             "messages": [m.to_dict() for m in self.messages],
             "system_prompt": self.system_prompt,
-            "preset_id": self.preset_id,
             "pinned": self.pinned,
             "sort_order": self.sort_order,
         }
@@ -41,7 +38,6 @@ class Session:
             updated_at=d.get("updated_at", time.time()),
             messages=messages,
             system_prompt=d.get("system_prompt", ""),
-            preset_id=d.get("preset_id", ""),
             pinned=d.get("pinned", False),
             sort_order=d.get("sort_order", 0),
         )
