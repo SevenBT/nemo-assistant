@@ -178,6 +178,7 @@ class AppConfig(QConfig):
         "Tools", "SearchProvider", "bocha",
         OptionsValidator(["ddg", "bing", "tavily", "brave", "bocha"]),
     )
+    toolWorkspace = ConfigItem("Tools", "Workspace", "")
     saveDir = ConfigItem("Tools", "SaveDir", "")
     toolStates = ConfigItem("Tools", "ToolStates", {})
 

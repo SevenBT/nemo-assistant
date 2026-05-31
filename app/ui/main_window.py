@@ -12,6 +12,8 @@ Layout:
   └──────────────────────────────────────────────────────────────┘
 """
 import json
+import threading
+from pathlib import Path
 
 from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QPixmap
@@ -20,6 +22,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
     QLabel,
+    QMessageBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -63,6 +66,8 @@ class MainWindow(FluentWindow):
     note_updated = pyqtSignal(int, str, str)
     # 将 worker 线程的笔记创建回调 marshal 到主线程
     _note_created_signal = pyqtSignal()
+    # 工具确认请求信号 (title, message, result_holder)
+    _confirm_request = pyqtSignal(str, str, object)
 
     def __init__(
         self,
@@ -119,6 +124,7 @@ class MainWindow(FluentWindow):
         self._snap_mgr = EdgeSnapManager(self)
         self._snap_mgr.set_enabled(cfg.get(cfg.edgeSnap))
         self._notify_signal.connect(self._on_notify)
+        self._confirm_request.connect(self._on_confirm_request)
         self._setup_hotkeys()
         self._restore_pinned_notes()
 
@@ -130,17 +136,59 @@ class MainWindow(FluentWindow):
     # ──────────────────────────────────────────── window setup
     def _init_tools(self):
         """初始化工具系统：自动发现内置工具 + 加载用户脚本工具。"""
+        # workspace：用户配置 > 默认 ~/Documents
+        ws_str = cfg.get(cfg.toolWorkspace)
+        workspace = Path(ws_str) if ws_str else Path.home() / "Documents"
+
         ctx = ToolContext(
             config=cfg,
+            workspace=workspace,
             note_mgr=self._notes,
             scheduler=self._scheduler,
             ai_client=self._ai,
             events=ToolEvents(
                 note_created=self._note_created_signal.emit,
             ),
+            confirm_action=self._confirm_action,
         )
         load_builtin_tools(ctx, self._registry)
         load_user_script_tools(USER_TOOLS_DIR, self._registry)
+
+    def _confirm_action(self, title: str, message: str) -> bool:
+        """
+        危险操作确认弹窗，供 exec 等工具在工作线程中调用。
+
+        通过信号将弹窗请求发回主线程，用 threading.Event 阻塞等待结果。
+        信号携带一个 list 作为结果容器，主线程槽函数写入结果后 set event。
+        """
+        if threading.current_thread() is threading.main_thread():
+            return self._show_confirm_dialog(title, message)
+
+        # 工作线程：通过信号发回主线程
+        result_holder = []  # 用 list 作为可变容器传递结果
+        event = threading.Event()
+        result_holder.append(event)  # [event] → 槽函数会 append True/False 再 set
+
+        self._confirm_request.emit(title, message, result_holder)
+        event.wait(timeout=120)  # 最多等 2 分钟
+        return result_holder[1] if len(result_holder) > 1 else False
+
+    @pyqtSlot(str, str, object)
+    def _on_confirm_request(self, title: str, message: str, result_holder: list):
+        """主线程槽：弹出确认对话框，将结果写回 result_holder。"""
+        answer = self._show_confirm_dialog(title, message)
+        result_holder.append(answer)
+        # result_holder[0] 是 event
+        result_holder[0].set()
+
+    def _show_confirm_dialog(self, title: str, message: str) -> bool:
+        """在主线程中显示确认对话框。"""
+        reply = QMessageBox.question(
+            self, title, message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
     def _build_window(self):
         w = cfg.get(cfg.windowWidth)

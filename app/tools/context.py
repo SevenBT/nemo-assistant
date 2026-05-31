@@ -39,13 +39,14 @@ class ToolContext:
 
     字段说明：
       config:          AppConfig 实例，提供全局配置读取
-      workspace:       工作目录路径（预留，未来可用于文件操作工具的沙箱限制）
+      workspace:       工作目录路径，文件系统工具的安全边界
       note_mgr:        笔记管理器，供笔记相关工具使用
       scheduler:       定时任务管理器，供 scheduler 工具使用
       ai_client:       AI 客户端，供多模型咨询等工具使用
       events:          工具事件回调集合（如笔记创建后触发 UI 刷新）
       http_timeout:    HTTP 请求超时秒数，供网络工具使用
       proxy:           HTTP 代理地址（预留）
+      confirm_action:  危险操作确认回调，(title, message) -> bool
       extra:           扩展字典，用于传递非标准依赖
     """
     config: Any  # AppConfig 实例（避免循环导入，用 Any）
@@ -59,5 +60,6 @@ class ToolContext:
 
     http_timeout: int = 20
     proxy: str | None = None
+    confirm_action: Callable[[str, str], bool] | None = None
 
     extra: dict[str, Any] = field(default_factory=dict)

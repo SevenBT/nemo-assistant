@@ -6,6 +6,7 @@
   - HTML 页面使用 BeautifulSoup 提取正文（去除导航、脚本等噪音）
   - 优先从 <main>、<article>、#content 等语义标签提取
   - 超长内容自动截断（默认 20000 字符）
+  - SSRF 防护：阻止访问内网和本机地址
 
 依赖：
   - httpx: HTTP 客户端
@@ -13,7 +14,10 @@
 """
 from __future__ import annotations
 
+import ipaddress
+import socket
 from typing import Any, TYPE_CHECKING
+from urllib.parse import urlparse
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Str, tool_params
@@ -23,6 +27,55 @@ if TYPE_CHECKING:
 
 # 正文最大字符数，防止超长页面撑爆 LLM 上下文
 _MAX_CONTENT = 20_000
+
+# SSRF 防护：禁止访问的内网网段
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _check_url_safety(url: str) -> tuple[bool, str]:
+    """
+    检查 URL 是否安全（非内网地址）。
+
+    Returns:
+        (is_safe, error_message) — 安全时 error_message 为空
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False, f"不支持的协议: {parsed.scheme}"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "无效的 URL"
+
+    # 直接拦截 localhost 别名
+    if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        return False, "禁止访问本机地址"
+
+    try:
+        infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False, f"无法解析域名: {hostname}"
+
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        for network in _BLOCKED_NETWORKS:
+            if ip in network:
+                return False, f"禁止访问内网地址: {hostname} ({ip})"
+
+    return True, ""
 
 
 class FetchUrlTool(BuiltinTool):
@@ -66,6 +119,11 @@ class FetchUrlTool(BuiltinTool):
         # 自动补全协议前缀
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
+
+        # SSRF 防护：检查目标地址是否安全
+        safe, reason = _check_url_safety(url)
+        if not safe:
+            return {"status": "error", "data": {"message": reason, "url": url}}
 
         # 模拟浏览器请求头，避免被反爬拦截
         headers = {
