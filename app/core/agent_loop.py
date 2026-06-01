@@ -325,6 +325,10 @@ class AgentLoop(QThread):
         tool_name = tc["name"]
         ai_args = tc["arguments"]
 
+        # 注入 session_id 供 memory 等工具使用（不在 schema 中，LLM 不可见）
+        if self._session_id:
+            ai_args["_session_id"] = self._session_id
+
         # 执行
         self.tool_event.emit(call_id, "start", {"name": tool_name, "params": ai_args})
         result = self._registry.execute(tool_name, ai_args)
@@ -336,6 +340,9 @@ class AgentLoop(QThread):
         results: list[tuple[dict, dict] | None] = [None] * len(batch)
 
         for tc in batch:
+            # 注入 session_id 供 memory 等工具使用
+            if self._session_id:
+                tc["arguments"]["_session_id"] = self._session_id
             self.tool_event.emit(tc["id"], "start", {"name": tc["name"], "params": tc["arguments"]})
 
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:

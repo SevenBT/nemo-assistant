@@ -111,6 +111,7 @@ class MainWindow(FluentWindow):
         self._build_window()
         self._build_ui()
         self._init_tools()
+        self._init_memory()
         self._scheduler.set_tool_manager(self._registry)
         self._note_created_signal.connect(self._notes_panel.refresh)
         self._setup_tray()
@@ -136,6 +137,10 @@ class MainWindow(FluentWindow):
         ws_str = cfg.get(cfg.toolWorkspace)
         workspace = Path(ws_str) if ws_str else Path.home() / "Documents"
 
+        # 记忆管理器（与 NoteManager 共用同一个 DatabaseManager）
+        from app.core.memory_manager import MemoryManager
+        self._memory_mgr = MemoryManager(self._notes.db)
+
         ctx = ToolContext(
             config=cfg,
             workspace=workspace,
@@ -146,9 +151,35 @@ class MainWindow(FluentWindow):
                 note_created=self._note_created_signal.emit,
             ),
             confirm_action=self._confirm_action,
+            extra={"memory_mgr": self._memory_mgr},
         )
         load_builtin_tools(ctx, self._registry)
         load_user_script_tools(USER_TOOLS_DIR, self._registry)
+
+    def _init_memory(self):
+        """初始化记忆系统：Consolidator + Dream 定时器。"""
+        from app.core.consolidator import Consolidator
+        from app.core.dream import Dream
+
+        self._consolidator = Consolidator(
+            ai_client=self._ai,
+            memory_mgr=self._memory_mgr,
+        )
+        self._dream = Dream(
+            ai_client=self._ai,
+            memory_mgr=self._memory_mgr,
+        )
+
+        # Dream 定时器：每小时执行一次
+        from PyQt6.QtCore import QTimer
+        self._dream_timer = QTimer(self)
+        self._dream_timer.timeout.connect(self._run_dream)
+        self._dream_timer.start(3600_000)
+
+    def _run_dream(self):
+        """在后台线程执行 Dream，避免阻塞 UI。"""
+        import threading
+        threading.Thread(target=self._dream.run, daemon=True).start()
 
     def _confirm_action(self, title: str, message: str) -> bool:
         """
@@ -548,6 +579,17 @@ class MainWindow(FluentWindow):
         self._session_live[sid] = {"ai_msg": ai_msg, "ai_text": "", "first_chunk_sent": False}
 
         session = self._sessions.get(sid)
+
+        # Consolidator: 压缩超长对话
+        if hasattr(self, "_consolidator"):
+            # messages[:-1] 排除刚加的占位 AI 消息
+            original_msgs = session.messages[:-1]
+            compressed = self._consolidator.maybe_consolidate(original_msgs, sid)
+            if len(compressed) < len(original_msgs):
+                # 消息被压缩了，更新 session
+                session.messages = compressed + [session.messages[-1]]
+                self._sessions.save_session(sid)
+
         api_msgs = self._build_api_messages(session.messages[:-1])  # exclude placeholder
 
         worker = AgentLoop(
@@ -583,6 +625,14 @@ class MainWindow(FluentWindow):
 
         # 优先级 4: 追加当前时间信息和内置工具说明
         full_system_prompt = user_prompt + "\n" + get_current_datetime_info() + "\n" + BUILTIN_TOOLS_INSTRUCTION
+
+        # 注入长期记忆
+        if self._current_session_id and hasattr(self, "_memory_mgr"):
+            memory_context = self._memory_mgr.build_memory_context(
+                self._current_session_id
+            )
+            if memory_context:
+                full_system_prompt += "\n\n" + memory_context
 
         result = [{"role": "system", "content": full_system_prompt}]
 

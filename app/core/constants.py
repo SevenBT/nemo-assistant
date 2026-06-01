@@ -40,4 +40,11 @@ BUILTIN_TOOLS_INSTRUCTION = """
 - 使用 read_notes 查看用户的笔记列表和内容预览。
 - 使用 create_note 为用户保存一条新笔记（title + content）。
 - 使用 summarize_session_as_note 将当前对话总结后保存为笔记。
+
+【记忆】
+- 当用户要求你记住某些信息时，使用 save_memory 工具保存。
+- 当用户询问你记住了什么时，使用 recall_memory 工具查看。
+- 当用户要求你忘记某条信息时，使用 forget_memory 工具删除。
+- 分类：user（用户偏好）、project（项目决策）、fact（具体事实）、personality（AI行为风格）。
+- 范围：global（所有会话可见）、session（仅当前会话可见）。
 """
