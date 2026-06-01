@@ -609,6 +609,8 @@ class MainWindow(FluentWindow):
         2. 全局配置 config.system_prompt
         3. 默认值 DEFAULT_USER_PROMPT
         4. 追加 BUILTIN_TOOLS_INSTRUCTION
+        5. 追加长期记忆
+        6. 追加当前时间信息（动态内容放末尾，提升 prompt cache 命中）
         """
         session = self._sessions.get(self._current_session_id)
         user_prompt = ""
@@ -623,8 +625,8 @@ class MainWindow(FluentWindow):
         if not user_prompt:
             user_prompt = DEFAULT_USER_PROMPT
 
-        # 优先级 4: 追加当前时间信息和内置工具说明
-        full_system_prompt = user_prompt + "\n" + get_current_datetime_info() + "\n" + BUILTIN_TOOLS_INSTRUCTION
+        # 稳定内容放在前面，动态时间信息放在最后，提升 prompt cache 命中率。
+        full_system_prompt = user_prompt + "\n" + BUILTIN_TOOLS_INSTRUCTION
 
         # 注入长期记忆
         if self._current_session_id and hasattr(self, "_memory_mgr"):
@@ -633,6 +635,8 @@ class MainWindow(FluentWindow):
             )
             if memory_context:
                 full_system_prompt += "\n\n" + memory_context
+
+        full_system_prompt += "\n\n" + get_current_datetime_info()
 
         result = [{"role": "system", "content": full_system_prompt}]
 

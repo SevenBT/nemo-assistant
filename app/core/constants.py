@@ -14,7 +14,8 @@ def get_current_datetime_info() -> str:
     tz = now.astimezone().tzname()
     return f"""
 【当前时间信息】
-日期时间: {now.strftime("%Y-%m-%d %H:%M:%S")}
+日期: {now.strftime("%Y-%m-%d")}
+时间: {now.strftime("%H:%M")}
 星期: {weekday}
 时区: {tz}
 """
