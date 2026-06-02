@@ -11,7 +11,6 @@ Layout:
   │  page 2: ToolboxPanel                                        │
   └──────────────────────────────────────────────────────────────┘
 """
-import json
 import threading
 from pathlib import Path
 
@@ -28,18 +27,17 @@ from PyQt6.QtWidgets import (
 
 from app.core.ai_client import AIClient
 from app.core.config import cfg, USER_TOOLS_DIR
+from app.core.conversation_prompt_builder import ConversationPromptBuilder
 from app.core.note_manager import NoteManager
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
 from app.tools.context import ToolContext, ToolEvents
 from app.tools.loader import load_builtin_tools, load_user_script_tools
 from app.tools.registry import ToolRegistry
-from app.models.message import Message, MessageRole, ToolCall
-from app.ui.chat_widget import ChatWidget, MessageBubble
-from app.core.agent_loop import AgentLoop
+from app.ui.chat_session_controller import ChatSessionController
+from app.ui.chat_widget import ChatWidget
 from app.ui.edge_snap import EdgeSnapManager
 from app.ui.input_widget import InputWidget
-from app.ui.manual_params_dialog import ManualParamsDialog
 from app.ui.notes_dialog import NotesPanel
 from app.core.hotkey_manager import HotkeyManager
 from app.ui.resize_filter import ResizeFilter
@@ -52,7 +50,6 @@ from app.ui.style import THEMES, apply_theme
 from app.ui.title_bar import TitleBar
 from app.ui.toast import show_toast
 from app.ui.tray_manager import TrayManager
-from app.core.constants import DEFAULT_USER_PROMPT, BUILTIN_TOOLS_INSTRUCTION, get_current_datetime_info
 from qfluentwidgets import FluentWindow, FluentIcon
 
 
@@ -96,13 +93,6 @@ class MainWindow(FluentWindow):
         self._notes = note_mgr
         self._registry = ToolRegistry()
         self._ai = AIClient()
-        self._current_session_id: str | None = None
-        self._workers: dict[str, AgentLoop] = {}
-        self._session_live: dict[str, dict] = {}  # sid -> {ai_msg, ai_text}
-        self._current_ai_bubble: MessageBubble | None = None
-        self._current_ai_msg: Message | None = None
-        self._current_ai_text = ""
-        self._pending_attachments: list = []  # 暂存拖放的附件
         self._snap_mgr: EdgeSnapManager | None = None
 
         self._build_window()
@@ -116,6 +106,23 @@ class MainWindow(FluentWindow):
         self._sticky_note_controller.note_updated.connect(self._on_note_updated)
         self._init_tools()
         self._init_memory()
+        self._prompt_builder = ConversationPromptBuilder(
+            ai_client=self._ai,
+            session_mgr=self._sessions,
+            memory_mgr=self._memory_mgr,
+        )
+        self._chat_session_controller = ChatSessionController(
+            parent=self,
+            session_mgr=self._sessions,
+            ai_client=self._ai,
+            registry=self._registry,
+            prompt_builder=self._prompt_builder,
+            chat=self._chat,
+            input_widget=self._input,
+            session_panel=self._session_panel,
+            tool_status=self._tool_status,
+            consolidator=self._consolidator,
+        )
         self._scheduler.set_tool_manager(self._registry)
         self._note_created_signal.connect(self._notes_panel.refresh)
         self._setup_tray()
@@ -379,367 +386,43 @@ class MainWindow(FluentWindow):
 
     # ──────────────────────────────────────────── 会话管理
     def _init_sessions(self):
-        sessions = self._sessions.get_sessions()
-        if not sessions:
-            s = self._sessions.create()
-            sessions = [s]
-        self._session_panel.load(sessions, sessions[0].id)
-        self._switch_session(sessions[0].id)
+        self._chat_session_controller.init_sessions()
 
     def _new_session(self):
-        """新建会话，直接创建默认无角色会话"""
-        s = self._sessions.create()
-        sessions = self._sessions.get_sessions()
-        self._session_panel.load(sessions, s.id)
-        self._switch_session(s.id)
+        self._chat_session_controller.new_session()
 
     def _delete_session(self, sid: str):
-        self._sessions.delete(sid)
-        sessions = self._sessions.get_sessions()
-        if not sessions:
-            s = self._sessions.create()
-            sessions = [s]
-        self._session_panel.load(sessions, sessions[0].id)
-        self._switch_session(sessions[0].id)
+        self._chat_session_controller.delete_session(sid)
 
     def _rename_session(self, sid: str, title: str):
-        self._sessions.rename(sid, title)
-        self._session_panel.update_title(sid, title)
+        self._chat_session_controller.rename_session(sid, title)
 
     def _on_session_settings(self, sid: str):
-        """打开会话设置对话框"""
-        from app.ui.session_settings_dialog import SessionSettingsDialog
-
-        session = self._sessions.get(sid)
-        if not session:
-            return
-
-        dialog = SessionSettingsDialog(session, self)
-        if dialog.exec():
-            # 保存会话设置
-            self._sessions.update_system_prompt(sid, session.system_prompt)
-            # 刷新会话列表
-            sessions = self._sessions.get_sessions()
-            self._session_panel.load(sessions, sid)
+        self._chat_session_controller.open_session_settings(sid)
 
     def _on_session_pin(self, sid: str, pinned: bool):
-        """置顶/取消置顶会话。"""
-        self._sessions.pin_session(sid, pinned)
-        sessions = self._sessions.get_sessions()
-        self._session_panel.load(sessions, sid)
+        self._chat_session_controller.pin_session(sid, pinned)
 
     def _on_session_reorder(self, ordered_ids: list):
-        """拖拽排序后更新置顶会话顺序。"""
-        self._sessions.reorder_sessions(ordered_ids)
+        self._chat_session_controller.reorder_sessions(ordered_ids)
 
     def _on_session_select(self, sid: str):
-        if sid != self._current_session_id:
-            self._switch_session(sid)
+        self._chat_session_controller.select_session(sid)
 
     def _cancel_worker(self, sid: str | None = None):
-        """停止并丢弃指定会话的 worker（默认为当前会话）。"""
-        if sid is None:
-            sid = self._current_session_id
-        if not sid:
-            return
-        worker = self._workers.pop(sid, None)
-        self._session_live.pop(sid, None)
-        if worker is None:
-            return
-        worker.cancel()
-        try:
-            worker.disconnect()
-        except RuntimeError:
-            pass
+        self._chat_session_controller.cancel_worker(sid)
 
     def _switch_session(self, sid: str):
-        # 不停止正在运行的 worker — 让它在后台继续执行。
-        self._current_ai_bubble = None
-        self._current_ai_msg = None
-        self._current_ai_text = ""
-        self._current_session_id = sid
-        self._tool_status.hide()
-        self._chat.stop_typing()
-
-        session = self._sessions.get(sid)
-        if session:
-            self._chat.load_session(session.messages)
-
-        live = self._session_live.get(sid)
-        if live:
-            self._current_ai_msg = live["ai_msg"]
-            self._current_ai_text = live["ai_text"]
-            last = self._chat.last_bubble()
-            if last and not last.is_user:
-                self._current_ai_bubble = last
-            else:
-                self._current_ai_bubble = None
-            self._input.set_enabled(False)
-            if not live.get("first_chunk_sent"):
-                self._chat.start_typing()
-        else:
-            self._input.set_enabled(True)
-
-        self._input.focus()
+        self._chat_session_controller.switch_session(sid)
 
     @pyqtSlot(list)
     def _on_files_attached(self, attachments: list):
-        """处理拖放到聊天区域的文件。"""
-        self._pending_attachments.extend(attachments)
-        # TODO: 在输入区域显示附件可视化反馈
+        self._chat_session_controller.on_files_attached(attachments)
 
     # ──────────────────────────────────────────── 聊天
     @pyqtSlot(str)
     def _on_submit(self, text: str):
-        sid = self._current_session_id
-        if not sid:
-            return
-        if sid in self._workers:
-            return  # 该会话已有任务运行中
-
-        # 创建带附件的用户消息
-        user_msg = Message(
-            role=MessageRole.USER,
-            content=text,
-            attachments=self._pending_attachments.copy()
-        )
-        self._pending_attachments.clear()  # 使用后清空
-
-        self._sessions.add_message(sid, user_msg)
-        self._chat.add_message(user_msg)
-        self._session_panel.update_title(sid, self._sessions.get(sid).title)
-
-        ai_msg = Message(role=MessageRole.ASSISTANT, content="")
-        self._sessions.add_message(sid, ai_msg)
-        self._current_ai_msg = ai_msg
-        self._current_ai_bubble = None
-        self._current_ai_text = ""
-        self._input.set_enabled(False)
-        self._tool_status.hide()
-        self._chat.start_typing()
-
-        self._session_live[sid] = {"ai_msg": ai_msg, "ai_text": "", "first_chunk_sent": False}
-
-        session = self._sessions.get(sid)
-
-        # Consolidator: 压缩超长对话
-        if hasattr(self, "_consolidator"):
-            # messages[:-1] 排除刚加的占位 AI 消息
-            original_msgs = session.messages[:-1]
-            compressed = self._consolidator.maybe_consolidate(original_msgs, sid)
-            if len(compressed) < len(original_msgs):
-                # 消息被压缩了，更新 session
-                session.messages = compressed + [session.messages[-1]]
-                self._sessions.save_session(sid)
-
-        api_msgs = self._build_api_messages(session.messages[:-1])  # exclude placeholder
-
-        worker = AgentLoop(
-            ai_client=self._ai,
-            registry=self._registry,
-            api_messages=api_msgs,
-            session_id=sid,
-        )
-        self._workers[sid] = worker
-        self._connect_worker(sid, worker)
-        worker.start()
-
-    def _build_api_messages(self, messages: list[Message]) -> list[dict]:
-        """
-        构建 API 消息列表，System Prompt 优先级：
-        1. 会话级 system_prompt（最高优先级）
-        2. 全局配置 config.system_prompt
-        3. 默认值 DEFAULT_USER_PROMPT
-        4. 追加 BUILTIN_TOOLS_INSTRUCTION
-        5. 追加长期记忆
-        6. 追加当前时间信息（动态内容放末尾，提升 prompt cache 命中）
-        """
-        session = self._sessions.get(self._current_session_id)
-        user_prompt = ""
-
-        # 优先级 1: 会话级 system_prompt（非空且非纯空白）
-        if session and session.system_prompt and session.system_prompt.strip():
-            user_prompt = session.system_prompt.strip()
-        # 优先级 2: 全局配置 config.system_prompt
-        if not user_prompt:
-            user_prompt = cfg.get(cfg.systemPrompt).strip()
-        # 优先级 3: 默认值
-        if not user_prompt:
-            user_prompt = DEFAULT_USER_PROMPT
-
-        # 稳定内容放在前面，动态时间信息放在最后，提升 prompt cache 命中率。
-        full_system_prompt = user_prompt + "\n" + BUILTIN_TOOLS_INSTRUCTION
-
-        # 注入长期记忆
-        if self._current_session_id and hasattr(self, "_memory_mgr"):
-            memory_context = self._memory_mgr.build_memory_context(
-                self._current_session_id
-            )
-            if memory_context:
-                full_system_prompt += "\n\n" + memory_context
-
-        full_system_prompt += "\n\n" + get_current_datetime_info()
-
-        result = [{"role": "system", "content": full_system_prompt}]
-
-        # 使用 AIClient.merge_attachments_to_content 处理附件
-        merged_messages = self._ai.merge_attachments_to_content(messages)
-
-        for i, m in enumerate(messages):
-            result.append(merged_messages[i])
-            # 每条带 tool_calls 的 assistant 消息后必须紧跟对应的 tool result，
-            # 否则 API 会返回 400 错误。
-            if m.role == MessageRole.ASSISTANT and m.tool_calls:
-                all_done = all(tc.result is not None for tc in m.tool_calls)
-                if all_done:
-                    for tc in m.tool_calls:
-                        result.append({
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": json.dumps(tc.result, ensure_ascii=False),
-                        })
-                else:
-                    result.pop()
-        return result
-
-    # ── Worker 信号连接 ───────────────────────────────────────────────────
-    def _connect_worker(self, sid: str, worker: AgentLoop):
-        worker.text_chunk.connect(lambda d, s=sid: self._on_bg_text_chunk(s, d))
-        worker.tool_event.connect(lambda cid, phase, payload, s=sid: self._on_bg_tool_event(s, cid, phase, payload))
-        worker.need_input.connect(lambda cid, tn, ps, s=sid: self._on_bg_need_input(s, cid, tn, ps))
-        worker.new_turn.connect(lambda tc, s=sid: self._on_bg_new_turn(s, tc))
-        worker.done.connect(lambda info, s=sid: self._on_bg_done(s, info))
-
-    # ── 会话感知的信号处理 ───────────────────────────────────────────────
-    def _on_bg_text_chunk(self, sid: str, delta: str):
-        live = self._session_live.get(sid)
-        if live is None:
-            return
-        live["ai_text"] += delta
-        if live["ai_msg"]:
-            live["ai_msg"].content = live["ai_text"]
-        if sid != self._current_session_id:
-            return
-        if not live.get("first_chunk_sent"):
-            self._chat.stop_typing()
-            live["first_chunk_sent"] = True
-        self._current_ai_text = live["ai_text"]
-        if self._current_ai_bubble is None and self._current_ai_msg:
-            self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
-        try:
-            if self._current_ai_bubble:
-                self._current_ai_bubble.set_content(self._current_ai_text)
-        except RuntimeError:
-            self._current_ai_bubble = None
-        self._chat.scroll_bottom()
-
-    def _on_bg_tool_event(self, sid: str, call_id: str, phase: str, payload: dict):
-        """统一处理工具事件（start / done / error）。"""
-        session = self._sessions.get(sid)
-        if phase == "start":
-            tool_name = payload["name"]
-            params = payload["params"]
-            if session and session.messages:
-                tc = ToolCall(id=call_id, name=tool_name, arguments=params, status="running")
-                session.messages[-1].tool_calls.append(tc)
-            if sid != self._current_session_id:
-                return
-            self._chat.stop_typing()
-            if self._current_ai_bubble is None and self._current_ai_msg:
-                self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
-            if self._current_ai_bubble:
-                self._current_ai_bubble.clear_text()
-                self._current_ai_bubble.add_tool_card(call_id, tool_name, params)
-            self._chat.scroll_bottom()
-        elif phase == "done":
-            result = payload["result"]
-            if session:
-                for msg in reversed(session.messages):
-                    for tc in msg.tool_calls:
-                        if tc.id == call_id:
-                            tc.result = result
-                            tc.status = result.get("status", "success")
-                            break
-            if sid != self._current_session_id:
-                return
-            if self._current_ai_bubble:
-                self._current_ai_bubble.update_tool_card(call_id, result)
-
-    def _on_bg_need_input(self, sid: str, call_id: str, tool_name: str, param_names: list):
-        worker = self._workers.get(sid)
-        if worker is None:
-            return
-        if sid == self._current_session_id:
-            dlg = ManualParamsDialog(tool_name, param_names, self)
-            params = dlg.get_values() if dlg.exec() else {}
-        else:
-            params = {}
-        worker.supply_input(params)
-
-    def _on_bg_new_turn(self, sid: str, turn_count: int):
-        ai_msg = Message(role=MessageRole.ASSISTANT, content="")
-        self._sessions.add_message(sid, ai_msg)
-        live = self._session_live.get(sid)
-        if live:
-            live["ai_msg"] = ai_msg
-            live["ai_text"] = ""
-            live["first_chunk_sent"] = False
-        if sid != self._current_session_id:
-            return
-        self._current_ai_msg = ai_msg
-        self._current_ai_text = ""
-        if self._current_ai_bubble:
-            self._current_ai_bubble.clear_text()
-        self._chat.start_typing()
-
-    def _on_bg_done(self, sid: str, info: dict):
-        """统一处理完成和错误。"""
-        live = self._session_live.get(sid)
-        ok = info.get("ok", True)
-        error_msg = info.get("error")
-
-        if ok:
-            # 正常完成
-            if live and live["ai_msg"] and not live["ai_msg"].content:
-                live["ai_msg"].content = live["ai_text"]
-                if live["ai_text"] and sid == self._current_session_id and self._current_ai_bubble is None:
-                    self._current_ai_bubble = self._chat.add_message(live["ai_msg"])
-            session = self._sessions.get(sid)
-            if session:
-                session.messages = [
-                    m for m in session.messages
-                    if not (m.role == "assistant" and not m.content and not m.tool_calls)
-                ]
-        else:
-            # 错误
-            hint = ""
-            if error_msg and "404" in error_msg:
-                hint = f"\n\n提示：请在设置中检查 API 地址（当前: {cfg.get(cfg.apiBaseUrl)}）和模型名称（当前: {cfg.get(cfg.model)}）"
-            elif error_msg and ("401" in error_msg or "Unauthorized" in error_msg):
-                hint = "\n\n提示：API Key 无效，请在设置中重新填写"
-            error_text = f"❌ 请求失败：{error_msg}{hint}"
-            if live and live["ai_msg"]:
-                live["ai_msg"].content = error_text
-            if sid == self._current_session_id:
-                if self._current_ai_bubble is None and self._current_ai_msg:
-                    self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
-                if self._current_ai_bubble:
-                    try:
-                        self._current_ai_bubble.set_content(error_text)
-                    except RuntimeError:
-                        pass
-
-        self._sessions.save_session(sid)
-        self._workers.pop(sid, None)
-        self._session_live.pop(sid, None)
-        if sid != self._current_session_id:
-            return
-        self._chat.stop_typing()
-        self._tool_status.hide()
-        self._input.set_enabled(True)
-        self._input.focus()
-        self._current_ai_msg = None
-        self._current_ai_bubble = None
+        self._chat_session_controller.submit(text)
 
     # ──────────────────────────────────────────── 调度器回调
     def _on_scheduler_result(self, job_id: str, job_name: str, result: dict):
@@ -900,8 +583,7 @@ class MainWindow(FluentWindow):
     def cleanup(self):
         """停止所有后台 worker，在应用退出前调用。"""
         self._hotkey_mgr.stop()
-        for sid in list(self._workers):
-            self._cancel_worker(sid)
+        self._chat_session_controller.cleanup()
 
     def _on_quit(self):
         # 仅当窗口可见时保存布局（否则 closeEvent 已保存）
