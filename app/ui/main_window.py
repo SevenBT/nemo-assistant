@@ -15,11 +15,9 @@ import json
 import threading
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QApplication,
-    QFileDialog,
     QFrame,
     QLabel,
     QMessageBox,
@@ -43,14 +41,14 @@ from app.ui.edge_snap import EdgeSnapManager
 from app.ui.input_widget import InputWidget
 from app.ui.manual_params_dialog import ManualParamsDialog
 from app.ui.notes_dialog import NotesPanel
-from app.ui.pin_window import PinWindow
 from app.core.hotkey_manager import HotkeyManager
 from app.ui.resize_filter import ResizeFilter
+from app.ui.screenshot_controller import ScreenshotController
 from app.ui.toolbox_panel import ToolboxPanel
-from app.ui.screenshot_overlay import ScreenshotOverlay
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_window import SettingsWindow
-from app.ui.style import THEMES, apply_theme, set_dark_titlebar
+from app.ui.sticky_note_controller import StickyNoteController
+from app.ui.style import THEMES, apply_theme
 from app.ui.title_bar import TitleBar
 from app.ui.toast import show_toast
 from app.ui.tray_manager import TrayManager
@@ -106,10 +104,16 @@ class MainWindow(FluentWindow):
         self._current_ai_text = ""
         self._pending_attachments: list = []  # 暂存拖放的附件
         self._snap_mgr: EdgeSnapManager | None = None
-        self._sticky_windows: list = []
 
         self._build_window()
         self._build_ui()
+        self._screenshot_controller = ScreenshotController(self)
+        self._sticky_note_controller = StickyNoteController(
+            note_mgr=self._notes,
+            notes_panel=self._notes_panel,
+            parent=self,
+        )
+        self._sticky_note_controller.note_updated.connect(self._on_note_updated)
         self._init_tools()
         self._init_memory()
         self._scheduler.set_tool_manager(self._registry)
@@ -171,7 +175,6 @@ class MainWindow(FluentWindow):
         )
 
         # Dream 定时器：每小时执行一次
-        from PyQt6.QtCore import QTimer
         self._dream_timer = QTimer(self)
         self._dream_timer.timeout.connect(self._run_dream)
         self._dream_timer.start(3600_000)
@@ -341,29 +344,7 @@ class MainWindow(FluentWindow):
         self._hotkey_mgr.start()
 
     def _new_note_via_hotkey(self):
-        from app.ui.sticky_note_window import StickyNoteWindow
-        note = self._notes.create()
-        # 获取屏幕中心位置
-        sg = QApplication.primaryScreen().availableGeometry()
-        x = (sg.width() - 240) // 2 + sg.x()
-        y = (sg.height() - 200) // 2 + sg.y()
-        # 将笔记固定到桌面中心位置
-        self._notes.pin_note(note.id, x, y)
-        win = StickyNoteWindow(
-            note_id=note.id,
-            title=note.title,
-            content=note.content,
-            note_mgr=self._notes,
-        )
-        win.move(x, y)
-        win.show()
-        self._sticky_windows.append(win)
-        win.closed.connect(
-            lambda w=win: self._on_sticky_closed(w)
-        )
-        # 连接内容变更信号
-        win.content_changed.connect(self._on_note_updated)
-        win.delete_requested.connect(lambda _: self._notes_panel.refresh())
+        self._sticky_note_controller.create_from_hotkey()
 
     def _toggle_window_visibility(self):
         if self.isVisible() and not self.isMinimized():
@@ -386,50 +367,11 @@ class MainWindow(FluentWindow):
         self._input.focus()
 
     def _restore_pinned_notes(self):
-        """启动时恢复所有固定笔记浮窗。"""
-        from app.ui.sticky_note_window import StickyNoteWindow
-        pinned = self._notes.get_pinned_notes()
-        for note in pinned:
-            try:
-                win = StickyNoteWindow(
-                    note_id=note.id,
-                    title=note.title,
-                    content=note.content,
-                    note_mgr=self._notes,
-                )
-                # 恢复位置并进行边界检查
-                x = note.pin_position_x or 100
-                y = note.pin_position_y or 100
-                sg = QApplication.primaryScreen().availableGeometry()
-                x = max(sg.x(), min(x, sg.x() + sg.width() - 180))
-                y = max(sg.y(), min(y, sg.y() + sg.height() - 120))
-                win.move(x, y)
-                win.show()
-                self._sticky_windows.append(win)
-                win.closed.connect(lambda w=win: self._on_sticky_closed(w))
-                # 连接内容变更信号
-                win.content_changed.connect(self._on_note_updated)
-                win.delete_requested.connect(lambda _: self._notes_panel.refresh())
-            except Exception as e:
-                print(f"Failed to restore pinned note {note.id}: {e}")
-
-    def _on_sticky_closed(self, win):
-        """浮窗关闭时取消固定并从列表移除。"""
-        if win in self._sticky_windows:
-            self._sticky_windows.remove(win)
-        # 取消笔记固定
-        if hasattr(win, '_note_id') and win._note_id:
-            try:
-                self._notes.unpin_note(win._note_id)
-            except Exception as e:
-                print(f"Failed to unpin note: {e}")
+        self._sticky_note_controller.restore_pinned()
 
     def _on_note_updated(self, note_id: int, title: str, content: str):
         """笔记内容更新时，通知所有相关浮窗和面板。"""
-        # 更新所有对应 note_id 的浮窗
-        for win in self._sticky_windows:
-            if hasattr(win, '_note_id') and win._note_id == note_id:
-                win.update_content(title, content)
+        self._sticky_note_controller.sync_note_update(note_id, title, content)
         # 如果笔记在其他地方被编辑，更新笔记面板
         self._notes_panel.refresh_note(note_id)
         # 广播到主信号
@@ -887,47 +829,7 @@ class MainWindow(FluentWindow):
 
     # ──────────────────────────────────────────── 截图
     def _start_screenshot(self):
-        if hasattr(self, '_overlay') and self._overlay is not None:
-            return
-        self.hide()
-        QTimer.singleShot(200, self._do_screenshot)
-
-    def _do_screenshot(self):
-        self._overlay = ScreenshotOverlay()
-        self._overlay.captured.connect(self._on_screenshot_done)
-        self._overlay.show()
-        self._overlay.activateWindow()
-
-    def _on_screenshot_done(self, pixmap: QPixmap, action: str, ocr_text: str, pos: QPoint):
-        self._overlay = None
-        self.show()
-        self.raise_()
-        self.activateWindow()
-
-        if action == "cancel":
-            return
-        if action == "ocr":
-            if ocr_text:
-                QApplication.clipboard().setText(ocr_text)
-            return
-        if pixmap.isNull():
-            return
-
-        if action == "pin":
-            pw = PinWindow(pixmap, pos=pos)
-            pw.show()
-            if not hasattr(self, '_pin_windows'):
-                self._pin_windows = []
-            self._pin_windows.append(pw)
-            pw.closed.connect(lambda w=pw: self._pin_windows.remove(w) if w in self._pin_windows else None)
-        elif action == "copy":
-            QApplication.clipboard().setPixmap(pixmap)
-        elif action == "save":
-            path, _ = QFileDialog.getSaveFileName(
-                self, "保存截图", "screenshot.png", "PNG (*.png)"
-            )
-            if path:
-                pixmap.save(path, "PNG")
+        self._screenshot_controller.start()
 
     def _show_window(self):
         if self._snap_mgr is not None and self._snap_mgr.is_snapped:

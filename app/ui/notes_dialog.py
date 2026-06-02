@@ -317,7 +317,7 @@ class NotesPanel(QWidget):
         self._editor_widget.setMinimumWidth(300)
         self._editor_widget.installEventFilter(self)
         right_layout = QVBoxLayout(self._editor_widget)
-        right_layout.setContentsMargins(16, 12, 0, 12)
+        right_layout.setContentsMargins(16, 12, 16, 12)
         right_layout.setSpacing(6)
 
         self._title_edit = LineEdit()
@@ -782,10 +782,9 @@ class NotesPanel(QWidget):
             self._load()
 
     def _update_editor_margins(self, width: int):
-        """Keep editor content centered with equal side margins when wider than max width.
-        Right margin stays 0 so the scrollbar sits at the panel's right edge."""
+        """Keep editor content centered with equal side margins when wider than max width."""
         side = max(16, (width - self._MAX_EDITOR_WIDTH) // 2)
-        self._editor_widget.layout().setContentsMargins(side, 12, 0, 12)
+        self._editor_widget.layout().setContentsMargins(side, 12, side, 12)
 
     # ------------------------------------------------------------------ save
     def eventFilter(self, obj, event):
