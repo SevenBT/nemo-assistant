@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from app.core.ai_client import AIClient
+from app.core.llm_gateway import LLMGateway
 from app.core.checkpoint import clear_checkpoint, save_checkpoint
 from app.tools.registry import ToolErrorType, ToolRegistry
 from app.core.turn_context import (
@@ -57,7 +57,7 @@ class AgentLoop(QThread):
 
     def __init__(
         self,
-        ai_client: AIClient,
+        llm_gateway: LLMGateway,
         registry: ToolRegistry,
         api_messages: list[dict],
         session_id: str = "",
@@ -65,7 +65,7 @@ class AgentLoop(QThread):
         parent=None,
     ):
         super().__init__(parent)
-        self._ai = ai_client
+        self._llm = llm_gateway
         self._registry = registry
         self._messages = api_messages
         self._session_id = session_id
@@ -146,7 +146,7 @@ class AgentLoop(QThread):
     def _state_stream(self, ctx: TurnContext) -> str:
         ctx.reset_turn()
 
-        for chunk in self._ai.chat_stream(ctx.messages, ctx.tools):
+        for chunk in self._llm.chat_stream(ctx.messages, ctx.tools):
             if self._cancelled:
                 return "error"
 

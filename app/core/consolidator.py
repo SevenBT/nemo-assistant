@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from app.models.memory import MemoryCategory, MemoryScope
 
 if TYPE_CHECKING:
-    from app.core.ai_client import AIClient
+    from app.core.llm_gateway import LLMGateway
     from app.core.memory_manager import MemoryManager
     from app.models.message import Message
 
@@ -58,12 +58,12 @@ class Consolidator:
 
     def __init__(
         self,
-        ai_client: "AIClient",
+        llm_gateway: "LLMGateway",
         memory_mgr: "MemoryManager",
         max_context_tokens: int = 60000,
         consolidation_ratio: float = 0.5,
     ):
-        self._ai = ai_client
+        self._llm = llm_gateway
         self._mem = memory_mgr
         self._max_tokens = max_context_tokens
         self._ratio = consolidation_ratio  # 压缩后目标占比
@@ -144,7 +144,7 @@ class Consolidator:
 
         try:
             result_parts = []
-            for event in self._ai.chat_stream(
+            for event in self._llm.chat_stream(
                 [{"role": "user", "content": prompt}],
                 tools=None,
             ):

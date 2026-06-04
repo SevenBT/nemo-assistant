@@ -26,11 +26,6 @@ class FakeSessionManager:
         return self._session
 
 
-class FakeAIClient:
-    def merge_attachments_to_content(self, messages):
-        return [message.to_api_dict() for message in messages]
-
-
 class FakeMemoryManager:
     def build_memory_context(self, session_id):
         return f"memory for {session_id}"
@@ -40,7 +35,6 @@ class ConversationPromptBuilderTest(unittest.TestCase):
     def test_session_prompt_memory_and_tool_results_are_preserved(self):
         session = SimpleNamespace(system_prompt="Session prompt")
         builder = ConversationPromptBuilder(
-            ai_client=FakeAIClient(),
             session_mgr=FakeSessionManager(session),
             memory_mgr=FakeMemoryManager(),
             config=FakeConfig("Global prompt"),
@@ -72,7 +66,6 @@ class ConversationPromptBuilderTest(unittest.TestCase):
     def test_incomplete_assistant_tool_call_is_omitted(self):
         session = SimpleNamespace(system_prompt="")
         builder = ConversationPromptBuilder(
-            ai_client=FakeAIClient(),
             session_mgr=FakeSessionManager(session),
             config=FakeConfig("Global prompt"),
             datetime_info_provider=lambda: "time info",

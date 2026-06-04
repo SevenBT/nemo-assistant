@@ -17,7 +17,7 @@ class ChatSessionController(QObject):
         *,
         parent,
         session_mgr,
-        ai_client,
+        llm_gateway,
         registry,
         prompt_builder,
         chat,
@@ -29,7 +29,7 @@ class ChatSessionController(QObject):
         super().__init__(parent)
         self._parent = parent
         self._sessions = session_mgr
-        self._ai = ai_client
+        self._llm = llm_gateway
         self._registry = registry
         self._prompt_builder = prompt_builder
         self._chat = chat
@@ -191,7 +191,7 @@ class ChatSessionController(QObject):
         api_msgs = self._prompt_builder.build(session.messages[:-1], sid)
 
         worker = AgentLoop(
-            ai_client=self._ai,
+            llm_gateway=self._llm,
             registry=self._registry,
             api_messages=api_msgs,
             session_id=sid,

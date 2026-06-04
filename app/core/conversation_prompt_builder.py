@@ -18,13 +18,11 @@ class ConversationPromptBuilder:
 
     def __init__(
         self,
-        ai_client,
         session_mgr,
         memory_mgr=None,
         config=cfg,
         datetime_info_provider: Callable[[], str] = get_current_datetime_info,
     ):
-        self._ai = ai_client
         self._sessions = session_mgr
         self._memory_mgr = memory_mgr
         self._config = config
@@ -36,7 +34,7 @@ class ConversationPromptBuilder:
             {"role": "system", "content": system_prompt}
         ]
 
-        merged_messages = self._ai.merge_attachments_to_content(messages)
+        merged_messages = merge_attachments_to_content(messages)
         for index, message in enumerate(messages):
             result.append(merged_messages[index])
             if message.role == MessageRole.ASSISTANT and message.tool_calls:
@@ -82,3 +80,24 @@ class ConversationPromptBuilder:
             }
             for tool_call in message.tool_calls
         ]
+
+
+def merge_attachments_to_content(messages: list[Message]) -> list[dict]:
+    """调用模型前，把用户消息的附件解析内容合并进 content。"""
+    api_messages = []
+    for msg in messages:
+        api_dict = msg.to_api_dict()
+
+        if msg.role == MessageRole.USER and msg.attachments:
+            attachment_texts = [
+                f"[文件: {att.file_name}]\n{att.parsed_content}"
+                for att in msg.attachments
+            ]
+            merged_content = "\n\n".join(attachment_texts)
+            if msg.content:
+                merged_content += f"\n\n{msg.content}"
+            api_dict["content"] = merged_content
+
+        api_messages.append(api_dict)
+
+    return api_messages

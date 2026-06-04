@@ -74,7 +74,7 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.controller = ChatSessionController(
             parent=None,
             session_mgr=self.sessions,
-            ai_client=Mock(),
+            llm_gateway=Mock(),
             registry=Mock(),
             prompt_builder=self.prompt_builder,
             chat=self.chat,

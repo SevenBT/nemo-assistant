@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.core.ai_client import AIClient
+    from app.core.llm_gateway import LLMGateway
     from app.core.note_manager import NoteManager
     from app.core.scheduler import SchedulerManager
 
@@ -42,7 +42,7 @@ class ToolContext:
       workspace:       工作目录路径，文件系统工具的安全边界
       note_mgr:        笔记管理器，供笔记相关工具使用
       scheduler:       定时任务管理器，供 scheduler 工具使用
-      ai_client:       AI 客户端，供多模型咨询等工具使用
+      llm_gateway:     LLM 网关，供多模型咨询等工具使用
       events:          工具事件回调集合（如笔记创建后触发 UI 刷新）
       http_timeout:    HTTP 请求超时秒数，供网络工具使用
       proxy:           HTTP 代理地址（预留）
@@ -54,7 +54,7 @@ class ToolContext:
 
     note_mgr: "NoteManager | None" = None
     scheduler: "SchedulerManager | None" = None
-    ai_client: "AIClient | None" = None
+    llm_gateway: "LLMGateway | None" = None
 
     events: ToolEvents = field(default_factory=ToolEvents)
 

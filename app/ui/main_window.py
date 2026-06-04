@@ -25,9 +25,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.ai_client import AIClient
 from app.core.config import cfg, USER_TOOLS_DIR
 from app.core.conversation_prompt_builder import ConversationPromptBuilder
+from app.core.llm_gateway import LLMGateway
 from app.core.note_manager import NoteManager
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
@@ -92,7 +92,7 @@ class MainWindow(FluentWindow):
         self._scheduler = scheduler
         self._notes = note_mgr
         self._registry = ToolRegistry()
-        self._ai = AIClient()
+        self._llm_gateway = LLMGateway()
         self._snap_mgr: EdgeSnapManager | None = None
 
         self._build_window()
@@ -107,14 +107,13 @@ class MainWindow(FluentWindow):
         self._init_tools()
         self._init_memory()
         self._prompt_builder = ConversationPromptBuilder(
-            ai_client=self._ai,
             session_mgr=self._sessions,
             memory_mgr=self._memory_mgr,
         )
         self._chat_session_controller = ChatSessionController(
             parent=self,
             session_mgr=self._sessions,
-            ai_client=self._ai,
+            llm_gateway=self._llm_gateway,
             registry=self._registry,
             prompt_builder=self._prompt_builder,
             chat=self._chat,
@@ -157,7 +156,7 @@ class MainWindow(FluentWindow):
             workspace=workspace,
             note_mgr=self._notes,
             scheduler=self._scheduler,
-            ai_client=self._ai,
+            llm_gateway=self._llm_gateway,
             events=ToolEvents(
                 note_created=self._note_created_signal.emit,
             ),
@@ -173,11 +172,11 @@ class MainWindow(FluentWindow):
         from app.core.dream import Dream
 
         self._consolidator = Consolidator(
-            ai_client=self._ai,
+            llm_gateway=self._llm_gateway,
             memory_mgr=self._memory_mgr,
         )
         self._dream = Dream(
-            ai_client=self._ai,
+            llm_gateway=self._llm_gateway,
             memory_mgr=self._memory_mgr,
         )
 

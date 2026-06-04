@@ -1,6 +1,6 @@
 """AI-powered tool script generator.
 
-Builds a prompt, calls AIClient, and parses the response into
+Builds a prompt, calls LLMGateway, and parses the response into
 manifest.json + tool.py content.
 """
 from __future__ import annotations
@@ -10,7 +10,6 @@ import re
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
-from app.core.ai_client import AIClient
 from app.core.config import (
     MODEL_TEMPLATES,
     SHANGDAO_MODELS,
@@ -19,6 +18,7 @@ from app.core.config import (
     get_litellm_provider_api_key,
     get_shangdao_api_key,
 )
+from app.core.llm_gateway import LLMGateway
 
 
 @dataclass
@@ -37,11 +37,11 @@ class ModelOverride:
 
 
 class _ConfigProxy:
-    """Thin proxy that overrides api_type and model for AIClient.
+    """Thin proxy that overrides api_type and model for LLMGateway.
 
-    AIClient reads from the cfg singleton, so this proxy temporarily
-    patches cfg values during the generation call. Instead, we provide
-    the same attribute interface that AIClient's internal helpers expect.
+    LLMGateway normally reads from the cfg singleton. For tool generation we
+    provide the small attribute interface it needs so the dialog can call a
+    one-off model without mutating global settings.
     """
 
     def __init__(self, override: ModelOverride):
@@ -207,7 +207,7 @@ def stream_generate(
 ) -> Iterator[dict]:
     """Stream tool generation from AI.
 
-    Yields the same event dicts as AIClient.chat_stream:
+    Yields the same event dicts as LLMGateway.chat_stream:
       {"type": "text", "delta": str}
       {"type": "done"}
       {"type": "error", "message": str}
@@ -225,8 +225,8 @@ def stream_generate(
             ),
         },
     ]
-    client = AIClient(config_proxy=_ConfigProxy(model_override)) if model_override else AIClient()
-    yield from client.chat_stream(messages)
+    gateway = LLMGateway(config_proxy=_ConfigProxy(model_override)) if model_override else LLMGateway()
+    yield from gateway.chat_stream(messages)
 
 
 def parse_result(full_text: str) -> tuple[str, str, str]:
