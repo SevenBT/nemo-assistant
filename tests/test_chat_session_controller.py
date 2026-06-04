@@ -21,6 +21,7 @@ class FakeWorker:
         self.need_input = FakeSignal()
         self.new_turn = FakeSignal()
         self.done = FakeSignal()
+        self.finished = FakeSignal()
         self.started = False
         self.cancelled = False
         FakeWorker.instances.append(self)
@@ -93,11 +94,29 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.assertEqual(self.sessions.session.messages[0].role, MessageRole.USER)
         self.assertEqual(self.sessions.session.messages[1].role, MessageRole.ASSISTANT)
         self.chat.add_message.assert_called_once_with(self.sessions.session.messages[0])
-        self.input.set_enabled.assert_called_with(False)
+        self.input.set_running.assert_called_with(True)
         self.chat.start_typing.assert_called_once()
         self.prompt_builder.build.assert_called_once()
         self.assertEqual(len(FakeWorker.instances), 1)
         self.assertTrue(FakeWorker.instances[0].started)
+
+    def test_cancel_keeps_partial_response_and_stops_worker(self):
+        bubble = Mock()
+        self.chat.add_message.side_effect = [Mock(), bubble]
+        self.controller.switch_session("s1")
+
+        with patch("app.ui.chat_session_controller.AgentLoop", FakeWorker):
+            self.controller.submit("hello")
+
+        self.controller._on_text_chunk("s1", "partial")
+        self.controller.cancel_worker("s1")
+
+        self.assertTrue(FakeWorker.instances[0].cancelled)
+        self.assertEqual(self.sessions.session.messages[-1].content, "partial\n\n（已取消）")
+        bubble.set_content.assert_any_call("partial\n\n（已取消）")
+        self.input.set_running.assert_called_with(False)
+        self.chat.stop_typing.assert_called()
+        self.assertEqual(self.sessions.saved, ["s1"])
 
 
 if __name__ == "__main__":

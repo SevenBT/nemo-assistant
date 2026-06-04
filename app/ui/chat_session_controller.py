@@ -8,6 +8,8 @@ from app.models.message import Message, MessageRole, ToolCall
 from app.ui.manual_params_dialog import ManualParamsDialog
 from app.ui.session_settings_dialog import SessionSettingsDialog
 
+_CANCELLED_MARKER = "（已取消）"
+
 
 class ChatSessionController(QObject):
     """Coordinates session list state, chat widgets, and background agent workers."""
@@ -40,6 +42,7 @@ class ChatSessionController(QObject):
 
         self._current_session_id: str | None = None
         self._workers: dict[str, AgentLoop] = {}
+        self._cancelled_workers: list[AgentLoop] = []
         self._session_live: dict[str, dict] = {}
         self._current_ai_bubble = None
         self._current_ai_msg: Message | None = None
@@ -100,20 +103,39 @@ class ChatSessionController(QObject):
         if sid != self._current_session_id:
             self.switch_session(sid)
 
-    def cancel_worker(self, sid: str | None = None):
+    def cancel_worker(self, sid: str | None = None, *, mark_cancelled: bool = True):
         if sid is None:
             sid = self._current_session_id
         if not sid:
             return
         worker = self._workers.pop(sid, None)
-        self._session_live.pop(sid, None)
+        live = self._session_live.pop(sid, None)
         if worker is None:
             return
-        worker.cancel()
+
+        if mark_cancelled and live:
+            self._mark_live_message_cancelled(sid, live)
+
         try:
             worker.disconnect()
         except RuntimeError:
             pass
+        self._cancelled_workers.append(worker)
+        try:
+            worker.finished.connect(
+                lambda _=None, w=worker: self._release_cancelled_worker(w)
+            )
+        except (AttributeError, RuntimeError):
+            pass
+        worker.cancel()
+
+        if sid == self._current_session_id:
+            self._chat.stop_typing()
+            self._tool_status.hide()
+            self._input.set_running(False)
+            self._input.focus()
+            self._current_ai_msg = None
+            self._current_ai_bubble = None
 
     def switch_session(self, sid: str):
         self._current_ai_bubble = None
@@ -136,11 +158,11 @@ class ChatSessionController(QObject):
                 self._current_ai_bubble = last
             else:
                 self._current_ai_bubble = None
-            self._input.set_enabled(False)
+            self._input.set_running(True)
             if not live.get("first_chunk_sent"):
                 self._chat.start_typing()
         else:
-            self._input.set_enabled(True)
+            self._input.set_running(False)
 
         self._input.focus()
 
@@ -170,7 +192,7 @@ class ChatSessionController(QObject):
         self._current_ai_msg = ai_msg
         self._current_ai_bubble = None
         self._current_ai_text = ""
-        self._input.set_enabled(False)
+        self._input.set_running(True)
         self._tool_status.hide()
         self._chat.start_typing()
 
@@ -202,7 +224,7 @@ class ChatSessionController(QObject):
 
     def cleanup(self):
         for sid in list(self._workers):
-            self.cancel_worker(sid)
+            self.cancel_worker(sid, mark_cancelled=False)
 
     def _connect_worker(self, sid: str, worker: AgentLoop):
         worker.text_chunk.connect(lambda delta, s=sid: self._on_text_chunk(s, delta))
@@ -357,10 +379,43 @@ class ChatSessionController(QObject):
             return
         self._chat.stop_typing()
         self._tool_status.hide()
-        self._input.set_enabled(True)
+        self._input.set_running(False)
         self._input.focus()
         self._current_ai_msg = None
         self._current_ai_bubble = None
+
+    def _mark_live_message_cancelled(self, sid: str, live: dict):
+        ai_msg = live.get("ai_msg")
+        if ai_msg is None:
+            return
+        text = live.get("ai_text") or ai_msg.content or ""
+        ai_msg.content = self._cancelled_content(text)
+        self._sessions.save_session(sid)
+        if sid != self._current_session_id:
+            return
+        if self._current_ai_bubble is None:
+            self._current_ai_msg = ai_msg
+            self._current_ai_bubble = self._chat.add_message(ai_msg)
+        if self._current_ai_bubble:
+            try:
+                self._current_ai_bubble.set_content(ai_msg.content)
+            except RuntimeError:
+                self._current_ai_bubble = None
+        self._chat.scroll_bottom()
+
+    def _cancelled_content(self, text: str) -> str:
+        text = text.rstrip()
+        if text.endswith(_CANCELLED_MARKER):
+            return text
+        if text:
+            return f"{text}\n\n{_CANCELLED_MARKER}"
+        return _CANCELLED_MARKER
+
+    def _release_cancelled_worker(self, worker: AgentLoop):
+        try:
+            self._cancelled_workers.remove(worker)
+        except ValueError:
+            pass
 
     def _format_error(self, error_msg: str | None) -> str:
         hint = ""

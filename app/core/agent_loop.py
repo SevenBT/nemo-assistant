@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from app.core.llm_gateway import LLMGateway
+from app.core.llm_gateway import CancellationToken, LLMGateway
 from app.core.checkpoint import clear_checkpoint, save_checkpoint
 from app.tools.registry import ToolErrorType, ToolRegistry
 from app.core.turn_context import (
@@ -72,6 +72,7 @@ class AgentLoop(QThread):
         self._max_turns = max_turns
 
         self._cancelled = False
+        self._cancel_token = CancellationToken()
         self._input_queue: queue.Queue = queue.Queue()
         self._inject_queue: queue.Queue = queue.Queue()
         # 工具连续失败计数：{tool_name: count}
@@ -82,6 +83,7 @@ class AgentLoop(QThread):
     def cancel(self):
         """请求取消当前 turn。"""
         self._cancelled = True
+        self._cancel_token.cancel()
         self._input_queue.put({})
 
     def supply_input(self, params: dict):
@@ -146,9 +148,13 @@ class AgentLoop(QThread):
     def _state_stream(self, ctx: TurnContext) -> str:
         ctx.reset_turn()
 
-        for chunk in self._llm.chat_stream(ctx.messages, ctx.tools):
+        for chunk in self._llm.chat_stream(
+            ctx.messages,
+            ctx.tools,
+            cancel_token=self._cancel_token,
+        ):
             if self._cancelled:
-                return "error"
+                return "cancelled"
 
             if chunk["type"] == "text":
                 ctx.full_text += chunk["delta"]

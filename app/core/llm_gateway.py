@@ -37,6 +37,57 @@ _LOG_DIR = DATA_DIR.parent / "logs"
 _DEFAULT_LOG_PATH = _LOG_DIR / "llm_gateway.jsonl"
 
 
+def _is_cancelled(cancel_token: "CancellationToken | None") -> bool:
+    return bool(cancel_token and cancel_token.is_cancelled())
+
+
+def _close_resource(resource: Any) -> None:
+    close = getattr(resource, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            logger.debug("[LLMGateway] Failed to close cancellable resource", exc_info=True)
+
+
+class CancellationToken:
+    """Thread-safe cancellation token that can close active streaming resources."""
+
+    def __init__(self):
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._resources: list[Any] = []
+
+    def cancel(self) -> None:
+        self._event.set()
+        with self._lock:
+            resources = list(self._resources)
+        for resource in resources:
+            _close_resource(resource)
+
+    def is_cancelled(self) -> bool:
+        return self._event.is_set()
+
+    def add_resource(self, resource: Any) -> None:
+        if resource is None:
+            return
+        should_close = False
+        with self._lock:
+            if self._event.is_set():
+                should_close = True
+            else:
+                self._resources.append(resource)
+        if should_close:
+            _close_resource(resource)
+
+    def remove_resource(self, resource: Any) -> None:
+        with self._lock:
+            try:
+                self._resources.remove(resource)
+            except ValueError:
+                pass
+
+
 @dataclass(frozen=True)
 class LLMRequest:
     """网关内部的统一请求对象。
@@ -66,7 +117,11 @@ class ProviderAdapter(Protocol):
     重试和日志，这些横切逻辑留在 LLMGateway。
     """
 
-    def stream(self, request: LLMRequest) -> Iterator[dict]:
+    def stream(
+        self,
+        request: LLMRequest,
+        cancel_token: CancellationToken | None = None,
+    ) -> Iterator[dict]:
         """Yield normalized gateway events."""
 
 
@@ -211,7 +266,11 @@ class OpenAIAdapter:
     适用于官方 OpenAI、DeepSeek、Ollama 等兼容 Chat Completions 的端点。
     """
 
-    def stream(self, request: LLMRequest) -> Iterator[dict]:
+    def stream(
+        self,
+        request: LLMRequest,
+        cancel_token: CancellationToken | None = None,
+    ) -> Iterator[dict]:
         kwargs: dict[str, Any] = {
             "model": request.model,
             "messages": request.messages,
@@ -230,48 +289,66 @@ class OpenAIAdapter:
                 timeout=_TIMEOUT,
             )
             stream = client.chat.completions.create(**kwargs)
+            if cancel_token:
+                cancel_token.add_resource(stream)
             tc_buf: dict[int, dict[str, str]] = {}
             reasoning_buf = ""
 
-            for chunk in stream:
-                if not chunk.choices:
-                    continue
-                choice = chunk.choices[0]
-                delta = choice.delta
+            try:
+                for chunk in stream:
+                    if _is_cancelled(cancel_token):
+                        return
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    delta = choice.delta
 
-                reasoning = getattr(delta, "reasoning_content", None)
-                if reasoning:
-                    reasoning_buf += reasoning
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    if reasoning:
+                        reasoning_buf += reasoning
 
-                if delta.content:
-                    yield {"type": "text", "delta": delta.content}
+                    if delta.content:
+                        yield {"type": "text", "delta": delta.content}
 
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index
-                        if idx not in tc_buf:
-                            tc_buf[idx] = {"id": "", "name": "", "args_str": ""}
-                        if tc.id:
-                            tc_buf[idx]["id"] = tc.id
-                        if tc.function:
-                            if tc.function.name:
-                                tc_buf[idx]["name"] = tc.function.name
-                            if tc.function.arguments:
-                                tc_buf[idx]["args_str"] += tc.function.arguments
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = tc.index
+                            if idx not in tc_buf:
+                                tc_buf[idx] = {"id": "", "name": "", "args_str": ""}
+                            if tc.id:
+                                tc_buf[idx]["id"] = tc.id
+                            if tc.function:
+                                if tc.function.name:
+                                    tc_buf[idx]["name"] = tc.function.name
+                                if tc.function.arguments:
+                                    tc_buf[idx]["args_str"] += tc.function.arguments
 
-                if choice.finish_reason in ("stop", "tool_calls"):
-                    break
+                    if choice.finish_reason in ("stop", "tool_calls"):
+                        break
+            finally:
+                if cancel_token:
+                    cancel_token.remove_resource(stream)
+                if _is_cancelled(cancel_token):
+                    _close_resource(stream)
 
+            if _is_cancelled(cancel_token):
+                return
             yield from _parse_tool_calls(tc_buf)
             yield {"type": "done", "reasoning_content": reasoning_buf or None}
         except Exception as exc:
+            if _is_cancelled(cancel_token):
+                return
             yield _error_event(exc)
 
 
 class ShangdaoAdapter:
     """商道 SSE 网关适配器。"""
 
-    def stream(self, request: LLMRequest) -> Iterator[dict]:
+    def stream(
+        self,
+        request: LLMRequest,
+        cancel_token: CancellationToken | None = None,
+    ) -> Iterator[dict]:
         model_meta = request.extra.get("model_meta")
         if not model_meta:
             yield {"type": "error", "message": f"未知的商道模型: {request.model}"}
@@ -303,42 +380,60 @@ class ShangdaoAdapter:
         try:
             with httpx.Client(timeout=_TIMEOUT) as client:
                 with client.stream("POST", url, json=body, headers=headers) as resp:
+                    if cancel_token:
+                        cancel_token.add_resource(resp)
                     resp.raise_for_status()
                     reasoning_buf = ""
-                    for line in resp.iter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        data_str = line[len("data:"):].strip()
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                        except json.JSONDecodeError:
-                            continue
+                    try:
+                        for line in resp.iter_lines():
+                            if _is_cancelled(cancel_token):
+                                return
+                            if not line or not line.startswith("data:"):
+                                continue
+                            data_str = line[len("data:"):].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
 
-                        choices = chunk.get("choices", [])
-                        if not choices:
-                            continue
-                        choice = choices[0]
-                        delta = choice.get("message") or choice.get("delta", {})
-                        reasoning = delta.get("reasoning_content")
-                        if reasoning:
-                            reasoning_buf += reasoning
-                        content = delta.get("content")
-                        if content:
-                            yield {"type": "text", "delta": content}
-                        if choice.get("finish_reason") in ("stop", "tool_calls"):
-                            break
+                            choices = chunk.get("choices", [])
+                            if not choices:
+                                continue
+                            choice = choices[0]
+                            delta = choice.get("message") or choice.get("delta", {})
+                            reasoning = delta.get("reasoning_content")
+                            if reasoning:
+                                reasoning_buf += reasoning
+                            content = delta.get("content")
+                            if content:
+                                yield {"type": "text", "delta": content}
+                            if choice.get("finish_reason") in ("stop", "tool_calls"):
+                                break
+                    finally:
+                        if cancel_token:
+                            cancel_token.remove_resource(resp)
+                        if _is_cancelled(cancel_token):
+                            _close_resource(resp)
 
+                    if _is_cancelled(cancel_token):
+                        return
                     yield {"type": "done", "reasoning_content": reasoning_buf or None}
         except Exception as exc:
+            if _is_cancelled(cancel_token):
+                return
             yield _error_event(exc, "商道 API 请求失败")
 
 
 class LiteLLMAdapter:
     """LiteLLM Python 包适配器。"""
 
-    def stream(self, request: LLMRequest) -> Iterator[dict]:
+    def stream(
+        self,
+        request: LLMRequest,
+        cancel_token: CancellationToken | None = None,
+    ) -> Iterator[dict]:
         try:
             import litellm
         except ImportError:
@@ -366,41 +461,55 @@ class LiteLLMAdapter:
 
         try:
             stream = litellm.completion(**kwargs)
+            if cancel_token:
+                cancel_token.add_resource(stream)
             tc_buf: dict[int, dict[str, str]] = {}
             reasoning_buf = ""
 
-            for chunk in stream:
-                if not hasattr(chunk, "choices") or not chunk.choices:
-                    continue
-                choice = chunk.choices[0]
-                delta = choice.delta
+            try:
+                for chunk in stream:
+                    if _is_cancelled(cancel_token):
+                        return
+                    if not hasattr(chunk, "choices") or not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    delta = choice.delta
 
-                reasoning = getattr(delta, "reasoning_content", None)
-                if reasoning:
-                    reasoning_buf += reasoning
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    if reasoning:
+                        reasoning_buf += reasoning
 
-                if hasattr(delta, "content") and delta.content:
-                    yield {"type": "text", "delta": delta.content}
+                    if hasattr(delta, "content") and delta.content:
+                        yield {"type": "text", "delta": delta.content}
 
-                if hasattr(delta, "tool_calls") and delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index
-                        if idx not in tc_buf:
-                            tc_buf[idx] = {"id": "", "name": "", "args_str": ""}
-                        if tc.id:
-                            tc_buf[idx]["id"] = tc.id
-                        if tc.function:
-                            if tc.function.name:
-                                tc_buf[idx]["name"] = tc.function.name
-                            if tc.function.arguments:
-                                tc_buf[idx]["args_str"] += tc.function.arguments
+                    if hasattr(delta, "tool_calls") and delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = tc.index
+                            if idx not in tc_buf:
+                                tc_buf[idx] = {"id": "", "name": "", "args_str": ""}
+                            if tc.id:
+                                tc_buf[idx]["id"] = tc.id
+                            if tc.function:
+                                if tc.function.name:
+                                    tc_buf[idx]["name"] = tc.function.name
+                                if tc.function.arguments:
+                                    tc_buf[idx]["args_str"] += tc.function.arguments
 
-                if hasattr(choice, "finish_reason") and choice.finish_reason in ("stop", "tool_calls"):
-                    break
+                    if hasattr(choice, "finish_reason") and choice.finish_reason in ("stop", "tool_calls"):
+                        break
+            finally:
+                if cancel_token:
+                    cancel_token.remove_resource(stream)
+                if _is_cancelled(cancel_token):
+                    _close_resource(stream)
 
+            if _is_cancelled(cancel_token):
+                return
             yield from _parse_tool_calls(tc_buf)
             yield {"type": "done", "reasoning_content": reasoning_buf or None}
         except Exception as exc:
+            if _is_cancelled(cancel_token):
+                return
             event = _error_event(exc, "LiteLLM 调用失败")
             yield event
 
@@ -590,6 +699,7 @@ class LLMGateway:
         self,
         messages: list[dict],
         tools: Optional[list[dict]] = None,
+        cancel_token: CancellationToken | None = None,
     ) -> Iterator[dict]:
         """对外暴露的流式接口，返回 AgentLoop 已兼容的事件字典。"""
         request = self._build_request(messages, tools)
@@ -600,9 +710,14 @@ class LLMGateway:
 
         rate_key = f"{request.api_type}:{request.model}"
         with self._limiter.acquire(rate_key):
-            yield from self._stream_with_retry(adapter, request)
+            yield from self._stream_with_retry(adapter, request, cancel_token)
 
-    def _stream_with_retry(self, adapter: ProviderAdapter, request: LLMRequest) -> Iterator[dict]:
+    def _stream_with_retry(
+        self,
+        adapter: ProviderAdapter,
+        request: LLMRequest,
+        cancel_token: CancellationToken | None = None,
+    ) -> Iterator[dict]:
         """执行一次或多次 provider 调用。
 
         关键规则：只在“还没有向 UI/上层输出任何 text/tool_call”时重试。
@@ -615,42 +730,64 @@ class LLMGateway:
         ttft_ms: float | None = None
 
         for attempt in range(1, self._retry_policy.max_attempts + 1):
+            if _is_cancelled(cancel_token):
+                self._write_log(request, t0, ttft_ms, retry_count, "cancelled", None)
+                return
             streamed = False
             attempt_request = LLMRequest(
                 **{**request.__dict__, "attempt_id": uuid.uuid4().hex}
             )
-            for event in adapter.stream(attempt_request):
-                event_type = event.get("type")
-                if event_type == "text" and ttft_ms is None:
-                    ttft_ms = (time.perf_counter() - t0) * 1000
-                if event_type in {"text", "tool_call"}:
-                    streamed = True
+            stream_iter = adapter.stream(attempt_request, cancel_token=cancel_token)
+            retry_next_attempt = False
+            try:
+                for event in stream_iter:
+                    if _is_cancelled(cancel_token):
+                        _close_resource(stream_iter)
+                        self._write_log(
+                            request, t0, ttft_ms, retry_count, "cancelled", None
+                        )
+                        return
+                    event_type = event.get("type")
+                    if event_type == "text" and ttft_ms is None:
+                        ttft_ms = (time.perf_counter() - t0) * 1000
+                    if event_type in {"text", "tool_call"}:
+                        streamed = True
+                        yield event
+                        continue
+                    if event_type == "error":
+                        final_error = event
+                        can_retry = (
+                            not streamed
+                            and attempt < self._retry_policy.max_attempts
+                            and self._retry_policy.is_retryable(event)
+                            and not _is_cancelled(cancel_token)
+                        )
+                        if can_retry:
+                            retry_count += 1
+                            self._retry_policy.wait(attempt, event)
+                            retry_next_attempt = True
+                            break
+                        yield event
+                        self._write_log(request, t0, ttft_ms, retry_count, "error", event)
+                        return
+                    if event_type == "done":
+                        final_status = "ok"
+                        yield event
+                        self._write_log(request, t0, ttft_ms, retry_count, final_status, None)
+                        return
                     yield event
-                    continue
-                if event_type == "error":
-                    final_error = event
-                    can_retry = (
-                        not streamed
-                        and attempt < self._retry_policy.max_attempts
-                        and self._retry_policy.is_retryable(event)
-                    )
-                    if can_retry:
-                        retry_count += 1
-                        self._retry_policy.wait(attempt, event)
-                        break
-                    yield event
-                    self._write_log(request, t0, ttft_ms, retry_count, "error", event)
-                    return
-                if event_type == "done":
-                    final_status = "ok"
-                    yield event
-                    self._write_log(request, t0, ttft_ms, retry_count, final_status, None)
-                    return
-                yield event
-            else:
-                self._write_log(request, t0, ttft_ms, retry_count, final_status, final_error)
-                return
+            finally:
+                if _is_cancelled(cancel_token):
+                    _close_resource(stream_iter)
+            if retry_next_attempt:
+                continue
+            status = "cancelled" if _is_cancelled(cancel_token) else final_status
+            self._write_log(request, t0, ttft_ms, retry_count, status, final_error)
+            return
 
+        if _is_cancelled(cancel_token):
+            self._write_log(request, t0, ttft_ms, retry_count, "cancelled", None)
+            return
         if final_error is not None:
             yield final_error
         self._write_log(request, t0, ttft_ms, retry_count, "error", final_error)

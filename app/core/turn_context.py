@@ -30,6 +30,7 @@ TRANSITIONS: dict[tuple[TurnState, str], TurnState] = {
     (TurnState.STREAM, "no_tools"): TurnState.FINALIZE,
     (TurnState.STREAM, "has_tools"): TurnState.EXECUTE,
     (TurnState.STREAM, "error"): TurnState.FINALIZE,
+    (TurnState.STREAM, "cancelled"): TurnState.FINALIZE,
     (TurnState.EXECUTE, "ok"): TurnState.FEEDBACK,
     (TurnState.EXECUTE, "cancelled"): TurnState.FINALIZE,
     (TurnState.FEEDBACK, "continue"): TurnState.STREAM,

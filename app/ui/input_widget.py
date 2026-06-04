@@ -12,10 +12,12 @@ _BOTTOM_MARGIN = 30
 
 class InputWidget(QWidget):
     submitted = pyqtSignal(str)
+    cancel_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("inputWidget")
+        self._running = False
         self._build()
 
     def _build(self):
@@ -34,7 +36,7 @@ class InputWidget(QWidget):
         self._btn = PrimaryPushButton(FluentIcon.SEND, "发送")
         self._btn.setFixedWidth(80)
         self._btn.setFixedHeight(36)
-        self._btn.clicked.connect(self._submit)
+        self._btn.clicked.connect(self._on_button_clicked)
         self._layout.addWidget(self._btn)
 
     def resizeEvent(self, event):
@@ -43,10 +45,29 @@ class InputWidget(QWidget):
         self._layout.setContentsMargins(side, 8, side, _BOTTOM_MARGIN)
 
     def _submit(self):
+        if self._running:
+            return
         text = self._edit.toPlainText().strip()
         if text:
             self.submitted.emit(text)
             self._edit.clear()
+
+    def _on_button_clicked(self):
+        if self._running:
+            self.cancel_requested.emit()
+        else:
+            self._submit()
+
+    def set_running(self, running: bool):
+        self._running = running
+        self._edit.setEnabled(True)
+        self._btn.setEnabled(True)
+        if running:
+            self._btn.setText("取消")
+            self._btn.setIcon(FluentIcon.CLOSE.icon())
+        else:
+            self._btn.setText("发送")
+            self._btn.setIcon(FluentIcon.SEND.icon())
 
     def set_enabled(self, enabled: bool):
         self._edit.setEnabled(enabled)

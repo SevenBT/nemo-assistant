@@ -293,6 +293,7 @@ class MainWindow(FluentWindow):
         chat_col.addWidget(self._tool_status)
         self._input = InputWidget()
         self._input.submitted.connect(self._on_submit)
+        self._input.cancel_requested.connect(self._cancel_worker)
         chat_col.addWidget(self._input)
 
         self._chat.file_attached.connect(self._on_files_attached)

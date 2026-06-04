@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from app.core.llm_gateway import (
+    CancellationToken,
     GatewayLogger,
     LLMGateway,
     LocalRateLimiter,
@@ -15,10 +16,37 @@ class ScriptedAdapter(ProviderAdapter):
         self._attempts = list(attempts)
         self.calls = 0
 
-    def stream(self, request):
+    def stream(self, request, cancel_token=None):
         self.calls += 1
         for event in self._attempts.pop(0):
             yield event
+
+
+class CloseableResource:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class CancellingAdapter(ProviderAdapter):
+    def __init__(self):
+        self.calls = 0
+        self.resource = CloseableResource()
+
+    def stream(self, request, cancel_token=None):
+        self.calls += 1
+        if cancel_token:
+            cancel_token.add_resource(self.resource)
+        try:
+            yield {"type": "text", "delta": "partial"}
+            if cancel_token:
+                cancel_token.cancel()
+            yield {"type": "error", "message": "should not retry", "error_kind": "connection"}
+        finally:
+            if cancel_token:
+                cancel_token.remove_resource(self.resource)
 
 
 class SpyLimiter(LocalRateLimiter):
@@ -114,3 +142,23 @@ def test_gateway_logger_writes_sanitized_jsonl(tmp_path: Path):
     assert record["status"] == "ok"
     assert record["input_message_count"] == 1
     assert "secret prompt" not in lines[0]
+
+
+def test_gateway_stops_stream_and_retry_after_cancellation():
+    adapter = CancellingAdapter()
+    token = CancellationToken()
+    gateway = LLMGateway(
+        config_proxy=StaticConfig(),
+        adapters={"openai": adapter},
+        retry_policy=RetryPolicy(max_attempts=2, sleep=lambda _: None),
+        logger=GatewayLogger.disabled(),
+    )
+
+    events = list(gateway.chat_stream(
+        [{"role": "user", "content": "hi"}],
+        cancel_token=token,
+    ))
+
+    assert events == [{"type": "text", "delta": "partial"}]
+    assert adapter.calls == 1
+    assert adapter.resource.closed is True
