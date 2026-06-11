@@ -78,7 +78,7 @@
 2. 解析文件 → `FileParser.parse_file`
 3. 创建附件对象 → `Attachment`
 4. 显示文件卡片 → `FileCardWidget`
-5. 发送消息时合并内容 → `AIClient.merge_attachments_to_content`
+5. 发送消息时合并内容 → `conversation_prompt_builder.merge_attachments_to_content`
 6. AI 接收完整上下文 → 生成回复
 
 ### 数据存储

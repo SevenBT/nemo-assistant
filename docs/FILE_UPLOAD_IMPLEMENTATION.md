@@ -52,9 +52,9 @@
 - 为每个附件创建 `FileCardWidget`
 - 仅在用户消息中显示附件 (AI 消息不显示)
 
-### 6. AIClient 支持附件上下文 ✓
-**文件**: `app/core/ai_client.py`
-- 添加了 `merge_attachments_to_content` 静态方法
+### 6. 附件上下文合并 ✓
+**文件**: `app/core/conversation_prompt_builder.py`
+- 模块级函数 `merge_attachments_to_content`
 - 将附件内容格式化为：
   ```
   [文件: filename.txt]
