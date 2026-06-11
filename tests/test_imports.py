@@ -17,10 +17,10 @@ def test_imports():
     """测试导入是否正常。"""
     print("测试导入...")
     try:
-        from app.ui.components.todo_item_widget import TodoItemWidget
-        print("  ✓ TodoItemWidget 导入成功")
+        from app.ui.components.markdown_editor import MarkdownEditor
+        print("  ✓ MarkdownEditor 导入成功")
     except Exception as e:
-        print(f"  ✗ TodoItemWidget 导入失败: {e}")
+        print(f"  ✗ MarkdownEditor 导入失败: {e}")
         return False
 
     try:

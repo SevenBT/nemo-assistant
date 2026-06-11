@@ -13,3 +13,4 @@ PyPDF2>=3.0.0
 Markdown>=3.4.0
 Pygments>=2.15.0
 html2text>=2020.1.16
+litellm>=1.0.0

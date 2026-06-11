@@ -23,7 +23,6 @@ class SettingsWindow(QDialog):
     _PAGES = [
         ("外观", "appearance"),
         ("编辑器", "editor"),
-        ("聊天", "chat"),
         ("API 连接", "api"),
         ("工具", "tools"),
         ("快捷键", "hotkeys"),
@@ -78,7 +77,6 @@ class SettingsWindow(QDialog):
     def _create_pages(self):
         from app.ui.settings_pages.appearance_page import AppearancePage
         from app.ui.settings_pages.editor_page import EditorPage
-        from app.ui.settings_pages.chat_page import ChatPage
         from app.ui.settings_pages.api_page import ApiPage
         from app.ui.settings_pages.tools_page import ToolsPage
         from app.ui.settings_pages.hotkeys_page import HotkeysPage
@@ -86,7 +84,6 @@ class SettingsWindow(QDialog):
 
         self._stack.addWidget(AppearancePage(self))
         self._stack.addWidget(EditorPage(self))
-        self._stack.addWidget(ChatPage(self))
         self._stack.addWidget(ApiPage(self))
         self._stack.addWidget(ToolsPage(self._registry, self))
         self._stack.addWidget(HotkeysPage(self._hotkey_mgr, self))
