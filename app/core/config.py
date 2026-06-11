@@ -65,6 +65,21 @@ SHANGDAO_MODELS: dict[str, dict] = {
     },
 }
 
+
+def get_shangdao_model_meta(model: str) -> dict | None:
+    """Return request metadata for built-in or user-defined Shangdao models."""
+    model = (model or "").strip()
+    if not model:
+        return None
+    if model in SHANGDAO_MODELS:
+        return SHANGDAO_MODELS[model]
+    return {
+        "path_prefix": f"CMHK-LMMP-PRD_{model}/CMHK-LMMP-PRD",
+        "body_model_field": "model",
+        "body_model_value": model,
+    }
+
+
 MODEL_TEMPLATES: dict[str, list[dict]] = {
     "openai": [
         {"id": "gpt-4o", "name": "GPT-4o"},
@@ -159,10 +174,7 @@ class AppConfig(QConfig):
     shangdaoBaseUrl = ConfigItem(
         "Shangdao", "BaseUrl", "https://api.example.com"
     )
-    shangdaoModel = OptionsConfigItem(
-        "Shangdao", "Model", "Qwen3_235B",
-        OptionsValidator(list(SHANGDAO_MODELS.keys())),
-    )
+    shangdaoModel = ConfigItem("Shangdao", "Model", "Qwen3_235B")
     shangdaoMaxTokens = RangeConfigItem(
         "Shangdao", "MaxTokens", 2048, RangeValidator(256, 65536)
     )

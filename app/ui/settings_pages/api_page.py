@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -17,6 +18,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.ui.litellm_model_edit_dialog import LiteLLMModelEditDialog
+from app.ui.litellm_template_dialog import LiteLLMTemplateDialog
 from app.core.config import (
     SHANGDAO_MODELS,
     cfg,
@@ -129,11 +132,16 @@ class ApiPage(QScrollArea):
         sd_form.addRow("API Key:", self._sd_api_key)
 
         self._sd_model = QComboBox()
+        self._sd_model.setEditable(True)
         for name in SHANGDAO_MODELS:
             self._sd_model.addItem(name, name)
-        self._sd_model.setCurrentText(cfg.get(cfg.shangdaoModel))
+        current_sd_model = cfg.get(cfg.shangdaoModel)
+        if self._sd_model.findText(current_sd_model) < 0:
+            self._sd_model.addItem(current_sd_model, current_sd_model)
+        self._sd_model.setCurrentText(current_sd_model)
+        self._sd_model.lineEdit().setPlaceholderText("输入商道模型名")
         self._sd_model.currentTextChanged.connect(
-            lambda v: cfg.set(cfg.shangdaoModel, v)
+            lambda v: cfg.set(cfg.shangdaoModel, v.strip())
         )
         sd_form.addRow("模型:", self._sd_model)
 
@@ -165,33 +173,36 @@ class ApiPage(QScrollArea):
         ll_form.setContentsMargins(0, 0, 0, 0)
 
         self._ll_default_model = QComboBox()
-        models = cfg.get(cfg.litellmModels)
-        for m in models:
-            self._ll_default_model.addItem(m.get("name", m["id"]), m["id"])
-        current_default = cfg.get(cfg.litellmDefaultModel)
-        idx = self._ll_default_model.findData(current_default)
-        if idx >= 0:
-            self._ll_default_model.setCurrentIndex(idx)
         self._ll_default_model.currentIndexChanged.connect(self._on_ll_default_changed)
         ll_form.addRow("默认模型:", self._ll_default_model)
 
+        ll_model_actions = QWidget()
+        ll_model_actions_layout = QHBoxLayout(ll_model_actions)
+        ll_model_actions_layout.setContentsMargins(0, 0, 0, 0)
+        self._ll_add_template_btn = QPushButton("从模板添加")
+        self._ll_add_template_btn.clicked.connect(self._add_ll_model_from_template)
+        self._ll_add_custom_btn = QPushButton("添加自定义")
+        self._ll_add_custom_btn.clicked.connect(self._add_custom_ll_model)
+        self._ll_edit_btn = QPushButton("编辑当前")
+        self._ll_edit_btn.clicked.connect(self._edit_current_ll_model)
+        self._ll_delete_btn = QPushButton("删除当前")
+        self._ll_delete_btn.clicked.connect(self._delete_current_ll_model)
+        for btn in (
+            self._ll_add_template_btn,
+            self._ll_add_custom_btn,
+            self._ll_edit_btn,
+            self._ll_delete_btn,
+        ):
+            ll_model_actions_layout.addWidget(btn)
+        ll_form.addRow("模型管理:", ll_model_actions)
+
         # Provider API keys
-        ll_key_group = QGroupBox("API Key 配置")
-        ll_key_layout = QFormLayout(ll_key_group)
-        ll_key_layout.setContentsMargins(8, 8, 8, 8)
+        self._ll_key_group = QGroupBox("API Key 配置")
+        self._ll_key_layout = QFormLayout(self._ll_key_group)
+        self._ll_key_layout.setContentsMargins(8, 8, 8, 8)
         self._ll_provider_keys: dict[str, QLineEdit] = {}
-        providers = list(set(m.get("provider", "") for m in models if m.get("provider")))
-        for provider in sorted(providers):
-            key_input = QLineEdit()
-            key_input.setEchoMode(QLineEdit.EchoMode.Password)
-            key_input.setText(get_litellm_provider_api_key(provider))
-            key_input.setPlaceholderText(f"输入 {provider.capitalize()} API Key")
-            key_input.editingFinished.connect(
-                lambda p=provider, w=key_input: set_litellm_provider_api_key(p, w.text().strip())
-            )
-            self._ll_provider_keys[provider] = key_input
-            ll_key_layout.addRow(f"{provider.capitalize()}:", key_input)
-        ll_form.addRow(ll_key_group)
+        ll_form.addRow(self._ll_key_group)
+        self._refresh_ll_models()
 
         self._ll_detail.setVisible(False)
         layout.addWidget(self._ll_detail)
@@ -234,7 +245,119 @@ class ApiPage(QScrollArea):
             w.setEnabled(not enabled)
         self._sd_enabled.setEnabled(not enabled)
 
+    def _refresh_ll_models(self, selected_model_id: str | None = None):
+        models = list(cfg.get(cfg.litellmModels) or [])
+        configured_model_ids = {m.get("id") for m in models if m.get("id")}
+        current_model_id = (
+            selected_model_id
+            or self._ll_default_model.currentData()
+            or cfg.get(cfg.litellmDefaultModel)
+        )
+
+        self._ll_default_model.blockSignals(True)
+        self._ll_default_model.clear()
+        for model in models:
+            model_id = model.get("id", "")
+            if not model_id:
+                continue
+            name = model.get("name") or model_id
+            provider = model.get("provider", "")
+            label = f"{name} ({provider})" if provider else name
+            self._ll_default_model.addItem(label, model_id)
+
+        if current_model_id and self._ll_default_model.findData(current_model_id) < 0:
+            self._ll_default_model.addItem(current_model_id, current_model_id)
+
+        idx = self._ll_default_model.findData(current_model_id)
+        if idx >= 0:
+            self._ll_default_model.setCurrentIndex(idx)
+        self._ll_default_model.blockSignals(False)
+
+        if self._ll_default_model.currentData():
+            cfg.set(cfg.litellmDefaultModel, self._ll_default_model.currentData())
+
+        can_modify_current = self._ll_default_model.currentData() in configured_model_ids
+        self._ll_edit_btn.setEnabled(can_modify_current)
+        self._ll_delete_btn.setEnabled(can_modify_current)
+        self._refresh_ll_provider_keys(models)
+
+    def _refresh_ll_provider_keys(self, models: list[dict]):
+        cached_values = {
+            provider: widget.text()
+            for provider, widget in self._ll_provider_keys.items()
+        }
+        while self._ll_key_layout.count():
+            item = self._ll_key_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        self._ll_provider_keys = {}
+        providers = sorted({
+            m.get("provider", "").strip()
+            for m in models
+            if m.get("provider", "").strip()
+        })
+        for provider in providers:
+            key_input = QLineEdit()
+            key_input.setEchoMode(QLineEdit.EchoMode.Password)
+            key_input.setText(cached_values.get(provider, get_litellm_provider_api_key(provider)))
+            key_input.setPlaceholderText(f"输入 {provider.capitalize()} API Key")
+            key_input.editingFinished.connect(
+                lambda p=provider, w=key_input: set_litellm_provider_api_key(p, w.text().strip())
+            )
+            self._ll_provider_keys[provider] = key_input
+            self._ll_key_layout.addRow(f"{provider.capitalize()}:", key_input)
+        self._ll_key_group.setVisible(bool(providers))
+
+    def _add_ll_model_from_template(self):
+        if LiteLLMTemplateDialog(self).exec():
+            self._refresh_ll_models()
+
+    def _add_custom_ll_model(self):
+        if LiteLLMModelEditDialog(parent=self).exec():
+            self._refresh_ll_models()
+
+    def _edit_current_ll_model(self):
+        model_id = self._ll_default_model.currentData()
+        if not model_id:
+            QMessageBox.warning(self, "未选择模型", "请先选择一个模型")
+            return
+        if LiteLLMModelEditDialog(model_id, self).exec():
+            self._refresh_ll_models(cfg.get(cfg.litellmDefaultModel))
+
+    def _delete_current_ll_model(self):
+        model_id = self._ll_default_model.currentData()
+        if not model_id:
+            QMessageBox.warning(self, "未选择模型", "请先选择一个模型")
+            return
+        reply = QMessageBox.question(
+            self,
+            "删除模型",
+            f"确定删除模型 {model_id} 吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        models = [
+            m for m in list(cfg.get(cfg.litellmModels) or [])
+            if m.get("id") != model_id
+        ]
+        cfg.set(cfg.litellmModels, models)
+        next_default = models[0].get("id", "") if models else ""
+        if cfg.get(cfg.litellmDefaultModel) == model_id:
+            cfg.set(cfg.litellmDefaultModel, next_default)
+        self._refresh_ll_models(next_default)
+
     def _on_ll_default_changed(self, index: int):
         model_id = self._ll_default_model.itemData(index)
         if model_id:
             cfg.set(cfg.litellmDefaultModel, model_id)
+        configured_model_ids = {
+            m.get("id") for m in list(cfg.get(cfg.litellmModels) or []) if m.get("id")
+        }
+        can_modify_current = model_id in configured_model_ids
+        self._ll_edit_btn.setEnabled(can_modify_current)
+        self._ll_delete_btn.setEnabled(can_modify_current)

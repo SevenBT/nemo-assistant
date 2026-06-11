@@ -23,10 +23,10 @@ from openai import OpenAI
 
 from app.core.config import (
     DATA_DIR,
-    SHANGDAO_MODELS,
     cfg,
     get_api_key,
     get_litellm_provider_api_key,
+    get_shangdao_model_meta,
     get_shangdao_api_key,
 )
 
@@ -125,21 +125,50 @@ class ProviderAdapter(Protocol):
         """Yield normalized gateway events."""
 
 
+def _safe_getattr(obj: Any, name: str, default: Any = None) -> Any:
+    try:
+        return getattr(obj, name, default)
+    except Exception:
+        return default
+
+
+def _read_response_payload(response: Any) -> Any:
+    response_json = _safe_getattr(response, "json")
+    if callable(response_json):
+        try:
+            return response_json()
+        except Exception:
+            pass
+
+    response_read = _safe_getattr(response, "read")
+    if callable(response_read):
+        try:
+            response_read()
+        except Exception:
+            pass
+
+    if callable(response_json):
+        try:
+            return response_json()
+        except Exception:
+            pass
+
+    text = _safe_getattr(response, "text")
+    if text:
+        return text
+    return None
+
+
 def _get_error_payload(exc: Exception) -> Any:
-    response = getattr(exc, "response", None)
-    payload = (
-        getattr(exc, "body", None)
-        or getattr(exc, "doc", None)
-        or getattr(response, "text", None)
-    )
-    if payload is None and response is not None:
-        response_json = getattr(response, "json", None)
-        if callable(response_json):
-            try:
-                payload = response_json()
-            except Exception:
-                return None
-    return payload
+    payload = _safe_getattr(exc, "body") or _safe_getattr(exc, "doc")
+    if payload is not None:
+        return payload
+
+    response = _safe_getattr(exc, "response")
+    if response is None:
+        return None
+
+    return _read_response_payload(response)
 
 
 def _error_type_code(payload: Any) -> tuple[str | None, str | None]:
@@ -247,17 +276,127 @@ def _error_event(exc: Exception, prefix: str = "") -> dict:
 
 def _parse_tool_calls(tc_buf: dict[int, dict[str, str]]) -> Iterator[dict]:
     """把流式 tool_call 分片组装成 AgentLoop 已经认识的事件格式。"""
-    for tc_data in tc_buf.values():
+    for _, tc_data in sorted(tc_buf.items()):
+        if not tc_data["name"]:
+            continue
         try:
             args = json.loads(tc_data["args_str"] or "{}")
         except json.JSONDecodeError:
             args = {}
+        if not isinstance(args, dict):
+            args = {}
         yield {
             "type": "tool_call",
-            "id": tc_data["id"],
+            "id": tc_data["id"] or f"call_{uuid.uuid4().hex}",
             "name": tc_data["name"],
             "arguments": args,
         }
+
+
+def _field(data: Any, name: str, default: Any = None) -> Any:
+    """Read a field from either SDK objects or plain response dictionaries."""
+    if isinstance(data, dict):
+        return data.get(name, default)
+    return getattr(data, name, default)
+
+
+def _append_tool_call_delta(
+    tc_buf: dict[int, dict[str, str]],
+    tool_call: Any,
+    fallback_index: int = 0,
+) -> None:
+    """Merge one streamed tool_call delta into the per-index buffer."""
+    idx = _field(tool_call, "index", fallback_index)
+    try:
+        idx = int(idx)
+    except (TypeError, ValueError):
+        idx = fallback_index
+
+    entry = tc_buf.setdefault(idx, {"id": "", "name": "", "args_str": ""})
+    call_id = _field(tool_call, "id")
+    if call_id:
+        entry["id"] = str(call_id)
+
+    function = _field(tool_call, "function", {}) or {}
+    name = _field(function, "name")
+    arguments = _field(function, "arguments")
+    if name:
+        entry["name"] = str(name)
+    if arguments:
+        if isinstance(arguments, str):
+            entry["args_str"] += arguments
+        else:
+            entry["args_str"] = json.dumps(arguments, ensure_ascii=False)
+
+
+def _append_function_call_delta(
+    tc_buf: dict[int, dict[str, str]],
+    function_call: Any,
+) -> None:
+    """Merge legacy function_call deltas into the tool-call event shape."""
+    entry = tc_buf.setdefault(0, {"id": "", "name": "", "args_str": ""})
+    name = _field(function_call, "name")
+    arguments = _field(function_call, "arguments")
+    if name:
+        entry["name"] = str(name)
+    if arguments:
+        if isinstance(arguments, str):
+            entry["args_str"] += arguments
+        else:
+            entry["args_str"] = json.dumps(arguments, ensure_ascii=False)
+
+
+def _messages_with_text_tool_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert OpenAI tool history messages into plain chat text for gateways."""
+    result: list[dict[str, Any]] = []
+    tool_names_by_id: dict[str, str] = {}
+
+    for message in messages:
+        role = message.get("role")
+        if role == "assistant" and message.get("tool_calls"):
+            content_parts: list[str] = []
+            if message.get("content"):
+                content_parts.append(str(message["content"]))
+
+            call_lines: list[str] = []
+            for tc in message.get("tool_calls", []):
+                call_id = str(tc.get("id") or "")
+                function = tc.get("function") or {}
+                name = str(function.get("name") or "unknown_tool")
+                arguments = function.get("arguments") or "{}"
+                if call_id:
+                    tool_names_by_id[call_id] = name
+                call_lines.append(f"- {name}({arguments})")
+
+            if call_lines:
+                content_parts.append("已请求调用工具:\n" + "\n".join(call_lines))
+
+            result.append({
+                "role": "assistant",
+                "content": "\n\n".join(content_parts) or "已请求调用工具。",
+            })
+            continue
+
+        if role == "tool":
+            call_id = str(message.get("tool_call_id") or "")
+            tool_name = tool_names_by_id.get(call_id, call_id or "unknown_tool")
+            result.append({
+                "role": "user",
+                "content": (
+                    f"工具 {tool_name} 返回结果:\n"
+                    f"{message.get('content') or ''}"
+                ),
+            })
+            continue
+
+        cleaned = {
+            "role": role,
+            "content": message.get("content") or "",
+        }
+        if role:
+            result.append(cleaned)
+
+    return result
 
 
 class OpenAIAdapter:
@@ -311,17 +450,8 @@ class OpenAIAdapter:
                         yield {"type": "text", "delta": delta.content}
 
                     if delta.tool_calls:
-                        for tc in delta.tool_calls:
-                            idx = tc.index
-                            if idx not in tc_buf:
-                                tc_buf[idx] = {"id": "", "name": "", "args_str": ""}
-                            if tc.id:
-                                tc_buf[idx]["id"] = tc.id
-                            if tc.function:
-                                if tc.function.name:
-                                    tc_buf[idx]["name"] = tc.function.name
-                                if tc.function.arguments:
-                                    tc_buf[idx]["args_str"] += tc.function.arguments
+                        for fallback_index, tc in enumerate(delta.tool_calls):
+                            _append_tool_call_delta(tc_buf, tc, fallback_index)
 
                     if choice.finish_reason in ("stop", "tool_calls"):
                         break
@@ -363,7 +493,7 @@ class ShangdaoAdapter:
         )
         body: dict[str, Any] = {
             model_meta["body_model_field"]: model_meta["body_model_value"],
-            "messages": request.messages,
+            "messages": _messages_with_text_tool_history(request.messages),
             "stream": True,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
@@ -383,6 +513,7 @@ class ShangdaoAdapter:
                     if cancel_token:
                         cancel_token.add_resource(resp)
                     resp.raise_for_status()
+                    tc_buf: dict[int, dict[str, str]] = {}
                     reasoning_buf = ""
                     try:
                         for line in resp.iter_lines():
@@ -402,13 +533,28 @@ class ShangdaoAdapter:
                             if not choices:
                                 continue
                             choice = choices[0]
-                            delta = choice.get("message") or choice.get("delta", {})
+                            delta = choice.get("message") or choice.get("delta") or {}
                             reasoning = delta.get("reasoning_content")
                             if reasoning:
                                 reasoning_buf += reasoning
                             content = delta.get("content")
                             if content:
                                 yield {"type": "text", "delta": content}
+                            tool_calls = (
+                                delta.get("tool_calls")
+                                or choice.get("tool_calls")
+                            )
+                            if tool_calls:
+                                for fallback_index, tc in enumerate(tool_calls):
+                                    _append_tool_call_delta(
+                                        tc_buf, tc, fallback_index
+                                    )
+                            function_call = (
+                                delta.get("function_call")
+                                or choice.get("function_call")
+                            )
+                            if function_call:
+                                _append_function_call_delta(tc_buf, function_call)
                             if choice.get("finish_reason") in ("stop", "tool_calls"):
                                 break
                     finally:
@@ -419,6 +565,7 @@ class ShangdaoAdapter:
 
                     if _is_cancelled(cancel_token):
                         return
+                    yield from _parse_tool_calls(tc_buf)
                     yield {"type": "done", "reasoning_content": reasoning_buf or None}
         except Exception as exc:
             if _is_cancelled(cancel_token):
@@ -483,17 +630,8 @@ class LiteLLMAdapter:
                         yield {"type": "text", "delta": delta.content}
 
                     if hasattr(delta, "tool_calls") and delta.tool_calls:
-                        for tc in delta.tool_calls:
-                            idx = tc.index
-                            if idx not in tc_buf:
-                                tc_buf[idx] = {"id": "", "name": "", "args_str": ""}
-                            if tc.id:
-                                tc_buf[idx]["id"] = tc.id
-                            if tc.function:
-                                if tc.function.name:
-                                    tc_buf[idx]["name"] = tc.function.name
-                                if tc.function.arguments:
-                                    tc_buf[idx]["args_str"] += tc.function.arguments
+                        for fallback_index, tc in enumerate(delta.tool_calls):
+                            _append_tool_call_delta(tc_buf, tc, fallback_index)
 
                     if hasattr(choice, "finish_reason") and choice.finish_reason in ("stop", "tool_calls"):
                         break
@@ -827,7 +965,7 @@ class LLMGateway:
 
         if api_type == "shangdao":
             model = self._value("shangdao_model", cfg.shangdaoModel)
-            model_meta = SHANGDAO_MODELS.get(model)
+            model_meta = get_shangdao_model_meta(model)
             return LLMRequest(
                 trace_id=trace_id,
                 attempt_id=uuid.uuid4().hex,

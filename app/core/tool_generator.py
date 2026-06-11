@@ -90,7 +90,11 @@ def build_model_options() -> list[ModelOverride]:
 
     # Shangdao models
     if cfg.get(cfg.shangdaoEnabled):
-        for name in SHANGDAO_MODELS:
+        shangdao_names = list(SHANGDAO_MODELS)
+        current_shangdao_model = cfg.get(cfg.shangdaoModel)
+        if current_shangdao_model and current_shangdao_model not in shangdao_names:
+            shangdao_names.insert(0, current_shangdao_model)
+        for name in shangdao_names:
             options.append(ModelOverride(
                 api_type="shangdao",
                 model_id=name,
