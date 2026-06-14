@@ -1,4 +1,7 @@
-"""工具设置页 — 搜索引擎、API Key、保存目录、工具开关"""
+"""工具设置页 — 搜索引擎、API Key、保存目录
+
+工具的启用/禁用已统一到「能力管理器」(工坊面板),此处只保留配置类设置。
+"""
 
 from pathlib import Path
 
@@ -7,14 +10,12 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import SwitchButton
 
 from app.core.config import (
     cfg,
@@ -43,7 +44,6 @@ class ToolsPage(QScrollArea):
     def __init__(self, registry=None, parent=None):
         super().__init__(parent)
         self._registry = registry
-        self._tool_switches: dict[str, SwitchButton] = {}
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
         self._build()
@@ -89,26 +89,6 @@ class ToolsPage(QScrollArea):
 
         layout.addLayout(form)
 
-        # Tool enable/disable switches
-        if self._registry:
-            from app.tools.script_adapter import ScriptToolAdapter
-            layout.addWidget(QLabel("工具开关:"))
-            tool_form = QFormLayout()
-            states = cfg.get(cfg.toolStates)
-            for tool in self._registry.get_all():
-                if not isinstance(tool, ScriptToolAdapter):
-                    continue
-                name = tool.name
-                label = name
-                sw = SwitchButton()
-                sw.setChecked(states.get(name, True))
-                sw.checkedChanged.connect(
-                    lambda checked, n=name: self._on_tool_toggled(n, checked)
-                )
-                self._tool_switches[name] = sw
-                tool_form.addRow(label + ":", sw)
-            layout.addLayout(tool_form)
-
         layout.addStretch()
         self.setWidget(container)
 
@@ -131,8 +111,3 @@ class ToolsPage(QScrollArea):
         if path:
             self._save_dir.setText(path)
             cfg.set(cfg.saveDir, path)
-
-    def _on_tool_toggled(self, name: str, checked: bool):
-        states = dict(cfg.get(cfg.toolStates))
-        states[name] = checked
-        cfg.set(cfg.toolStates, states)

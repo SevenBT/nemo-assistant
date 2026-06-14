@@ -112,8 +112,16 @@ class BuiltinTool(ABC):
 
     @property
     def enabled(self) -> bool:
-        """工具是否启用。禁用的工具不会出现在 LLM 的可用工具列表中。"""
-        return True
+        """工具是否启用。禁用的工具不会出现在 LLM 的可用工具列表中。
+
+        默认 True。可通过 setter 关闭（例如用户在能力面板中禁用高风险工具，
+        或在 cfg.toolStates 中持久化的开关状态）。
+        """
+        return getattr(self, "_enabled", True)
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        self._enabled = bool(value)
 
     @classmethod
     def create(cls, ctx: "ToolContext") -> "BuiltinTool":

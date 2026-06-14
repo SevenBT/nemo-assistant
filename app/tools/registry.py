@@ -29,6 +29,10 @@ from app.tools.base import BuiltinTool
 
 logger = logging.getLogger(__name__)
 
+# 高风险内置工具：有副作用或安全影响（执行命令、运行代码、写文件），
+# 允许用户在能力面板中关闭。其余内置工具默认常驻、不提供开关。
+HIGH_RISK_TOOLS = frozenset({"exec", "run_python", "save_file"})
+
 _MAX_RESULT_CHARS = 8000
 
 
@@ -159,6 +163,18 @@ class ToolRegistry:
 
     def get_openai_functions(self) -> list[dict[str, Any]]:
         return [t.to_openai_function() for t in self._tools.values() if t.enabled]
+
+    def apply_saved_states(self, states: dict[str, bool]) -> None:
+        """将持久化的开关状态应用到已注册工具。
+
+        在工具加载完成后调用一次，确保用户上次的开关选择在启动时即生效，
+        而不是等到打开能力面板交互时才生效。未在 states 中出现的工具保持
+        默认启用。
+        """
+        for name, enabled in states.items():
+            tool = self._tools.get(name)
+            if tool is not None:
+                tool.enabled = enabled
 
     @property
     def tool_names(self) -> list[str]:
