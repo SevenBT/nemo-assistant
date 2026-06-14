@@ -2,11 +2,13 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+DEFAULT_SESSION_TITLE = "新会话"
+
 
 @dataclass
 class Session:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    title: str = "新会话"
+    title: str = DEFAULT_SESSION_TITLE
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     messages: list = field(default_factory=list)  # list[Message]
@@ -33,7 +35,7 @@ class Session:
         messages = [Message.from_dict(m) for m in d.get("messages", [])]
         return cls(
             id=d.get("id", str(uuid.uuid4())),
-            title=d.get("title", "新会话"),
+            title=d.get("title", DEFAULT_SESSION_TITLE),
             created_at=d.get("created_at", time.time()),
             updated_at=d.get("updated_at", time.time()),
             messages=messages,

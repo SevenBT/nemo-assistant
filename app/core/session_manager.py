@@ -10,7 +10,7 @@ from typing import Optional
 
 from app.core.config import SESSIONS_DIR
 from app.models.message import Message
-from app.models.session import Session
+from app.models.session import DEFAULT_SESSION_TITLE, Session
 
 
 class SessionManager:
@@ -103,8 +103,14 @@ class SessionManager:
             return
         session.messages.append(message)
         session.updated_at = time.time()
-        # 从第一条用户消息自动生成标题
-        if len(session.messages) == 1 and message.role == "user" and message.content:
+        # 从第一条用户消息自动生成标题（仅当标题仍是默认值时；
+        # 识图等场景已设置自定义标题，不应被覆盖）
+        if (
+            len(session.messages) == 1
+            and message.role == "user"
+            and message.content
+            and session.title == DEFAULT_SESSION_TITLE
+        ):
             session.title = message.content[:25].strip()
         self._save(session)
 

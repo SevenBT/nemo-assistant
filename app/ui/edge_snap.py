@@ -65,6 +65,11 @@ class EdgeSnapManager(QObject):
     def is_animating(self) -> bool:
         return self._animating
 
+    @property
+    def unsnapped_geo(self) -> QRect | None:
+        """Geometry the window had before it snapped (None if not snapped)."""
+        return self._unsnapped_geo if self._snapped else None
+
     # ── public methods ──────────────────────────────────────────────────
     def set_enabled(self, enabled: bool):
         self._enabled = enabled

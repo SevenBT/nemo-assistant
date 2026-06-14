@@ -31,6 +31,14 @@ class ResizeFilter(QObject):
         self._start_pos = None
         self._cursor_shape = None
         self._recently_resized = False
+        self._enabled = True
+
+    def set_enabled(self, enabled: bool):
+        """Enable/disable edge-resize handling (mini mode uses a fixed size)."""
+        self._enabled = enabled
+        if not enabled:
+            self._active = False
+            self._clear_cursor()
 
     @property
     def is_resizing(self) -> bool:
@@ -126,6 +134,10 @@ class ResizeFilter(QObject):
     def eventFilter(self, obj, event):
         etype = event.type()
 
+        # Disabled (e.g. mini mode uses a fixed window size)
+        if not self._enabled:
+            return False
+
         # Suppress resize while snapped or animating
         snap = self._win._snap_mgr
         if snap is not None and (snap.is_snapped or snap.is_animating):
@@ -178,6 +190,7 @@ class ResizeFilter(QObject):
             if self._active:
                 self._active = False
                 self._recently_resized = True
+                self._win._user_has_resized = True
                 QTimer.singleShot(300, self._clear_recently_resized)
                 return True
 

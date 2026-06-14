@@ -38,6 +38,7 @@ from app.ui.chat_session_controller import ChatSessionController
 from app.ui.chat_widget import ChatWidget
 from app.ui.edge_snap import EdgeSnapManager
 from app.ui.input_widget import InputWidget
+from app.ui.mini_panel import MiniPanel
 from app.ui.notes_dialog import NotesPanel
 from app.core.hotkey_manager import HotkeyManager
 from app.ui.resize_filter import ResizeFilter
@@ -122,6 +123,10 @@ class MainWindow(FluentWindow):
             tool_status=self._tool_status,
             consolidator=self._consolidator,
         )
+        # 识图：每次截图动作新建一个会话，附上图片并按动作处理（自动发送或等输入）
+        self._screenshot_controller.set_chat_callbacks(
+            vision_callback=self._chat_session_controller.start_vision_session,
+        )
         self._scheduler.set_tool_manager(self._registry)
         self._note_created_signal.connect(self._notes_panel.refresh)
         self._setup_tray()
@@ -134,6 +139,7 @@ class MainWindow(FluentWindow):
         self._confirm_request.connect(self._on_confirm_request)
         self._setup_hotkeys()
         self._restore_pinned_notes()
+        self._setup_mini_mode()
 
         # 实时字体大小：内容/编辑器字号变化时重新应用主题 QSS
         cfg.contentFontSize.valueChanged.connect(self._on_font_size_changed)
@@ -165,6 +171,8 @@ class MainWindow(FluentWindow):
         )
         load_builtin_tools(ctx, self._registry)
         load_user_script_tools(USER_TOOLS_DIR, self._registry)
+        # 应用上次持久化的工具开关状态（启动即生效，不必等打开能力面板）
+        self._registry.apply_saved_states(cfg.get(cfg.toolStates))
 
     def _init_memory(self):
         """初始化记忆系统：Consolidator + Dream 定时器。"""
@@ -227,11 +235,19 @@ class MainWindow(FluentWindow):
         return reply == QMessageBox.StandardButton.Yes
 
     def _build_window(self):
-        w = cfg.get(cfg.windowWidth)
-        h = cfg.get(cfg.windowHeight)
+        sg = QApplication.primaryScreen().availableGeometry()
+
+        from app.core.config import CONFIG_DIR
+        if not (CONFIG_DIR / "app_config.json").exists():
+            # 初次启动：按屏幕比例设定初始尺寸（宽 1/2，高 2/3）
+            w = sg.width() // 2
+            h = sg.height() * 2 // 3
+        else:
+            w = cfg.get(cfg.windowWidth)
+            h = cfg.get(cfg.windowHeight)
+
         self.resize(w, h)
         # 默认居中屏幕
-        sg = QApplication.primaryScreen().availableGeometry()
         default_x = sg.x() + (sg.width() - w) // 2
         default_y = sg.y() + (sg.height() - h) // 2
         self.move(default_x, default_y)
@@ -282,19 +298,20 @@ class MainWindow(FluentWindow):
         self._session_panel.session_reorder_requested.connect(self._on_session_reorder)
         self._chat_splitter.addWidget(self._session_panel)
 
-        chat_col = QVBoxLayout()
-        chat_col.setContentsMargins(0, 0, 0, 0)
-        chat_col.setSpacing(0)
+        self._chat_col = QVBoxLayout()
+        self._chat_col.setContentsMargins(0, 0, 0, 0)
+        self._chat_col.setSpacing(0)
         self._chat = ChatWidget()
-        chat_col.addWidget(self._chat)
+        self._chat_col.addWidget(self._chat)
         self._tool_status = QLabel()
         self._tool_status.setObjectName("toolStatus")
         self._tool_status.hide()
-        chat_col.addWidget(self._tool_status)
+        self._chat_col.addWidget(self._tool_status)
         self._input = InputWidget()
         self._input.submitted.connect(self._on_submit)
         self._input.cancel_requested.connect(self._cancel_worker)
-        chat_col.addWidget(self._input)
+        self._chat_col.addWidget(self._input)
+        chat_col = self._chat_col
 
         self._chat.file_attached.connect(self._on_files_attached)
         chat_area = QFrame()
@@ -348,6 +365,7 @@ class MainWindow(FluentWindow):
         self._hotkey_mgr.new_note_triggered.connect(self._new_note_via_hotkey)
         self._hotkey_mgr.toggle_window_triggered.connect(self._toggle_window_visibility)
         self._hotkey_mgr.quick_ask_triggered.connect(self._quick_ask)
+        self._hotkey_mgr.toggle_mini_triggered.connect(self.toggle_mini_mode)
         self._hotkey_mgr.start()
 
     def _new_note_via_hotkey(self):
@@ -372,6 +390,192 @@ class MainWindow(FluentWindow):
         self.raise_()
         self.activateWindow()
         self._input.focus()
+
+    # ──────────────────────────────────────────── Mini 模式
+    def _setup_mini_mode(self):
+        """初始化 Mini 模式状态与面板（默认正常模式）。"""
+        self._mode = "normal"
+        self._mini_session_id: str | None = None
+        # 进入 mini 前的正常几何，退出时还原
+        self._pre_mini_geo = None
+
+        self._mini_panel = MiniPanel(self)
+        self._mini_panel.new_session_requested.connect(self._mini_new_session)
+        self._mini_panel.exit_mini_requested.connect(self.exit_mini_mode)
+        self._mini_panel.minimize_requested.connect(self._minimize)
+        self._mini_panel.close_requested.connect(self._hide_to_tray)
+        # 作为 stackedWidget 的一个页面注册（隐藏于导航之外）
+        self.stackedWidget.addWidget(self._mini_panel)
+        self._mini_panel.hide()
+
+        # mini 字号变化时实时应用
+        cfg.miniFontSize.valueChanged.connect(
+            lambda _v=None: self._mini_panel.apply_font_size(cfg.get(cfg.miniFontSize))
+        )
+        # mini 尺寸变化时，若正处于 mini 模式则实时重设窗口大小
+        cfg.miniWidth.valueChanged.connect(self._on_mini_size_changed)
+        cfg.miniHeight.valueChanged.connect(self._on_mini_size_changed)
+        # mini 不透明度变化时，若正处于 mini 模式则实时应用
+        cfg.miniOpacity.valueChanged.connect(self._on_mini_opacity_changed)
+
+    def _on_mini_size_changed(self, _value=None):
+        if self._mode == "mini":
+            self._set_fixed_size(False)  # 先解除旧的固定约束
+            self._apply_mini_geometry()
+
+    def _on_mini_opacity_changed(self, _value=None):
+        if self._mode == "mini":
+            self.setWindowOpacity(cfg.get(cfg.miniOpacity) / 100.0)
+
+    def toggle_mini_mode(self):
+        """全局热键 / 按钮入口：在正常与 mini 模式间切换。"""
+        if not self.isVisible():
+            self.show()
+        if self._mode == "mini":
+            self.exit_mini_mode()
+        else:
+            self.enter_mini_mode()
+        self.raise_()
+        self.activateWindow()
+
+    def enter_mini_mode(self):
+        """切入 mini 模式：固定小尺寸、置顶、精简布局，复用同一 controller。"""
+        if self._mode == "mini":
+            return
+
+        # 取消最大化 / 边缘吸附，记下还原几何
+        if self.is_maximized:
+            self._toggle_maximize()
+        if self._snap_mgr is not None and self._snap_mgr.is_snapped:
+            self._snap_mgr.unsnap_full()
+        self._pre_mini_geo = self._normal_geometry()
+
+        self._mode = "mini"
+
+        # 选定 / 创建 mini 专用会话
+        sid = self._mini_session_id
+        if not sid or self._sessions.get(sid) is None:
+            session = self._sessions.create(title="快速提问")
+            sid = session.id
+            self._mini_session_id = sid
+
+        # 把共享的 InputWidget 从正常布局移入 mini 面板
+        self._chat_col.removeWidget(self._input)
+        self._mini_panel.set_input_widget(self._input)
+
+        # 切换 controller 的渲染目标到 mini 视图
+        self._chat_session_controller.bind_targets(
+            chat=self._mini_panel.chat,
+            input_widget=self._input,
+            tool_status=self._tool_status,
+        )
+
+        # 标题栏隐藏、内容区切到 mini 页
+        self._title_bar.hide()
+        self.widgetLayout.setContentsMargins(0, 0, 0, 0)
+        self.stackedWidget.setCurrentWidget(self._mini_panel)
+        self._mini_panel.show()
+        self._mini_panel.apply_font_size(cfg.get(cfg.miniFontSize))
+
+        # 重建 mini 视图并恢复任何进行中的流式状态
+        self._chat_session_controller.switch_session(sid)
+
+        # 禁用边缘吸附与边框调整大小，固定尺寸
+        self._resize_filter.set_enabled(False)
+        if self._snap_mgr is not None:
+            self._snap_mgr.set_enabled(False)
+        self._apply_mini_geometry()
+
+        # 置顶
+        self._set_always_on_top(True)
+
+        # 整窗半透明（常驻桌面的轻透视觉）
+        self.setWindowOpacity(cfg.get(cfg.miniOpacity) / 100.0)
+
+    def exit_mini_mode(self):
+        """切回正常模式：还原尺寸、布局、渲染目标与置顶状态。"""
+        if self._mode != "mini":
+            return
+        self._mode = "normal"
+
+        # 还原整窗不透明度
+        self.setWindowOpacity(1.0)
+
+        # 取消置顶
+        self._set_always_on_top(False)
+
+        # 还原固定尺寸约束
+        self._set_fixed_size(False)
+        self._resize_filter.set_enabled(True)
+        if self._snap_mgr is not None:
+            self._snap_mgr.set_enabled(cfg.get(cfg.edgeSnap))
+
+        # 把 InputWidget 移回正常布局
+        self._mini_panel.hide()
+        self._input.setParent(None)
+        self._chat_col.addWidget(self._input)
+
+        # 渲染目标切回正常聊天视图
+        self._chat_session_controller.bind_targets(
+            chat=self._chat,
+            input_widget=self._input,
+            tool_status=self._tool_status,
+        )
+
+        # 还原标题栏与内容区
+        self._title_bar.show()
+        self._title_bar.move(0, 0)
+        self._title_bar.resize(self.width(), self._title_bar.height())
+        self.widgetLayout.setContentsMargins(0, self._title_bar.height(), 0, 0)
+        self.switchTo(self._pages[0])
+        self._title_bar.set_active_view(0)
+
+        # 还原会话视图：mini 用的会话继续显示在正常模式
+        self._chat_session_controller.switch_session(
+            self._mini_session_id or self._chat_session_controller.current_session_id
+        )
+
+        # 还原几何
+        if self._pre_mini_geo is not None and self._pre_mini_geo.isValid():
+            self.setGeometry(self._pre_mini_geo)
+
+    def _mini_new_session(self):
+        """mini 工具栏「新建会话」：开新会话，仍停留在 mini 模式。"""
+        session = self._sessions.create(title="快速提问")
+        self._mini_session_id = session.id
+        sessions = self._sessions.get_sessions()
+        self._session_panel.load(sessions, session.id)
+        self._chat_session_controller.switch_session(session.id)
+
+    def _apply_mini_geometry(self):
+        """按配置应用 mini 固定尺寸，尽量保持当前左上角位置。"""
+        w = cfg.get(cfg.miniWidth)
+        h = cfg.get(cfg.miniHeight)
+        pos = self.pos()
+        self._set_fixed_size(True, w, h)
+        # 防止超出屏幕：右/下边界回拉
+        sg = QApplication.primaryScreen().availableGeometry()
+        x = min(pos.x(), sg.x() + sg.width() - w)
+        y = min(pos.y(), sg.y() + sg.height() - h)
+        x = max(x, sg.x())
+        y = max(y, sg.y())
+        self.setGeometry(x, y, w, h)
+
+    def _set_fixed_size(self, fixed: bool, w: int = 0, h: int = 0):
+        """切换固定尺寸约束。fixed=False 时还原为正常的最小尺寸。"""
+        if fixed:
+            self.setMinimumSize(w, h)
+            self.setMaximumSize(w, h)
+        else:
+            self.setMaximumSize(16777215, 16777215)
+            self.setMinimumSize(320, 420)
+
+    def _set_always_on_top(self, on_top: bool):
+        """切换窗口置顶。无边框窗口下重设 flag 后需要重新 show。"""
+        was_visible = self.isVisible()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on_top)
+        if was_visible:
+            self.show()
 
     def _restore_pinned_notes(self):
         self._sticky_note_controller.restore_pinned()
@@ -481,11 +685,20 @@ class MainWindow(FluentWindow):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        # mini 模式下标题栏隐藏，无需调整其宽度
+        if getattr(self, '_mode', 'normal') == "mini":
+            return
         # FluentWindow 会偏移 titleBar 为导航面板展开按钮留空间，
         # 但由于侧栏已隐藏，需要保持标题栏全宽。
         if hasattr(self, '_title_bar'):
             self._title_bar.move(0, 0)
             self._title_bar.resize(self.width(), self._title_bar.height())
+
+    @property
+    def is_maximized(self) -> bool:
+        """自定义最大化状态。不用 Qt 原生 isMaximized()——无边框 +
+        setResizeEnabled(False) 下原生 showMaximized/showNormal 不可靠。"""
+        return getattr(self, '_is_maximized', False)
 
     def _minimize(self):
         """最小化窗口：根据配置选择隐藏到托盘或任务栏。"""
@@ -499,16 +712,40 @@ class MainWindow(FluentWindow):
         self.hide()
 
     def _toggle_maximize(self):
-        """切换窗口最大化/还原状态"""
-        if self.isMaximized():
-            # 当前是最大化，还原到之前的大小
-            self.showNormal()
+        """切换窗口最大化/还原状态。
+
+        全程用 setGeometry 手动实现，不用原生 showMaximized/showNormal——
+        无边框窗口 + setResizeEnabled(False) 下原生窗口状态会被 WM 反复
+        钳制回全屏（见 CLAUDE.md：尺寸一律走 setGeometry）。
+        """
+        if self.is_maximized:
+            geo = getattr(self, '_pre_max_geo', None)
+            self._is_maximized = False
+            if geo is not None and geo.isValid():
+                self.setGeometry(geo)
+            self._title_bar.update_max_btn(False)
         else:
             # 最大化前先取消边缘吸附
             if self._snap_mgr is not None and self._snap_mgr.is_snapped:
                 self._snap_mgr.unsnap_full()
-            # 当前是正常窗口，最大化
-            self.showMaximized()
+
+            # 记下还原目标：用户手动调整过就存当前几何，否则存半屏，
+            # 这样首次最大化后还原回到舒适的半屏尺寸。
+            if getattr(self, '_user_has_resized', False):
+                self._pre_max_geo = self.geometry()
+            else:
+                sg = QApplication.primaryScreen().availableGeometry()
+                w = sg.width() // 2
+                h = sg.height() * 2 // 3
+                x = sg.x() + (sg.width() - w) // 2
+                y = sg.y() + (sg.height() - h) // 2
+                from PyQt6.QtCore import QRect
+                self._pre_max_geo = QRect(x, y, w, h)
+
+            sg = QApplication.primaryScreen().availableGeometry()
+            self._is_maximized = True
+            self.setGeometry(sg)
+            self._title_bar.update_max_btn(True)
 
     # ──────────────────────────────────────────── 截图
     def _start_screenshot(self):
@@ -569,13 +806,38 @@ class MainWindow(FluentWindow):
             width = getattr(self, '_saved_session_width', None) or cfg.get(cfg.sessionPanelWidth)
             self._chat_splitter.setSizes([width, total - width])
 
-    # ──────────────────────────────────────────── 拦截关闭 → 隐藏到托盘
-    def closeEvent(self, event):
+    def _persist_layout(self):
+        """保存窗口尺寸与分栏宽度。
+
+        窗口最大化或边缘吸附时 self.width()/height() 是全屏尺寸，不能持久化，
+        否则下次启动会以全屏高度还原。这两种状态下保存还原后的"正常"尺寸。
+        """
         sizes = self._chat_splitter.sizes()
         session_width = sizes[0] if sizes[0] > 0 else getattr(self, '_saved_session_width', 180)
-        cfg.set(cfg.windowWidth, self.width())
-        cfg.set(cfg.windowHeight, self.height())
+
+        normal_geo = self._normal_geometry()
+        cfg.set(cfg.windowWidth, normal_geo.width())
+        cfg.set(cfg.windowHeight, normal_geo.height())
         cfg.set(cfg.sessionPanelWidth, max(session_width, 120))
+
+    def _normal_geometry(self):
+        """当前的"正常"几何：剔除最大化 / 边缘吸附 / mini 带来的非常规尺寸。"""
+        if getattr(self, '_mode', 'normal') == "mini":
+            geo = getattr(self, '_pre_mini_geo', None)
+            if geo is not None and geo.isValid():
+                return geo
+        if self.is_maximized:
+            # 最大化时还原目标存在 _pre_max_geo
+            geo = getattr(self, '_pre_max_geo', None)
+            if geo is not None and geo.isValid():
+                return geo
+        if self._snap_mgr is not None and self._snap_mgr.unsnapped_geo is not None:
+            return self._snap_mgr.unsnapped_geo
+        return self.geometry()
+
+    # ──────────────────────────────────────────── 拦截关闭 → 隐藏到托盘
+    def closeEvent(self, event):
+        self._persist_layout()
         cfg.save()
         event.ignore()
         self.hide()
@@ -588,11 +850,7 @@ class MainWindow(FluentWindow):
     def _on_quit(self):
         # 仅当窗口可见时保存布局（否则 closeEvent 已保存）
         if self.isVisible():
-            sizes = self._chat_splitter.sizes()
-            session_width = sizes[0] if sizes[0] > 0 else getattr(self, '_saved_session_width', 180)
-            cfg.set(cfg.windowWidth, self.width())
-            cfg.set(cfg.windowHeight, self.height())
-            cfg.set(cfg.sessionPanelWidth, max(session_width, 120))
+            self._persist_layout()
         cfg.save()
         self.cleanup()
         QApplication.instance().quit()

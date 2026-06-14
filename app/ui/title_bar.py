@@ -108,6 +108,7 @@ class TitleBar(QWidget):
         )
         top_layout.addWidget(self._max_btn)
 
+
         self._close_btn = self._make_tool_btn(
             FluentIcon.CLOSE, "关闭到托盘", self._win._hide_to_tray
         )
@@ -181,6 +182,11 @@ class TitleBar(QWidget):
         )
         nav_layout.addWidget(self._screenshot_btn)
 
+        self._mini_btn = self._make_tool_btn(
+            FluentIcon.ZOOM_OUT, "切换 Mini 模式", self._win.toggle_mini_mode
+        )
+        nav_layout.addWidget(self._mini_btn)
+
         root.addWidget(nav_row)
 
         # Aliases required by FluentWindow's nativeEvent and setTitleBar internals.
@@ -239,7 +245,7 @@ class TitleBar(QWidget):
             e.accept()
             return
         if e.button() == Qt.MouseButton.LeftButton:
-            if not self._win.isMaximized():
+            if not self._win.is_maximized:
                 if self._win._snap_mgr is not None:
                     self._win._snap_mgr.cancel_animation()
                 handle = self._win.windowHandle()
@@ -258,6 +264,15 @@ class TitleBar(QWidget):
         menu.addAction(Action(FluentIcon.CLOSE, "退出", triggered=self._win._on_quit))
 
         menu.exec(global_pos)
+
+    def update_max_btn(self, is_maximized: bool):
+        """Update the maximize/restore button icon and tooltip."""
+        if is_maximized:
+            self._max_btn.setIcon(FluentIcon.BACK_TO_WINDOW)
+            self._max_btn.setToolTip("还原")
+        else:
+            self._max_btn.setIcon(FluentIcon.FULL_SCREEN)
+            self._max_btn.setToolTip("最大化")
 
     def mouseDoubleClickEvent(self, e: QMouseEvent):
         """双击标题栏切换最大化/还原"""

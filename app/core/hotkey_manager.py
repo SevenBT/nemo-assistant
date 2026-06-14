@@ -17,6 +17,7 @@ DEFAULT_HOTKEYS: dict[str, str] = {
     "new_note":      "ctrl+alt+n",
     "toggle_window": "ctrl+alt+space",
     "quick_ask":     "ctrl+alt+q",
+    "toggle_mini":   "ctrl+alt+w",
 }
 
 _ACTION_LABELS: dict[str, str] = {
@@ -24,6 +25,7 @@ _ACTION_LABELS: dict[str, str] = {
     "new_note":      "新建便签",
     "toggle_window": "显示/隐藏窗口",
     "quick_ask":     "快速提问",
+    "toggle_mini":   "切换 Mini 模式",
 }
 
 
@@ -34,12 +36,14 @@ class HotkeyManager(QObject):
     new_note_triggered      = pyqtSignal()
     toggle_window_triggered = pyqtSignal()
     quick_ask_triggered     = pyqtSignal()
+    toggle_mini_triggered   = pyqtSignal()
 
     _SIGNAL_MAP = {
         "screenshot":    "screenshot_triggered",
         "new_note":      "new_note_triggered",
         "toggle_window": "toggle_window_triggered",
         "quick_ask":     "quick_ask_triggered",
+        "toggle_mini":   "toggle_mini_triggered",
     }
 
     def __init__(self, parent=None):
@@ -77,6 +81,7 @@ class HotkeyManager(QObject):
             "new_note": cfg.get(cfg.hotkeyNewNote),
             "toggle_window": cfg.get(cfg.hotkeyToggleWindow),
             "quick_ask": cfg.get(cfg.hotkeyQuickAsk),
+            "toggle_mini": cfg.get(cfg.hotkeyToggleMini),
         }
         for action, signal_name in self._SIGNAL_MAP.items():
             combo = hotkeys.get(action) or DEFAULT_HOTKEYS.get(action, "")
