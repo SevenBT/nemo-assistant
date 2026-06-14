@@ -13,6 +13,7 @@ from qfluentwidgets import IndeterminateProgressBar, SmoothScrollArea
 from app.models.message import Message, MessageRole
 from app.ui.tool_card import ToolSummaryWidget
 from app.ui.file_card_widget import FileCardWidget
+from app.ui.image_preview_widget import ImagePreviewWidget
 
 
 class TypingIndicator(QWidget):
@@ -139,8 +140,11 @@ class MessageBubble(QFrame):
             attachments_layout.setSpacing(4)
 
             for attachment in message.attachments:
-                file_card = FileCardWidget(attachment)
-                attachments_layout.addWidget(file_card)
+                if attachment.is_image():
+                    widget = ImagePreviewWidget(attachment)
+                else:
+                    widget = FileCardWidget(attachment)
+                attachments_layout.addWidget(widget)
 
             layout.addWidget(attachments_widget)
 
@@ -345,30 +349,9 @@ class ChatWidget(QWidget):
 
     def dropEvent(self, event):
         """处理拖放的文件，解析后附加到聊天。"""
-        from app.core.file_parser import FileParser, FileParseError
-        import logging
+        from app.ui.attachment_intake import attachments_from_mime
 
-        logger = logging.getLogger(__name__)
-        urls = event.mimeData().urls()
-        if not urls:
-            return
-
-        parser = FileParser()
-        attachments = []
-
-        for url in urls:
-            file_path = url.toLocalFile()
-            if not file_path:
-                continue
-
-            try:
-                attachment = parser.parse_file(file_path)
-                attachments.append(attachment)
-                logger.info(f"成功解析文件: {attachment.file_name}")
-            except FileParseError as e:
-                logger.warning(f"解析文件失败: {e}")
-                continue
-
+        attachments = attachments_from_mime(event.mimeData())
         if attachments:
             self.file_attached.emit(attachments)
             event.acceptProposedAction()

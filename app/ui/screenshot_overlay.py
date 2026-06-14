@@ -7,6 +7,7 @@ Actions after selection: pin (贴图), copy (复制), save (保存), ocr (识别
 import threading
 
 from PyQt6.QtCore import (
+    QEvent,
     QPoint,
     QRect,
     Qt,
@@ -57,6 +58,9 @@ TOOLBAR_STYLE = f"""
         padding: 8px 14px;
         border-radius: 6px;
     }}
+    #snipToolbar QPushButton {{
+        padding: 4px 8px;
+    }}
     #snipToolbar QPushButton:hover, #ocrPanel QPushButton:hover {{
         background: #3D3D3D;
     }}
@@ -91,6 +95,118 @@ def _get_rapid_ocr():
         from rapidocr_onnxruntime import RapidOCR
         _rapid_ocr_engine = RapidOCR()
     return _rapid_ocr_engine
+
+
+# ── OCR layout reconstruction ──────────────────────────────────────────
+#
+# RapidOCR returns a list of [box, text, score] where *box* is four
+# (x, y) corner points.  The engine emits one entry per detected text
+# box, NOT per visual line — a single on-screen line is often split into
+# several boxes.  Joining everything with "\n" therefore breaks lines
+# apart.  We rebuild the original layout from box geometry: group boxes
+# into rows by vertical overlap, order each row left→right, and infer
+# inter-word spacing and leading indentation from horizontal gaps.
+
+# A box joins a row if its vertical center sits within this fraction of
+# the row's mean glyph height. Larger merges adjacent lines; smaller
+# over-splits. 0.5 keeps a comfortable margin for the common case.
+_ROW_OVERLAP_RATIO = 0.5
+# If the gap between two boxes on the same row exceeds this fraction of
+# the mean glyph height, insert a space. Below it the boxes are treated
+# as touching (no space) — important for CJK where boxes abut tightly.
+_WORD_GAP_RATIO = 0.4
+# Leading whitespace: one space per this many "glyph widths" of left
+# offset relative to the leftmost box in the block. Approximates indent.
+_INDENT_GAP_RATIO = 0.9
+
+
+def _box_metrics(box) -> dict:
+    """Extract geometry from a RapidOCR 4-point box."""
+    xs = [float(p[0]) for p in box]
+    ys = [float(p[1]) for p in box]
+    left, right = min(xs), max(xs)
+    top, bottom = min(ys), max(ys)
+    return {
+        "left": left,
+        "right": right,
+        "cy": (top + bottom) / 2.0,
+        "height": max(bottom - top, 1.0),
+    }
+
+
+def _reconstruct_layout(result) -> str:
+    """Rebuild text preserving the visual row/column structure of the image."""
+    items = []
+    for entry in result:
+        # entry is [box, text, score]; tolerate score-less variants
+        box, text = entry[0], entry[1]
+        if not text:
+            continue
+        m = _box_metrics(box)
+        m["text"] = text
+        items.append(m)
+
+    if not items:
+        return ""
+
+    # Order top→bottom so rows form in reading order.
+    items.sort(key=lambda it: it["cy"])
+
+    rows: list[list[dict]] = []
+    for it in items:
+        placed = False
+        for row in rows:
+            avg_cy = sum(b["cy"] for b in row) / len(row)
+            avg_h = sum(b["height"] for b in row) / len(row)
+            if abs(it["cy"] - avg_cy) <= avg_h * _ROW_OVERLAP_RATIO:
+                row.append(it)
+                placed = True
+                break
+        if not placed:
+            rows.append([it])
+
+    # Common left anchor + glyph width estimate for indentation.
+    block_left = min(it["left"] for it in items)
+    avg_glyph_w = _estimate_glyph_width(items)
+
+    lines = []
+    for row in rows:
+        row.sort(key=lambda b: b["left"])
+        lines.append(_assemble_row(row, block_left, avg_glyph_w))
+    return "\n".join(lines)
+
+
+def _estimate_glyph_width(items) -> float:
+    """Rough mean glyph width: box width divided by character count."""
+    widths = []
+    for it in items:
+        n = max(len(it["text"]), 1)
+        widths.append((it["right"] - it["left"]) / n)
+    widths = [w for w in widths if w > 0]
+    return sum(widths) / len(widths) if widths else 1.0
+
+
+def _assemble_row(row: list[dict], block_left: float, glyph_w: float) -> str:
+    """Join one row's boxes, inferring indentation and inter-box spacing."""
+    parts = []
+
+    # Leading indentation relative to the block's left edge.
+    indent = round((row[0]["left"] - block_left) / (glyph_w * _INDENT_GAP_RATIO))
+    if indent > 0:
+        parts.append(" " * indent)
+
+    prev_right = None
+    for b in row:
+        if prev_right is not None:
+            gap = b["left"] - prev_right
+            if gap > b["height"] * _WORD_GAP_RATIO:
+                # Scale spaces with gap size so wide columns stay separated.
+                spaces = max(1, round(gap / (glyph_w * _INDENT_GAP_RATIO)))
+                parts.append(" " * spaces)
+        parts.append(b["text"])
+        prev_right = b["right"]
+
+    return "".join(parts)
 
 
 class ScreenshotOverlay(QWidget):
@@ -268,26 +384,47 @@ class ScreenshotOverlay(QWidget):
         self._toolbar.setStyleSheet(TOOLBAR_STYLE)
         self._toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
 
-        layout = QHBoxLayout(self._toolbar)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(2)
+        root = QVBoxLayout(self._toolbar)
+        root.setContentsMargins(4, 4, 4, 4)
+        root.setSpacing(3)
 
-        actions = [
+        from app.ui.vision_actions import VISION_ACTIONS
+
+        # AI 行：识图动作，发图片像素给多模态模型
+        ai_actions = [
+            (a.action_id, f"{a.icon} {a.label}") for a in VISION_ACTIONS
+        ]
+        # 本地行：不走 AI 的动作（贴图 / 本地 OCR 识字 / 复制 / 保存 / 取消）
+        local_actions = [
             ("pin",  "📌 贴图"),
             ("ocr",  "📝 识字"),
             ("copy", "📋 复制"),
             ("save", "💾 保存"),
             ("cancel", "✕"),
         ]
-        for key, label in actions:
-            btn = QPushButton(label)
-            if key == "cancel":
-                btn.setObjectName("snipCloseBtn")
-            btn.clicked.connect(lambda checked, k=key: self._on_action(k))
-            layout.addWidget(btn)
+
+        def _add_row(actions):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(2)
+            for key, label in actions:
+                btn = QPushButton(label)
+                if key == "cancel":
+                    btn.setObjectName("snipCloseBtn")
+                btn.clicked.connect(lambda checked, k=key: self._on_action(k))
+                row.addWidget(btn)
+            # Trailing stretch keeps buttons at natural width and left-aligned,
+            # so the two rows share the same left edge instead of stretching
+            # each row's buttons to fill differing widths.
+            row.addStretch()
+            root.addLayout(row)
+
+        _add_row(ai_actions)
+        _add_row(local_actions)
 
         sh = self._toolbar.sizeHint()
         self._toolbar.setFixedSize(max(sh.width(), 200), max(sh.height(), 36))
+        self._toolbar.installEventFilter(self)
         self._toolbar.show()
         self._toolbar.raise_()
         QTimer.singleShot(0, self._position_toolbar)
@@ -339,7 +476,9 @@ class ScreenshotOverlay(QWidget):
             self._do_ocr()
             return
 
-        # pin / copy / save — capture & emit immediately
+        # pin / copy / save / vision:* — capture & emit immediately.
+        # vision actions carry the screenshot pixmap through to the AI path;
+        # OCR (above) is a separate path that extracts text locally.
         self.hide()
         QApplication.processEvents()
         pixmap = self._grab_rect(r)
@@ -388,7 +527,7 @@ class ScreenshotOverlay(QWidget):
             engine = _get_rapid_ocr()
             result, _ = engine(bgr)
             if result:
-                return "\n".join(line[1] for line in result).strip()
+                return _reconstruct_layout(result).strip() or "[未识别到文字]"
             return "[未识别到文字]"
         except Exception as e:
             return f"[OCR 错误: {e}]"
@@ -464,6 +603,7 @@ class ScreenshotOverlay(QWidget):
         self._ocr_panel.adjustSize()
         sh = self._ocr_panel.sizeHint()
         self._ocr_panel.setFixedSize(max(sh.width(), 400), max(sh.height(), 200))
+        self._ocr_panel.installEventFilter(self)
         self._ocr_panel.show()
         self._ocr_panel.raise_()
         self._ocr_edit.setFocus()
@@ -602,6 +742,16 @@ class ScreenshotOverlay(QWidget):
         p.drawLine(x + rw - off, y + rh - off, x + rw - off, y + rh - off - arm)
 
     # ── Mouse ──────────────────────────────────────────────────────────
+
+    def eventFilter(self, obj, event):
+        # The resize cursor is a *global* override (QApplication.setOverrideCursor).
+        # When the pointer crosses straight from the selection edge onto the
+        # toolbar/panel, the overlay stops getting mouseMove events, so the
+        # override never gets cleared and the resize cursor sticks on the
+        # buttons. Clear it the moment the pointer enters a panel.
+        if event.type() == QEvent.Type.Enter and obj in (self._toolbar, self._ocr_panel):
+            self._clear_resize_cursor()
+        return super().eventFilter(obj, event)
 
     def _is_on_panel(self, pos) -> bool:
         for panel in (self._toolbar, self._ocr_panel):

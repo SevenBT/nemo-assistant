@@ -346,6 +346,31 @@ def _append_function_call_delta(
             entry["args_str"] = json.dumps(arguments, ensure_ascii=False)
 
 
+def _flatten_content(content: Any) -> str:
+    """Reduce a (possibly multimodal list) content to plain text.
+
+    Shangdao's gateway only accepts string content. If multimodal list
+    content ever reaches it, keep the text parts and drop image_url parts
+    (replaced by a placeholder) instead of stringifying the whole list.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                if item.get("type") == "text":
+                    parts.append(str(item.get("text") or ""))
+                elif item.get("type") == "image_url":
+                    parts.append("[图片]")
+            elif item is not None:
+                parts.append(str(item))
+        return "\n".join(p for p in parts if p)
+    if content is None:
+        return ""
+    return str(content)
+
+
 def _messages_with_text_tool_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert OpenAI tool history messages into plain chat text for gateways."""
     result: list[dict[str, Any]] = []
@@ -356,7 +381,7 @@ def _messages_with_text_tool_history(messages: list[dict[str, Any]]) -> list[dic
         if role == "assistant" and message.get("tool_calls"):
             content_parts: list[str] = []
             if message.get("content"):
-                content_parts.append(str(message["content"]))
+                content_parts.append(_flatten_content(message["content"]))
 
             call_lines: list[str] = []
             for tc in message.get("tool_calls", []):
@@ -391,7 +416,7 @@ def _messages_with_text_tool_history(messages: list[dict[str, Any]]) -> list[dic
 
         cleaned = {
             "role": role,
-            "content": message.get("content") or "",
+            "content": _flatten_content(message.get("content")),
         }
         if role:
             result.append(cleaned)

@@ -40,6 +40,7 @@ SESSIONS_DIR = DATA_DIR / "sessions"
 NOTES_DIR = DATA_DIR / "notes"
 NOTES_IMAGES_DIR = NOTES_DIR / "images"
 TRASH_DIR = NOTES_DIR / "trash"
+SCREENSHOTS_DIR = DATA_DIR / "screenshots"
 TOOLS_DIR = BASE_DIR / "tools"
 USER_TOOLS_DIR = DATA_DIR / "user_tools"
 TOOL_RUNTIME_DIR = DATA_DIR / "tool_runtime"
@@ -78,6 +79,41 @@ def get_shangdao_model_meta(model: str) -> dict | None:
         "body_model_field": "model",
         "body_model_value": model,
     }
+
+
+# Substrings that mark an OpenAI-compatible model name as vision-capable.
+# Used only for the "auto" heuristic; users can override via visionSupport.
+_VISION_MODEL_MARKERS = (
+    "gpt-4o", "gpt-4.1", "gpt-4-turbo", "gpt-4-vision",
+    "o1", "o3", "o4",
+    "claude-3", "claude-4", "claude-opus", "claude-sonnet", "claude-haiku",
+    "gemini",
+    "vl", "vision", "llava", "qwen-vl", "qwen2-vl", "qwen2.5-vl",
+    "pixtral", "internvl", "minicpm-v", "glm-4v", "step-1v",
+)
+
+
+def model_supports_vision(model: str) -> bool:
+    """Heuristic: does this OpenAI-compatible model name imply image input?"""
+    name = (model or "").strip().lower()
+    if not name:
+        return False
+    return any(marker in name for marker in _VISION_MODEL_MARKERS)
+
+
+def current_vision_enabled() -> bool:
+    """Whether the active OpenAI-type model can receive image pixels.
+
+    Resolves the user override (visionSupport = on/off) or falls back to a
+    name-based heuristic ("auto"). Only meaningful for api_type == 'openai';
+    shangdao/litellm callers should make their own determination.
+    """
+    setting = (cfg.get(cfg.visionSupport) or "auto").strip().lower()
+    if setting == "on":
+        return True
+    if setting == "off":
+        return False
+    return model_supports_vision(cfg.get(cfg.model))
 
 
 MODEL_TEMPLATES: dict[str, list[dict]] = {
@@ -155,6 +191,20 @@ class AppConfig(QConfig):
     windowHeight = RangeConfigItem(
         "Window", "Height", 700, RangeValidator(400, 1200)
     )
+    # Mini 模式：常驻桌面的小窗，尺寸与字号独立可配
+    miniWidth = RangeConfigItem(
+        "Window", "MiniWidth", 320, RangeValidator(220, 500)
+    )
+    miniHeight = RangeConfigItem(
+        "Window", "MiniHeight", 420, RangeValidator(240, 600)
+    )
+    miniFontSize = RangeConfigItem(
+        "Window", "MiniFontSize", 12, RangeValidator(9, 16)
+    )
+    # Mini 模式整窗不透明度（百分比，50–100；100 = 完全不透明）
+    miniOpacity = RangeConfigItem(
+        "Window", "MiniOpacity", 90, RangeValidator(50, 100)
+    )
 
     # -- API --
     apiType = OptionsConfigItem(
@@ -168,6 +218,12 @@ class AppConfig(QConfig):
     )
     temperature = ConfigItem("API", "Temperature", 0.7)
     systemPrompt = ConfigItem("API", "SystemPrompt", "")
+    # 当前 OpenAI 兼容模型是否支持多模态识图（发送图片像素）。
+    # "auto" = 按模型名启发式推断；"on"/"off" = 用户手动覆盖。
+    visionSupport = OptionsConfigItem(
+        "API", "VisionSupport", "auto",
+        OptionsValidator(["auto", "on", "off"]),
+    )
 
     # -- Shangdao --
     shangdaoEnabled = ConfigItem("Shangdao", "Enabled", False, BoolValidator())
@@ -201,6 +257,7 @@ class AppConfig(QConfig):
         "Hotkeys", "ToggleWindow", "ctrl+alt+space"
     )
     hotkeyQuickAsk = ConfigItem("Hotkeys", "QuickAsk", "ctrl+alt+q")
+    hotkeyToggleMini = ConfigItem("Hotkeys", "ToggleMini", "ctrl+alt+w")
 
     # -- Layout (persisted, not shown in settings UI) --
     noteListWidth = ConfigItem("Layout", "NoteListWidth", 100)
@@ -265,7 +322,7 @@ def _ensure_dirs() -> None:
     for d in [
         CONFIG_DIR, DATA_DIR, SESSIONS_DIR, NOTES_DIR, NOTES_IMAGES_DIR,
         TRASH_DIR, USER_TOOLS_DIR, TOOL_RUNTIME_DIR,
-        TOOL_SITE_PACKAGES,
+        TOOL_SITE_PACKAGES, SCREENSHOTS_DIR,
     ]:
         d.mkdir(parents=True, exist_ok=True)
 

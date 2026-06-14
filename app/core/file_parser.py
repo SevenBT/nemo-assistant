@@ -47,11 +47,15 @@ class FileParser:
             self._ocr_engine = RapidOCR()
         return self._ocr_engine
 
-    def parse_file(self, file_path: str) -> Attachment:
+    def parse_file(self, file_path: str, *, ocr_images: bool = True) -> Attachment:
         """Parse a file and return an Attachment object.
 
         Args:
             file_path: Absolute path to the file
+            ocr_images: When False, image attachments are returned without
+                running OCR (parsed_content stays empty). Used for the vision
+                path, where pixels are sent directly and OCR text is only a
+                downgrade fallback — computed lazily later if actually needed.
 
         Returns:
             Attachment object with parsed content
@@ -90,7 +94,7 @@ class FileParser:
             if file_type == 'text':
                 parsed_content = self._parse_text(file_path)
             elif file_type == 'image':
-                parsed_content = self._parse_image(file_path)
+                parsed_content = self._parse_image(file_path) if ocr_images else ""
             else:
                 raise FileParseError(f"未实现的文件类型: {file_type}")
         except Exception as e:

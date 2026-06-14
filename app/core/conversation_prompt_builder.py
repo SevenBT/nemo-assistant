@@ -34,7 +34,8 @@ class ConversationPromptBuilder:
             {"role": "system", "content": system_prompt}
         ]
 
-        merged_messages = merge_attachments_to_content(messages)
+        vision_enabled = self._vision_enabled()
+        merged_messages = merge_attachments_to_content(messages, vision_enabled)
         for index, message in enumerate(messages):
             result.append(merged_messages[index])
             if message.role == MessageRole.ASSISTANT and message.tool_calls:
@@ -44,6 +45,27 @@ class ConversationPromptBuilder:
                     result.pop()
 
         return result
+
+    def _vision_enabled(self) -> bool:
+        """Whether the active provider/model can receive image pixels.
+
+        openai → resolve user override or name heuristic; litellm → name
+        heuristic on the default model; shangdao → not supported. Fails
+        safe to False (text-only) if config can't be resolved.
+        """
+        from app.core.config import current_vision_enabled, model_supports_vision
+
+        try:
+            api_type = self._config.get(self._config.apiType)
+            if api_type == "openai":
+                return current_vision_enabled()
+            if api_type == "litellm":
+                return model_supports_vision(
+                    self._config.get(self._config.litellmDefaultModel)
+                )
+        except (AttributeError, KeyError):
+            return False
+        return False
 
     def _build_system_prompt(self, session_id: str | None) -> str:
         user_prompt = self._resolve_user_prompt(session_id)
@@ -82,22 +104,87 @@ class ConversationPromptBuilder:
         ]
 
 
-def merge_attachments_to_content(messages: list[Message]) -> list[dict]:
-    """调用模型前，把用户消息的附件解析内容合并进 content。"""
+def merge_attachments_to_content(
+    messages: list[Message], vision_enabled: bool = False
+) -> list[dict]:
+    """调用模型前，把用户消息的附件并入 content。
+
+    文本附件（文档/文本文件）始终拼成文字。图片附件分两种处理：
+    - vision_enabled 且能取到图片数据 → content 变为 OpenAI 多模态 list，
+      文字部分 + 每张图一个 image_url，让模型真正"看到"像素。
+    - 否则 → 退回纯文本，用图片的 OCR 文字（parsed_content）占位。
+
+    注意：这条"图片像素通道"只服务多模态识图，与用户主动点 OCR 识字
+    是两条独立路径（见 docs/TODO_SCREENSHOT_AI.md）。
+    """
     api_messages = []
     for msg in messages:
         api_dict = msg.to_api_dict()
 
         if msg.role == MessageRole.USER and msg.attachments:
-            attachment_texts = [
-                f"[文件: {att.file_name}]\n{att.parsed_content}"
-                for att in msg.attachments
-            ]
-            merged_content = "\n\n".join(attachment_texts)
-            if msg.content:
-                merged_content += f"\n\n{msg.content}"
-            api_dict["content"] = merged_content
+            text_atts = [a for a in msg.attachments if not a.is_image()]
+            image_atts = [a for a in msg.attachments if a.is_image()]
+
+            text_block = _build_text_block(msg, text_atts, image_atts, vision_enabled)
+
+            image_urls = []
+            if vision_enabled:
+                for att in image_atts:
+                    data_url = att.to_data_url()
+                    if data_url:
+                        image_urls.append(data_url)
+
+            if image_urls:
+                content_parts: list[dict[str, Any]] = []
+                if text_block:
+                    content_parts.append({"type": "text", "text": text_block})
+                for url in image_urls:
+                    content_parts.append(
+                        {"type": "image_url", "image_url": {"url": url}}
+                    )
+                api_dict["content"] = content_parts
+            else:
+                api_dict["content"] = text_block
 
         api_messages.append(api_dict)
 
     return api_messages
+
+
+def _build_text_block(
+    msg: Message,
+    text_atts: list,
+    image_atts: list,
+    vision_enabled: bool,
+) -> str:
+    """Compose the textual portion: text-file contents, image OCR fallback, user text."""
+    parts = [f"[文件: {att.file_name}]\n{att.parsed_content}" for att in text_atts]
+
+    # When vision can't carry the pixels, fall back to image OCR text so the
+    # model still gets *something*. OCR is computed lazily here (not at intake)
+    # so the vision path never pays for it. When vision is on, pixels go through
+    # image_url, so we skip OCR entirely.
+    if not vision_enabled:
+        for att in image_atts:
+            text = att.parsed_content or _ocr_image_text(att)
+            if text:
+                parts.append(f"[图片: {att.file_name}]\n{text}")
+
+    merged = "\n\n".join(parts)
+    if msg.content:
+        merged = f"{merged}\n\n{msg.content}" if merged else msg.content
+    return merged
+
+
+def _ocr_image_text(attachment) -> str:
+    """Lazily OCR an image attachment for the vision-off downgrade path."""
+    from pathlib import Path
+
+    if not attachment.file_path or not Path(attachment.file_path).is_file():
+        return ""
+    try:
+        from app.core.file_parser import FileParser
+
+        return FileParser()._parse_image(attachment.file_path)
+    except Exception:
+        return ""

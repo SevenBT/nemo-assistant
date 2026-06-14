@@ -47,11 +47,22 @@ class ChatSessionController(QObject):
         self._current_ai_bubble = None
         self._current_ai_msg: Message | None = None
         self._current_ai_text = ""
-        self._pending_attachments: list = []
 
     @property
     def current_session_id(self) -> str | None:
         return self._current_session_id
+
+    def bind_targets(self, *, chat, input_widget, tool_status):
+        """Swap the render targets (chat view / input / tool status).
+
+        Used when toggling between normal and mini display modes: the same
+        controller (and its live workers) keeps driving whichever widget set
+        is currently visible. Call switch_session() afterwards to rebuild the
+        newly-bound chat view and restore any in-flight streaming state.
+        """
+        self._chat = chat
+        self._input = input_widget
+        self._tool_status = tool_status
 
     def init_sessions(self):
         sessions = self._sessions.get_sessions()
@@ -66,6 +77,25 @@ class ChatSessionController(QObject):
         sessions = self._sessions.get_sessions()
         self._session_panel.load(sessions, session.id)
         self.switch_session(session.id)
+
+    def start_vision_session(self, attachments: list, vision_action):
+        """识图：为每次截图动作新建一个会话并切过去，附上图片。
+
+        有预设提示词的动作（解释/翻译/解题/转表格）直接连图带词发出去；
+        通用「问AI」预设为空，只把图挂上、光标停在输入框等用户输入。
+        """
+        session = self._sessions.create(title=vision_action.session_title)
+        sessions = self._sessions.get_sessions()
+        self._session_panel.load(sessions, session.id)
+        self.switch_session(session.id)
+
+        self._input.add_pending_attachments(attachments)
+
+        if vision_action.auto_send:
+            self.submit(vision_action.prompt)
+        else:
+            self._input.set_text(vision_action.prompt)
+            self._input.focus()
 
     def delete_session(self, sid: str):
         self._sessions.delete(sid)
@@ -167,7 +197,8 @@ class ChatSessionController(QObject):
         self._input.focus()
 
     def on_files_attached(self, attachments: list):
-        self._pending_attachments.extend(attachments)
+        # 附件统一交给输入框的待发预览条管理（单一来源）。
+        self._input.add_pending_attachments(attachments)
 
     def submit(self, text: str):
         sid = self._current_session_id
@@ -176,12 +207,12 @@ class ChatSessionController(QObject):
         if sid in self._workers:
             return
 
+        attachments = self._input.take_pending_attachments()
         user_msg = Message(
             role=MessageRole.USER,
             content=text,
-            attachments=self._pending_attachments.copy(),
+            attachments=attachments,
         )
-        self._pending_attachments.clear()
 
         self._sessions.add_message(sid, user_msg)
         self._chat.add_message(user_msg)

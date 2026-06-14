@@ -71,6 +71,28 @@ class ApiPage(QScrollArea):
         )
         form.addRow("模型:", self._model)
 
+        # 识图（多模态）能力：截图/图片附件是否把像素发给模型
+        self._vision = QComboBox()
+        self._VISION_OPTIONS = [
+            ("auto", "自动（按模型名判断）"),
+            ("on", "始终开启"),
+            ("off", "始终关闭"),
+        ]
+        for value, label in self._VISION_OPTIONS:
+            self._vision.addItem(label, value)
+        current_vision = cfg.get(cfg.visionSupport)
+        vision_idx = self._vision.findData(current_vision)
+        self._vision.setCurrentIndex(vision_idx if vision_idx >= 0 else 0)
+        self._vision.currentIndexChanged.connect(
+            lambda i: cfg.set(cfg.visionSupport, self._vision.itemData(i))
+        )
+        self._vision.setToolTip(
+            "识图功能是否把图片像素发给模型。\n"
+            "自动：常见多模态模型名（gpt-4o/claude/gemini/vl 等）自动识别。\n"
+            "若用自定义模型名且确认支持视觉，选「始终开启」。"
+        )
+        form.addRow("识图能力:", self._vision)
+
         self._max_tokens = QSpinBox()
         self._max_tokens.setRange(256, 65536)
         self._max_tokens.setSingleStep(256)
@@ -224,7 +246,7 @@ class ApiPage(QScrollArea):
         elif not cfg.get(cfg.litellmEnabled):
             cfg.set(cfg.apiType, "openai")
         # Disable OpenAI fields when shangdao is active
-        for w in (self._base_url, self._api_key, self._model,
+        for w in (self._base_url, self._api_key, self._model, self._vision,
                   self._max_tokens, self._temperature):
             w.setEnabled(not enabled)
         self._ll_enabled.setEnabled(not enabled)
@@ -240,7 +262,7 @@ class ApiPage(QScrollArea):
             cfg.set(cfg.apiType, "litellm")
         elif not cfg.get(cfg.shangdaoEnabled):
             cfg.set(cfg.apiType, "openai")
-        for w in (self._base_url, self._api_key, self._model,
+        for w in (self._base_url, self._api_key, self._model, self._vision,
                   self._max_tokens, self._temperature):
             w.setEnabled(not enabled)
         self._sd_enabled.setEnabled(not enabled)
