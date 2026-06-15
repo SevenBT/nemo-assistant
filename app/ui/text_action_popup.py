@@ -1,8 +1,8 @@
-"""划词浮标 — 光标附近弹出的一排动作按钮。
+"""划词浮标 — 选区下方弹出的一排紧凑图标按钮。
 
-复刻截图工具栏（screenshot_overlay.py）的深色圆角视觉。两种触发路径
+与截图工具栏（screenshot_overlay.py）共享深色圆角视觉。两种触发路径
 共用同一个弹窗：
-  - 划词浮标：鼠标拖选后在光标附近弹出
+  - 划词浮标：鼠标拖选后在选区下方弹出
   - 全局热键：在当前鼠标位置弹出
 
 ★ 关键约束：弹窗绝不能抢焦点——连「点击按钮」也不能。一旦焦点被夺走，
@@ -17,12 +17,19 @@
 只有用户真要动作时才发一次 Ctrl+C，不打扰正常的复制粘贴。
 
 按钮按下后只发 action_chosen(key) 信号，由调用方负责取词与分发。
+
+—— 交互规则 ——
+- 显示后任意左/右键点击浮标以外区域 → 立即消失
+- 点击浮标背景（非按钮区域）→ 立即消失
+- 鼠标移入重置自动消失计时（2s），移出重新倒计时
 """
 from __future__ import annotations
 
+import logging
 import sys
+from collections.abc import Callable
 
-from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPoint, QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
@@ -32,32 +39,43 @@ from PyQt6.QtWidgets import (
 
 from app.ui.text_actions import TEXT_ACTIONS
 
-# 复用截图工具栏的深色调，保持视觉统一。
+logger = logging.getLogger(__name__)
+
+try:
+    import mouse as _mouse
+
+    _MOUSE_OK = True
+except ImportError:
+    _MOUSE_OK = False
+
+# 紧凑无文字浮标：图标 15px，内边距 3px 起。
 _POPUP_STYLE = """
     #textActionBar {
         background: #2D2D2D;
-        border-radius: 8px;
+        border-radius: 6px;
         border: 1px solid #3D3D3D;
     }
     #textActionBar QPushButton {
         background: transparent;
         border: none;
         color: #FFFFFF;
-        font-size: 13px;
-        padding: 6px 12px;
-        border-radius: 6px;
+        font-size: 15px;
+        padding: 3px 5px;
+        border-radius: 4px;
+        min-width: 26px;
+        min-height: 26px;
     }
     #textActionBar QPushButton:hover {
         background: #3D3D3D;
     }
 """
 
-# 浮标相对光标的偏移：落在光标右下方，不挡住选中的文字。
-_CURSOR_OFFSET_X = 12
-_CURSOR_OFFSET_Y = 16
+# 浮标相对光标的偏移：落在光标正下方。
+_CURSOR_OFFSET_X = 8
+_CURSOR_OFFSET_Y = 20
 
 # 鼠标移开后自动消失的延迟（ms）。
-_AUTO_HIDE_MS = 4000
+_AUTO_HIDE_MS = 2000
 
 # Win32 扩展样式常量（用于 WS_EX_NOACTIVATE，让窗口点击不抢焦点）。
 _GWL_EXSTYLE = -20
@@ -68,20 +86,25 @@ class TextActionPopup(QFrame):
     """无边框、不抢焦点的划词动作条。"""
 
     action_chosen = pyqtSignal(str)  # 选中的动作 key
+    _hide_requested = pyqtSignal()   # 内部：从 mouse hook 线程请求关闭
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._cached_geo: QRect | None = None
+        self._mouse_hook: Callable | None = None
         self._build_window()
         self._build_buttons()
         self._auto_hide = QTimer(self)
         self._auto_hide.setSingleShot(True)
         self._auto_hide.timeout.connect(self.hide)
+        self._hide_requested.connect(self._on_hide_requested)
+
+    # ── 窗口设置 ────────────────────────────────────────────────────────
 
     def _build_window(self):
         self.setObjectName("textActionBar")
         self.setStyleSheet(_POPUP_STYLE)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
-        # ★ 不抢焦点：保住源应用的选区。
         self.setWindowFlags(
             Qt.WindowType.Tool
             | Qt.WindowType.FramelessWindowHint
@@ -93,33 +116,34 @@ class TextActionPopup(QFrame):
 
     def _build_buttons(self):
         row = QHBoxLayout(self)
-        row.setContentsMargins(4, 4, 4, 4)
-        row.setSpacing(2)
+        row.setContentsMargins(3, 3, 3, 3)
+        row.setSpacing(1)
         for action in TEXT_ACTIONS:
-            btn = QPushButton(f"{action.icon} {action.label}")
+            btn = QPushButton(action.icon)
+            btn.setToolTip(action.label)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(
                 lambda _checked, k=action.key: self._on_clicked(k)
             )
             row.addWidget(btn)
 
+    # ── Win32 防激活 ────────────────────────────────────────────────────
+
     def showEvent(self, event):
-        """应用 WS_EX_NOACTIVATE：点击窗口上的按钮也不夺走前台焦点。
-
-        仅靠 WA_ShowWithoutActivating 只能保证 show() 时不激活，点击仍会抢焦点
-        （导致随后的 Ctrl+C 发给本 app，取不到源应用选区）。WS_EX_NOACTIVATE
-        让窗口自始至终不接受激活，源应用始终保持前台、选区不丢。
-
-        按 CLAUDE.md 经验：Win32 扩展样式须在 showEvent 中用 ctypes 设置。
-        """
         super().showEvent(event)
         self._apply_no_activate()
+        self._install_click_watcher()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self._remove_click_watcher()
 
     def _apply_no_activate(self):
         if sys.platform != "win32":
             return
         try:
             import ctypes
+
             hwnd = int(self.winId())
             user32 = ctypes.windll.user32
             ex_style = user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
@@ -127,38 +151,106 @@ class TextActionPopup(QFrame):
                 hwnd, _GWL_EXSTYLE, ex_style | _WS_EX_NOACTIVATE
             )
         except Exception:
-            pass
+            logger.warning(
+                "WS_EX_NOACTIVATE 设置失败，弹窗点击可能抢夺焦点",
+                exc_info=True,
+            )
+
+    # ── 全局点击监听（mouse hook 线程 → pyqtSignal → 主线程） ──────────
+
+    def _on_hide_requested(self):
+        """主线程 slot：收到 hook 线程的关闭请求后执行实际 hide。"""
+        self.hide()
+
+    def _install_click_watcher(self):
+        """安装全局 mouse hook，监听弹窗外的点击以便立即关闭。"""
+        if not _MOUSE_OK:
+            return
+        if self._mouse_hook is not None:
+            return
+        try:
+            self._mouse_hook = _mouse.hook(self._on_global_event)
+        except Exception:
+            logger.warning("mouse hook 安装失败，点击弹窗外部将无法关闭",
+                           exc_info=True)
+
+    def _remove_click_watcher(self):
+        if self._mouse_hook is None:
+            return
+        try:
+            _mouse.unhook(self._mouse_hook)
+        except Exception:
+            logger.warning("mouse hook 卸载失败", exc_info=True)
+            return  # 保留引用，避免下次 show 时重复安装导致泄漏
+        self._mouse_hook = None
+
+    def _on_global_event(self, event):
+        """mouse hook 回调（在 hook 线程执行）。
+
+        右键任意位置 → 立即关闭。
+        左键点弹窗以外区域 → 关闭；点在弹窗内（按钮 / 背景）→ 不干涉，
+        由 Qt 事件循环在主线处理：按钮 clicked → _on_clicked → hide，
+        背景 mousePressEvent → hide。
+        """
+        event_type = getattr(event, "event_type", None)
+        if event_type != "down":
+            return
+        button = getattr(event, "button", None)
+        if button == _mouse.RIGHT:
+            self._hide_requested.emit()
+            return
+        if button == _mouse.LEFT:
+            geo = self._cached_geo  # 抓本地引用，避免跨线程竞争
+            if geo is not None:
+                x, y = _mouse.get_position()
+                if not geo.contains(x, y):
+                    self._hide_requested.emit()
+
+    # ── 动作处理 ────────────────────────────────────────────────────────
 
     def _on_clicked(self, key: str):
         self._auto_hide.stop()
         self.hide()
         self.action_chosen.emit(key)
 
+    def mousePressEvent(self, event):
+        """点击浮标背景（非按钮区域）立即关闭；按钮有其自己的 clicked 处理。"""
+        super().mousePressEvent(event)
+        self.hide()
+
+    # ── 定位 ────────────────────────────────────────────────────────────
+
     def show_at(self, x: int, y: int):
-        """在屏幕坐标 (x, y) 的右下方弹出，自动避开屏幕边缘。"""
+        """在屏幕坐标 (x, y) 正下方弹出，自动避开屏幕边缘。"""
         self.adjustSize()
         w, h = self.width(), self.height()
         px = x + _CURSOR_OFFSET_X
         py = y + _CURSOR_OFFSET_Y
 
-        # 避免越出屏幕：超右则左移，超下则改到光标上方。
-        screen = QApplication.screenAt(self.mapToGlobal(self.rect().center())) \
+        # ★ 用目标坐标查屏幕，不能用 mapToGlobal(self.rect().center())——
+        # 此时弹窗尚未 move，其当前全局位置是 show 前残留的旧位置，
+        # 用旧位置 screenAt 可能拿到错误的屏幕 → wrong availableGeometry
+        # → 边缘修正把弹窗推到奇怪位置（表现就是「位置随机」）。
+        screen = QApplication.screenAt(QPoint(px, py)) \
             or QApplication.primaryScreen()
-        geo = screen.availableGeometry()
-        if px + w > geo.right():
-            px = geo.right() - w
-        if py + h > geo.bottom():
-            py = y - _CURSOR_OFFSET_Y - h
-        px = max(px, geo.left())
-        py = max(py, geo.top())
+        if screen is not None:
+            geo = screen.availableGeometry()
+            if px + w > geo.right():
+                px = geo.right() - w
+            if py + h > geo.bottom():
+                py = y - _CURSOR_OFFSET_Y - h
+            px = max(px, geo.left())
+            py = max(py, geo.top())
 
+        self._cached_geo = QRect(px, py, w, h)
         self.move(px, py)
         self.show()
         self.raise_()
         self._auto_hide.start(_AUTO_HIDE_MS)
 
+    # ── 鼠标悬停计时 ────────────────────────────────────────────────────
+
     def leaveEvent(self, event):
-        # 鼠标移出后开始倒计时关闭（给用户移回的机会）。
         self._auto_hide.start(_AUTO_HIDE_MS)
         super().leaveEvent(event)
 
