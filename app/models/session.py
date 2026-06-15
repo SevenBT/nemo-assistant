@@ -4,6 +4,10 @@ from dataclasses import dataclass, field
 
 DEFAULT_SESSION_TITLE = "新会话"
 
+# 会话来源：用于在会话列表里把手动会话与划词速记分开展示。
+SOURCE_MANUAL = "manual"        # 主窗手动新建 / 默认
+SOURCE_SELECTION = "selection"  # 划词气泡续聊产生
+
 
 @dataclass
 class Session:
@@ -15,6 +19,7 @@ class Session:
     system_prompt: str = ""
     pinned: bool = False  # 是否置顶
     sort_order: int = 0   # 自定义排序序号（越小越靠前）
+    source: str = SOURCE_MANUAL  # 会话来源（manual / selection）
 
     def to_dict(self) -> dict:
         return {
@@ -26,6 +31,7 @@ class Session:
             "system_prompt": self.system_prompt,
             "pinned": self.pinned,
             "sort_order": self.sort_order,
+            "source": self.source,
         }
 
     @classmethod
@@ -42,4 +48,5 @@ class Session:
             system_prompt=d.get("system_prompt", ""),
             pinned=d.get("pinned", False),
             sort_order=d.get("sort_order", 0),
+            source=d.get("source", SOURCE_MANUAL),
         )

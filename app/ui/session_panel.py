@@ -14,6 +14,7 @@ from qfluentwidgets import (
     LineEdit,
     ListWidget,
     PrimaryPushButton,
+    SegmentedWidget,
     TransparentToolButton,
     ToolTipFilter,
     ToolTipPosition,
@@ -21,7 +22,7 @@ from qfluentwidgets import (
 )
 from app.ui.components.context_menu import ContextMenu
 
-from app.models.session import Session
+from app.models.session import SOURCE_MANUAL, SOURCE_SELECTION, Session
 
 
 class SessionPanel(QFrame):
@@ -41,6 +42,7 @@ class SessionPanel(QFrame):
         self.setMinimumWidth(120)
         self._sessions: list[Session] = []
         self._search_keyword = ""
+        self._current_tab = SOURCE_MANUAL  # 当前 Tab 过滤的来源
         self._build()
 
         from app.core.config import cfg
@@ -80,6 +82,14 @@ class SessionPanel(QFrame):
         header.addWidget(new_btn)
         layout.addLayout(header)
 
+        # 来源 Tab：我的会话（手动） / 划词速记（划词气泡续聊）
+        self._pivot = SegmentedWidget()
+        self._pivot.addItem(SOURCE_MANUAL, "我的会话")
+        self._pivot.addItem(SOURCE_SELECTION, "划词速记")
+        self._pivot.setCurrentItem(SOURCE_MANUAL)
+        self._pivot.currentItemChanged.connect(self._on_tab_changed)
+        layout.addWidget(self._pivot)
+
         # list – Fluent ListWidget with drag-drop for reordering
         self._list = ListWidget()
         self._list.setObjectName("sessionList")
@@ -98,19 +108,33 @@ class SessionPanel(QFrame):
         self._search_keyword = keyword
         self._reload_list()
 
+    def _on_tab_changed(self, key: str):
+        """切换来源 Tab：仅改变过滤的来源，重渲染列表。"""
+        self._current_tab = key
+        self._reload_list()
+
+    def _visible_sessions(self) -> list[Session]:
+        """当前 Tab 来源 + 搜索关键字过滤后的会话。"""
+        kw = self._search_keyword.lower()
+        result = []
+        for s in self._sessions:
+            if s.source != self._current_tab:
+                continue
+            if kw and kw not in s.title.lower():
+                continue
+            result.append(s)
+        return result
+
     def _reload_list(self):
-        """Reload list applying current search filter, preserving selection."""
+        """Reload list applying current tab + search filter, preserving selection."""
         current_id = ""
         cur = self._list.currentItem()
         if cur:
             current_id = cur.data(Qt.ItemDataRole.UserRole)
 
-        kw = self._search_keyword.lower()
         self._list.blockSignals(True)
         self._list.clear()
-        for s in self._sessions:
-            if kw and kw not in s.title.lower():
-                continue
+        for s in self._visible_sessions():
             item = self._make_item(s)
             self._list.addItem(item)
             if s.id == current_id:
@@ -120,12 +144,16 @@ class SessionPanel(QFrame):
     # ------------------------------------------------------------------ data
     def load(self, sessions: list[Session], selected_id: str = ""):
         self._sessions = sessions
+        # 若选中的会话属于另一个 Tab，自动切到它所在的 Tab
+        if selected_id:
+            sel = next((s for s in sessions if s.id == selected_id), None)
+            if sel is not None and sel.source != self._current_tab:
+                self._current_tab = sel.source
+                self._pivot.setCurrentItem(sel.source)
+
         self._list.blockSignals(True)
         self._list.clear()
-        kw = self._search_keyword.lower()
-        for s in sessions:
-            if kw and kw not in s.title.lower():
-                continue
+        for s in self._visible_sessions():
             item = self._make_item(s)
             self._list.addItem(item)
             if s.id == selected_id:

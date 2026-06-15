@@ -49,7 +49,7 @@ from app.ui.toolbox_panel import ToolboxPanel
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_window import SettingsWindow
 from app.ui.sticky_note_controller import StickyNoteController
-from app.ui.style import THEMES, apply_theme
+from app.ui.style import DEFAULT_THEME, THEMES, apply_theme
 from app.ui.title_bar import TitleBar
 from app.ui.toast import show_toast
 from app.ui.tray_manager import TrayManager
@@ -135,6 +135,7 @@ class MainWindow(FluentWindow):
             note_mgr=self._notes,
             text_session_callback=self._chat_session_controller.start_text_session,
             mini_session_callback=self.dispatch_text_to_mini,
+            main_session_callback=self.dispatch_text_to_main,
             notify=self._notify_signal.emit,
         )
         self._scheduler.set_tool_manager(self._registry)
@@ -154,6 +155,9 @@ class MainWindow(FluentWindow):
         # 实时字体大小：内容/编辑器字号变化时重新应用主题 QSS
         cfg.contentFontSize.valueChanged.connect(self._on_font_size_changed)
         cfg.editorFontSize.valueChanged.connect(self._on_font_size_changed)
+
+        # 启动时应用主题（palette + QSS + DWM 标题栏）
+        self._reapply_theme()
 
     # ──────────────────────────────────────────── window setup
     # ──────────────────────────────────────────── window setup
@@ -588,6 +592,25 @@ class MainWindow(FluentWindow):
         else:
             self._chat_session_controller.submit(text_action.render(text))
 
+    def dispatch_text_to_main(
+        self, text: str, text_action, llm_reply: str, *, force_new: bool = False
+    ):
+        """气泡「在主窗继续」：在正常模式下把问答注入划词速记会话。
+
+        - force_new=False：复用最近的划词速记会话（默认，避免会话爆炸）。
+        - force_new=True：强制新建一个划词速记会话。
+        """
+        if not self.isVisible():
+            self.show()
+        # 正处于小窗模式时先切回正常模式，再注入到划词速记会话
+        if self._mode == "mini":
+            self.exit_mini_mode()
+        self.raise_()
+        self.activateWindow()
+        self._chat_session_controller.continue_in_selection_session(
+            text, text_action, llm_reply, force_new=force_new
+        )
+
     def _apply_mini_geometry(self):
         """按配置应用 mini 固定尺寸，尽量保持当前左上角位置。"""
         w = cfg.get(cfg.miniWidth)
@@ -680,7 +703,7 @@ class MainWindow(FluentWindow):
 
     @pyqtSlot(str, str)
     def _on_notify(self, title: str, body: str):
-        theme = THEMES.get(cfg.get(cfg.theme), THEMES["morning"])
+        theme = THEMES.get(cfg.get(cfg.theme), THEMES[DEFAULT_THEME])
         show_toast(title, body, accent=theme["accent"])
 
     # ──────────────────────────────────────────── 对话框 / 窗口操作

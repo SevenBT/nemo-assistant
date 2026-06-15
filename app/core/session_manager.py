@@ -10,7 +10,7 @@ from typing import Optional
 
 from app.core.config import SESSIONS_DIR
 from app.models.message import Message
-from app.models.session import DEFAULT_SESSION_TITLE, Session
+from app.models.session import DEFAULT_SESSION_TITLE, SOURCE_MANUAL, Session
 
 
 class SessionManager:
@@ -77,11 +77,21 @@ class SessionManager:
     def get(self, session_id: str) -> Optional[Session]:
         return self._sessions.get(session_id)
 
-    def create(self, title: str = "新会话") -> Session:
-        session = Session(title=title)
+    def create(self, title: str = "新会话", source: str = SOURCE_MANUAL) -> Session:
+        session = Session(title=title, source=source)
         self._sessions[session.id] = session
         self._save(session)
         return session
+
+    def latest_by_source(self, source: str) -> Optional[Session]:
+        """返回指定来源中最近更新的会话，没有则返回 None。
+
+        用于划词速记复用：续聊默认归到最近的同来源会话，避免会话爆炸。
+        """
+        candidates = [s for s in self._sessions.values() if s.source == source]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda s: s.updated_at)
 
     def delete(self, session_id: str):
         self._sessions.pop(session_id, None)

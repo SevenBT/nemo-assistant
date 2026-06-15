@@ -5,10 +5,14 @@ from PyQt6.QtCore import QObject
 from app.core.agent_loop import AgentLoop
 from app.core.config import cfg
 from app.models.message import Message, MessageRole, ToolCall
+from app.models.session import SOURCE_SELECTION
 from app.ui.manual_params_dialog import ManualParamsDialog
 from app.ui.session_settings_dialog import SessionSettingsDialog
 
 _CANCELLED_MARKER = "（已取消）"
+
+# 划词速记会话标题（划词气泡续聊归到此类，与手动会话分开）。
+SELECTION_SESSION_TITLE = "划词速记"
 
 
 class ChatSessionController(QObject):
@@ -97,19 +101,46 @@ class ChatSessionController(QObject):
             self._input.set_text(vision_action.prompt)
             self._input.focus()
 
-    def start_text_session(self, text: str, text_action):
+    def start_text_session(self, text: str, text_action, *, prefill_reply: str = ""):
         """划词：为一段选中文字新建会话并切过去，按动作处理。
 
         与识图（start_vision_session）平行：那边挂图片附件，这边把选中文字
         填入 prompt。解释/翻译等动作直接发出去，结果显示在浮窗聊天区。
         「存便签」等无 prompt 的本地动作不应走到这里，由调用方按 key 分发。
+
+        - prefill_reply 为空：直接发出查询，等 LLM 回复。
+        - prefill_reply 非空：注入气泡里已得到的问答，不重复请求 LLM。
         """
         session = self._sessions.create(title=text_action.session_title)
         sessions = self._sessions.get_sessions()
         self._session_panel.load(sessions, session.id)
         self.switch_session(session.id)
 
-        self.submit(text_action.render(text))
+        if prefill_reply:
+            self.inject_exchange(text_action.render(text), prefill_reply)
+        else:
+            self.submit(text_action.render(text))
+
+    def continue_in_selection_session(
+        self, text: str, text_action, llm_reply: str, *, force_new: bool = False
+    ) -> str:
+        """气泡「在主窗继续」：把已有问答注入划词速记会话（source=selection）。
+
+        默认复用最近的划词速记会话（避免会话爆炸）；force_new=True 时强制开新的。
+        返回归入的会话 id，供调用方据此切换/记录。
+        """
+        session = None
+        if not force_new:
+            session = self._sessions.latest_by_source(SOURCE_SELECTION)
+        if session is None:
+            session = self._sessions.create(
+                title=SELECTION_SESSION_TITLE, source=SOURCE_SELECTION
+            )
+        sessions = self._sessions.get_sessions()
+        self._session_panel.load(sessions, session.id)
+        self.switch_session(session.id)
+        self.inject_exchange(text_action.render(text), llm_reply)
+        return session.id
 
     def inject_exchange(self, user_text: str, assistant_text: str):
         """注入一对已完成的问答到当前会话（不触发 LLM）。
@@ -135,13 +166,22 @@ class ChatSessionController(QObject):
         self._input.focus()
 
     def delete_session(self, sid: str):
+        deleted = self._sessions.get(sid)
+        deleted_source = deleted.source if deleted is not None else None
+
         self._sessions.delete(sid)
         sessions = self._sessions.get_sessions()
         if not sessions:
             session = self._sessions.create()
             sessions = [session]
-        self._session_panel.load(sessions, sessions[0].id)
-        self.switch_session(sessions[0].id)
+
+        # 优先选与被删会话同来源的会话，避免删除后跳到另一个 Tab
+        target = next(
+            (s for s in sessions if s.source == deleted_source),
+            sessions[0],
+        )
+        self._session_panel.load(sessions, target.id)
+        self.switch_session(target.id)
 
     def rename_session(self, sid: str, title: str):
         self._sessions.rename(sid, title)

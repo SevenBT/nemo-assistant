@@ -109,6 +109,9 @@ class ResultBubble(QFrame):
 
     # 请求转入小窗继续对话，携带 (selected_text, llm_reply, action_key)
     continue_in_mini = pyqtSignal(str, str, str)
+    # 请求转入主窗划词速记会话，携带 (selected_text, llm_reply, action_key, force_new)
+    # force_new=False 复用最近的划词速记会话，True 强制新建。
+    continue_in_main = pyqtSignal(str, str, str, bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -182,6 +185,24 @@ class ResultBubble(QFrame):
         self._continue_btn.clicked.connect(self._on_continue)
         footer.addWidget(self._continue_btn)
 
+        # "在主窗继续"按钮（复用最近的划词速记会话）
+        self._main_btn = QPushButton("⤢")  # ⤢ 放大
+        self._main_btn.setToolTip("在主窗口继续（划词速记）")
+        self._main_btn.setObjectName("bubbleMainBtn")
+        self._main_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._main_btn.setFixedSize(24, 24)
+        self._main_btn.clicked.connect(self._on_continue_main)
+        footer.addWidget(self._main_btn)
+
+        # "在主窗新建会话"按钮（强制开一个新的划词速记会话）
+        self._new_btn = QPushButton("＋")  # ＋ 新建
+        self._new_btn.setToolTip("在主窗口新建会话")
+        self._new_btn.setObjectName("bubbleNewBtn")
+        self._new_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._new_btn.setFixedSize(24, 24)
+        self._new_btn.clicked.connect(self._on_continue_main_new)
+        footer.addWidget(self._new_btn)
+
         layout.addLayout(footer)
 
     # ── 主题适配 ────────────────────────────────────────────────────────
@@ -218,6 +239,28 @@ class ResultBubble(QFrame):
                 border-radius: 4px;
             }}
             #bubbleContinueBtn:hover {{
+                background: {surface_raised};
+                color: {accent};
+            }}
+            #bubbleMainBtn {{
+                background: transparent;
+                border: none;
+                color: {text_secondary};
+                font-size: 14px;
+                border-radius: 4px;
+            }}
+            #bubbleMainBtn:hover {{
+                background: {surface_raised};
+                color: {accent};
+            }}
+            #bubbleNewBtn {{
+                background: transparent;
+                border: none;
+                color: {text_secondary};
+                font-size: 16px;
+                border-radius: 4px;
+            }}
+            #bubbleNewBtn:hover {{
                 background: {surface_raised};
                 color: {accent};
             }}
@@ -372,6 +415,20 @@ class ResultBubble(QFrame):
         """将当前问答交接到小窗。"""
         self.continue_in_mini.emit(
             self._source_text, self._full_text, self._action_key
+        )
+        self.hide()
+
+    def _on_continue_main(self):
+        """将当前问答交接到主窗口，复用最近的划词速记会话。"""
+        self.continue_in_main.emit(
+            self._source_text, self._full_text, self._action_key, False
+        )
+        self.hide()
+
+    def _on_continue_main_new(self):
+        """将当前问答交接到主窗口，强制新建划词速记会话。"""
+        self.continue_in_main.emit(
+            self._source_text, self._full_text, self._action_key, True
         )
         self.hide()
 

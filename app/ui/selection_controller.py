@@ -41,6 +41,7 @@ class SelectionController(QObject):
         note_mgr,
         text_session_callback,
         mini_session_callback=None,
+        main_session_callback=None,
         notify=None,
     ):
         """
@@ -48,9 +49,11 @@ class SelectionController(QObject):
             window: 主窗口，AI 动作需要 show/raise 它。
             note_mgr: NoteManager，用于「存便签」。
             text_session_callback: 形如 start_text_session(text, action)。
-                用于"在小窗继续"升级为正式会话（长按直接走小窗也用这个）。
-            mini_session_callback: 形如 dispatch_to_mini(text, action_key)。
-                长按时直接把查询发到小窗。若为 None，退回到 text_session_callback。
+                长按直接走小窗的兜底（mini 回调缺失时）。
+            mini_session_callback: 形如 dispatch_to_mini(text, action, *, prefill_reply)。
+                长按时直接把查询发到小窗；气泡「在小窗继续」也走它。
+            main_session_callback: 形如 dispatch_to_main(text, action, llm_reply, *, force_new)。
+                气泡「在主窗继续 / 新建」把问答注入划词速记会话。
             notify: 可选 (title, body) -> None，用于 toast 提示。
         """
         super().__init__(window)
@@ -58,6 +61,7 @@ class SelectionController(QObject):
         self._notes = note_mgr
         self._text_session = text_session_callback
         self._mini_session = mini_session_callback
+        self._main_session = main_session_callback
         self._notify = notify
 
         self._popup = TextActionPopup(window)
@@ -66,6 +70,7 @@ class SelectionController(QObject):
 
         self._bubble = ResultBubble(window)
         self._bubble.continue_in_mini.connect(self._on_bubble_continue)
+        self._bubble.continue_in_main.connect(self._on_bubble_continue_main)
 
         # UIA 在手势命中时已取到的选中文字（若可用）；点击动作时优先消费它，
         # 取不到才退回 Ctrl+C 兜底。热键路径无此预取，恒为空。
@@ -186,6 +191,21 @@ class SelectionController(QObject):
             return
         if self._mini_session is not None:
             self._mini_session(source_text, action, prefill_reply=llm_reply)
+        else:
+            self._dispatch_to_ai(source_text, action)
+
+    def _on_bubble_continue_main(
+        self, source_text: str, llm_reply: str, action_key: str, force_new: bool
+    ):
+        """气泡中点击"在主窗继续 / 新建"：注入到划词速记会话。
+
+        force_new=False 复用最近的划词速记会话，True 强制新建。
+        """
+        action = get_text_action(action_key)
+        if action is None:
+            return
+        if self._main_session is not None:
+            self._main_session(source_text, action, llm_reply, force_new=force_new)
         else:
             self._dispatch_to_ai(source_text, action)
 
