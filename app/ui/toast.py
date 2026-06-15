@@ -1,7 +1,7 @@
 """
 Custom sliding toast notifications.
 
-Always uses a dark card style regardless of the app theme.
+Card colours follow the active app theme (surface / border / text).
 New toasts slide in from the bottom-right; older ones push upward.
 Click or wait 4 s to dismiss.
 """
@@ -18,17 +18,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.ui import style
+
 _W          = 300
 _H          = 72
 _MARGIN     = 20
 _GAP        = 10
 _IN_MS  = 250
 _OUT_MS     = 180
-
-_BG     = QColor("#26263A")
-_BORDER = QColor("#3A3A52")
-_TEXT   = "#F0F0F0"
-_MUTED  = "#9090A8"
 
 
 class Toast(QWidget):
@@ -39,6 +36,12 @@ class Toast(QWidget):
     def __init__(self, title: str, body: str, accent: str):
         super().__init__(None)
         self._closing = False
+        # Snapshot theme colours at creation so paint + children stay consistent.
+        theme = style.get_current_theme()
+        self._bg = QColor(theme["surface_solid"])
+        self._border = QColor(theme["border_solid"])
+        self._text = theme["text"]
+        self._muted = theme["text_secondary"]
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.Tool
@@ -71,7 +74,7 @@ class Toast(QWidget):
 
         lbl = QLabel(title)
         lbl.setStyleSheet(
-            f"color:{_TEXT};font-size:13px;font-weight:600;"
+            f"color:{self._text};font-size:13px;font-weight:600;"
             "background:transparent;border:none;"
         )
         row.addWidget(lbl, 1)
@@ -79,9 +82,9 @@ class Toast(QWidget):
         btn = QPushButton("✕")
         btn.setFixedSize(20, 20)
         btn.setStyleSheet(
-            f"QPushButton{{background:transparent;color:{_MUTED};"
+            f"QPushButton{{background:transparent;color:{self._muted};"
             f"border:none;border-radius:4px;font-size:10px;}}"
-            f"QPushButton:hover{{background:rgba(255,255,255,25);color:{_TEXT};}}"
+            f"QPushButton:hover{{background:{self._border.name()};color:{self._text};}}"
         )
         btn.clicked.connect(self._dismiss)
         row.addWidget(btn)
@@ -90,7 +93,7 @@ class Toast(QWidget):
         msg = QLabel(body)
         msg.setWordWrap(True)
         msg.setStyleSheet(
-            f"color:{_MUTED};font-size:12px;background:transparent;"
+            f"color:{self._muted};font-size:12px;background:transparent;"
             "border:none;padding-left:16px;"
         )
         root.addWidget(msg)
@@ -100,8 +103,8 @@ class Toast(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         path = QPainterPath()
         path.addRoundedRect(self.rect().toRectF().adjusted(.5, .5, -.5, -.5), 10, 10)
-        p.fillPath(path, _BG)
-        p.setPen(_BORDER)
+        p.fillPath(path, self._bg)
+        p.setPen(self._border)
         p.drawPath(path)
 
     def mousePressEvent(self, _):
@@ -167,6 +170,8 @@ def _slide_to(widget: QWidget, pos: QPoint, duration: int = 160):
     a.start()  # parent widget owns and cleans up the animation
 
 
-def show_toast(title: str, body: str, accent: str = "#5B9BD5") -> None:
+def show_toast(title: str, body: str, accent: str | None = None) -> None:
     """Create and display a toast notification.  Must be called on the main thread."""
+    if accent is None:
+        accent = style.get_current_theme()["accent"]
     Toast(title, body, accent)

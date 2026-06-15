@@ -38,22 +38,25 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.ui import style
+
 OVERLAY_ALPHA = 80
-BORDER_COLOR = QColor("#4A9EFF")
 BORDER_WIDTH = 2
-TOOLBAR_BG = QColor("#2D2D2D")
 RESIZE_MARGIN = 8  # pixels from edge that trigger resize cursor
 
-TOOLBAR_STYLE = f"""
+
+def _toolbar_style(theme: dict) -> str:
+    """根据主题构造工具栏 / OCR 面板 QSS。"""
+    return f"""
     #snipToolbar, #ocrPanel {{
-        background: {TOOLBAR_BG.name()};
+        background: {theme["surface_solid"]};
         border-radius: 8px;
-        border: 1px solid #3D3D3D;
+        border: 1px solid {theme["border_solid"]};
     }}
     #snipToolbar QPushButton, #ocrPanel QPushButton {{
         background: transparent;
         border: none;
-        color: #FFFFFF;
+        color: {theme["text"]};
         font-size: 13px;
         padding: 8px 14px;
         border-radius: 6px;
@@ -62,25 +65,29 @@ TOOLBAR_STYLE = f"""
         padding: 4px 8px;
     }}
     #snipToolbar QPushButton:hover, #ocrPanel QPushButton:hover {{
-        background: #3D3D3D;
+        background: {theme["accent_subtle"]};
+        color: {theme["accent"]};
     }}
     #snipToolbar QPushButton#snipCloseBtn:hover, #ocrPanel QPushButton#snipCloseBtn:hover {{
-        background: #C62828;
+        background: {theme["error"]};
+        color: #FFFFFF;
     }}
     #ocrPanel QPushButton#ocrConfirmBtn {{
-        background: {BORDER_COLOR.name()};
+        background: {theme["accent"]};
+        color: #FFFFFF;
         padding: 6px 18px;
     }}
     #ocrPanel QPushButton#ocrConfirmBtn:hover {{
-        background: #3A8EDB;
+        background: {theme["accent"]}dd;
     }}
     #ocrPanel QPushButton#ocrCloseBtn {{
         background: transparent;
-        border: 1px solid #555;
+        border: 1px solid {theme["border_solid"]};
         padding: 6px 18px;
     }}
     #ocrPanel QPushButton#ocrCloseBtn:hover {{
-        background: #3D3D3D;
+        background: {theme["accent_subtle"]};
+        color: {theme["accent"]};
     }}
 """
 
@@ -221,6 +228,11 @@ class ScreenshotOverlay(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Snapshot theme so toolbar, OCR panel and selection accents all match
+        # the active app theme.
+        self._theme = style.get_current_theme()
+        self._toolbar_qss = _toolbar_style(self._theme)
+        self._border_color = QColor(self._theme["accent"])
         self._start = QPoint()
         self._end = QPoint()
         self._state = "IDLE"  # IDLE | DRAGGING | SELECTED | RESIZING | OCR_EDIT
@@ -381,7 +393,7 @@ class ScreenshotOverlay(QWidget):
         self._hide_ocr_panel()
         self._toolbar = QFrame(self)
         self._toolbar.setObjectName("snipToolbar")
-        self._toolbar.setStyleSheet(TOOLBAR_STYLE)
+        self._toolbar.setStyleSheet(self._toolbar_qss)
         self._toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
 
         root = QVBoxLayout(self._toolbar)
@@ -549,7 +561,7 @@ class ScreenshotOverlay(QWidget):
 
         self._ocr_panel = QFrame(self)
         self._ocr_panel.setObjectName("ocrPanel")
-        self._ocr_panel.setStyleSheet(TOOLBAR_STYLE)
+        self._ocr_panel.setStyleSheet(self._toolbar_qss)
         self._ocr_panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
 
         root = QVBoxLayout(self._ocr_panel)
@@ -559,7 +571,10 @@ class ScreenshotOverlay(QWidget):
         # Header
         header = QHBoxLayout()
         title = QLabel("OCR 识别结果（可编辑）")
-        title.setStyleSheet("color: #AAA; font-size: 12px; background: transparent; border: none;")
+        title.setStyleSheet(
+            f"color: {self._theme['text_secondary']}; font-size: 12px;"
+            "background: transparent; border: none;"
+        )
         header.addWidget(title)
         header.addStretch()
 
@@ -575,15 +590,15 @@ class ScreenshotOverlay(QWidget):
         self._ocr_edit.setPlainText(text)
         self._ocr_edit.setMinimumSize(340, 120)
         self._ocr_edit.setMaximumHeight(300)
-        self._ocr_edit.setStyleSheet("""
-            QTextEdit {
-                background: #1A1A1A;
-                color: #E0E0E0;
-                border: 1px solid #3D3D3D;
+        self._ocr_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background: {self._theme["surface_raised"]};
+                color: {self._theme["text"]};
+                border: 1px solid {self._theme["border_solid"]};
                 border-radius: 4px;
                 padding: 6px;
                 font-size: 13px;
-            }
+            }}
         """)
         root.addWidget(self._ocr_edit)
 
@@ -667,7 +682,7 @@ class ScreenshotOverlay(QWidget):
             # ── Selection border ──
             is_dragging = self._state == "DRAGGING"
             border_w = 3 if is_dragging else BORDER_WIDTH
-            border_color = QColor("#FFFFFF") if is_dragging else BORDER_COLOR
+            border_color = QColor("#FFFFFF") if is_dragging else self._border_color
             pen_style = Qt.PenStyle.SolidLine if is_dragging else Qt.PenStyle.DashLine
 
             pen = QPen(border_color, border_w, pen_style)
@@ -703,7 +718,7 @@ class ScreenshotOverlay(QWidget):
             label_x = self.width() - text_w - 4
 
         label_rect = QRect(int(label_x), int(label_y), text_w, text_h)
-        bg = QColor("#FFFFFF") if bright else BORDER_COLOR
+        bg = QColor("#FFFFFF") if bright else self._border_color
         fg = QColor("#1A1A1A") if bright else QColor("#FFFFFF")
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(bg)

@@ -11,6 +11,8 @@ from qfluentwidgets import (
     TransparentPushButton,
 )
 
+from app.ui import style
+
 
 class ToolSummaryWidget(QFrame):
     """Compact summary of all tool calls in one message.
@@ -80,14 +82,15 @@ class ToolSummaryWidget(QFrame):
         if n == 0:
             self._summary_label.setText("")
             return
+        theme = style.get_current_theme()
         pending = sum(1 for t in self._tools if t["status"] == "pending")
         errors = sum(1 for t in self._tools if t["status"] == "error")
         if pending > 0:
-            text = f'<span style="color:#f9e2af">⟳</span> 正在调用工具... ({n})'
+            text = f'<span style="color:{theme["warning"]}">⟳</span> 正在调用工具... ({n})'
         elif errors > 0:
-            text = f'<span style="color:#f38ba8">⚠</span> 已调用 {n} 个工具（{errors} 个失败）'
+            text = f'<span style="color:{theme["error"]}">⚠</span> 已调用 {n} 个工具（{errors} 个失败）'
         else:
-            text = f'<span style="color:#a6e3a1">✓</span> 已调用 {n} 个工具'
+            text = f'<span style="color:{theme["success"]}">✓</span> 已调用 {n} 个工具'
         self._summary_label.setText(text)
 
     def _rebuild_detail(self):
@@ -97,13 +100,14 @@ class ToolSummaryWidget(QFrame):
             if item.widget():
                 item.widget().deleteLater()
         # Add one label per tool
+        theme = style.get_current_theme()
         for t in self._tools:
             if t["status"] == "pending":
-                icon, color = "⟳", "#f9e2af"
+                icon, color = "⟳", theme["warning"]
             elif t["status"] == "success":
-                icon, color = "✓", "#a6e3a1"
+                icon, color = "✓", theme["success"]
             else:
-                icon, color = "✗", "#f38ba8"
+                icon, color = "✗", theme["error"]
             lbl = CaptionLabel(f"  {icon} {t['name']}")
             lbl.setStyleSheet(f"color: {color}")
             self._detail_layout.addWidget(lbl)

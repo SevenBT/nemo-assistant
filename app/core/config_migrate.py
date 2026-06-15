@@ -72,7 +72,7 @@ def _convert_old_to_new(old: dict) -> dict:
     # Appearance
     window = old.get("window", {})
     new.setdefault("Appearance", {})
-    new["Appearance"]["Theme"] = window.get("theme", "morning")
+    new["Appearance"]["Theme"] = window.get("theme", "almond")
     fs = window.get("font_size", 15)
     new["Appearance"]["ContentFontSize"] = fs
     new["Appearance"]["NavigationFontSize"] = max(fs - 2, 10)

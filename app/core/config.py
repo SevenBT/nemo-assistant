@@ -143,8 +143,13 @@ MODEL_TEMPLATES: dict[str, list[dict]] = {
 # ── Theme list (for OptionsValidator) ─────────────────────────────────
 
 THEME_OPTIONS = [
-    "warm_night", "deep_ocean", "obsidian",
-    "morning", "warm_sand", "mint", "rose", "lavender",
+    # Dark
+    "warm_night", "obsidian", "morandi_dusk",
+    "tokyo_night", "mocha", "rose_pine", "nord", "everforest",
+    # Light
+    "almond", "misty", "sage", "morandi_clay",
+    "morandi_haze", "morandi_olive", "morandi_lilac",
+    "latte", "rose_pine_dawn",
 ]
 
 # ── Keyring constants ─────────────────────────────────────────────────
@@ -163,7 +168,7 @@ class AppConfig(QConfig):
 
     # -- Appearance --
     theme = OptionsConfigItem(
-        "Appearance", "Theme", "morning", OptionsValidator(THEME_OPTIONS)
+        "Appearance", "Theme", "almond", OptionsValidator(THEME_OPTIONS)
     )
     contentFontSize = RangeConfigItem(
         "Appearance", "ContentFontSize", 15, RangeValidator(12, 24)

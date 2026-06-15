@@ -17,12 +17,21 @@ from PyQt6.QtWidgets import (
 )
 
 from app.models.attachment import Attachment
+from app.ui import style
 
 _THUMB = 52
 _REMOVE = 16
 
-_REMOVE_QSS = """
-QPushButton#pendingRemove {
+
+def _remove_qss() -> str:
+    """构造移除按钮 QSS。
+
+    按钮悬浮在缩略图角上，底色保持半透明深色以保证在任意图片上可见，
+    hover 用主题的 error 色表达「删除」语义。
+    """
+    error = style.get_current_theme()["error"]
+    return f"""
+QPushButton#pendingRemove {{
     background: rgba(0, 0, 0, 0.65);
     color: #FFFFFF;
     border: 1px solid rgba(255, 255, 255, 0.7);
@@ -30,11 +39,11 @@ QPushButton#pendingRemove {
     font-size: 11px;
     font-weight: bold;
     padding: 0;
-}
-QPushButton#pendingRemove:hover {
-    background: #C62828;
-    border-color: #C62828;
-}
+}}
+QPushButton#pendingRemove:hover {{
+    background: {error};
+    border-color: {error};
+}}
 """
 
 
@@ -78,7 +87,7 @@ class _PendingItem(QWidget):
 
         remove = QPushButton("✕", self)
         remove.setObjectName("pendingRemove")
-        remove.setStyleSheet(_REMOVE_QSS)
+        remove.setStyleSheet(_remove_qss())
         remove.setFixedSize(_REMOVE, _REMOVE)
         remove.setCursor(Qt.CursorShape.PointingHandCursor)
         remove.clicked.connect(

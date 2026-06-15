@@ -39,6 +39,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.ui import style
 from app.ui.text_actions import TEXT_ACTIONS
 
 logger = logging.getLogger(__name__)
@@ -50,26 +51,33 @@ try:
 except ImportError:
     _MOUSE_OK = False
 
-# 紧凑无文字浮标：图标 15px，内边距 3px 起。
-_POPUP_STYLE = """
-    #textActionBar {
-        background: #2D2D2D;
+
+def _build_popup_style(theme: dict) -> str:
+    """根据主题生成浮标 QSS。
+
+    紧凑无文字浮标：图标 15px，内边距 3px 起。背景用浮起面、文字用主文本色、
+    hover 用强调色淡底，与应用整体主题一致。
+    """
+    return f"""
+    #textActionBar {{
+        background: {theme["surface_raised"]};
         border-radius: 6px;
-        border: 1px solid #3D3D3D;
-    }
-    #textActionBar QPushButton {
+        border: 1px solid {theme["border_solid"]};
+    }}
+    #textActionBar QPushButton {{
         background: transparent;
         border: none;
-        color: #FFFFFF;
+        color: {theme["text"]};
         font-size: 15px;
         padding: 3px 5px;
         border-radius: 4px;
         min-width: 26px;
         min-height: 26px;
-    }
-    #textActionBar QPushButton:hover {
-        background: #3D3D3D;
-    }
+    }}
+    #textActionBar QPushButton:hover {{
+        background: {theme["accent_subtle"]};
+        color: {theme["accent"]};
+    }}
 """
 
 # 浮标与选区之间的间距（px）。
@@ -114,7 +122,7 @@ class TextActionPopup(QFrame):
 
     def _build_window(self):
         self.setObjectName("textActionBar")
-        self.setStyleSheet(_POPUP_STYLE)
+        self._apply_theme_style()
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setWindowFlags(
             Qt.WindowType.Tool
@@ -150,12 +158,26 @@ class TextActionPopup(QFrame):
         self._progress_bar.setRange(0, _LONG_PRESS_MS)
         self._progress_bar.setValue(0)
         self._progress_bar.setTextVisible(False)
+        accent = style.get_current_theme()["accent"]
         self._progress_bar.setStyleSheet(
             "QProgressBar { background: transparent; border: none; }"
-            "QProgressBar::chunk { background: #7AA2F7; border-radius: 1px; }"
+            f"QProgressBar::chunk {{ background: {accent}; border-radius: 1px; }}"
         )
         self._progress_bar.hide()
         layout.addWidget(self._progress_bar)
+
+    # ── 主题适配 ────────────────────────────────────────────────────────
+
+    def _apply_theme_style(self):
+        """根据当前主题刷新浮标与进度条样式（每次显示前调用）。"""
+        theme = style.get_current_theme()
+        self.setStyleSheet(_build_popup_style(theme))
+        if hasattr(self, "_progress_bar"):
+            self._progress_bar.setStyleSheet(
+                "QProgressBar { background: transparent; border: none; }"
+                f"QProgressBar::chunk {{ background: {theme['accent']}; "
+                "border-radius: 1px; }"
+            )
 
     # ── Win32 防激活 ────────────────────────────────────────────────────
 
@@ -289,6 +311,7 @@ class TextActionPopup(QFrame):
         浮标居中对齐 x，顶边紧贴 y 下方 _GAP_PX 处。
         屏幕底边空间不足时自动翻到选区上方，左右超屏则贴边。
         """
+        self._apply_theme_style()
         self.adjustSize()
         w, h = self.width(), self.height()
         px = x - w // 2         # 水平居中

@@ -34,13 +34,17 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.ui import style
+
 _RESIZE_BORDER = 6
 _MIN_W = 180
 _MIN_H = 120
 _TITLE_H = 32
 
-# Pastel background colours for sticky notes (cycles through on creation)
-_NOTE_COLORS = [
+# Per-note tints cycle on creation. Two palettes — soft pastels for light
+# themes, desaturated deep tints for dark themes — so the sticky-note variety
+# survives while staying legible under either mode.
+_NOTE_COLORS_LIGHT = [
     "#FFFDE7",  # warm yellow
     "#E8F5E9",  # mint green
     "#E3F2FD",  # sky blue
@@ -48,14 +52,48 @@ _NOTE_COLORS = [
     "#F3E5F5",  # lavender
     "#FFF3E0",  # peach
 ]
+_NOTE_COLORS_DARK = [
+    "#3A3526",  # warm yellow
+    "#26352A",  # mint green
+    "#243240",  # sky blue
+    "#3A2730",  # rose pink
+    "#322A3C",  # lavender
+    "#3A3026",  # peach
+]
 _color_index = 0
+
+
+def _note_palette() -> list[str]:
+    """根据当前主题深浅返回对应的便签纸色板。"""
+    dark = style.get_current_theme()["mode"] == style.Theme.DARK
+    return _NOTE_COLORS_DARK if dark else _NOTE_COLORS_LIGHT
 
 
 def _next_color() -> str:
     global _color_index
-    c = _NOTE_COLORS[_color_index % len(_NOTE_COLORS)]
+    palette = _note_palette()
+    c = palette[_color_index % len(palette)]
     _color_index += 1
     return c
+
+
+def _ink_colors(bg_hex: str) -> tuple[str, str, str]:
+    """按纸张明度返回 (主文字, 次要/标题, 淡色) 三档前景色（rgba 字符串）。
+
+    深色纸用浅墨、浅色纸用深墨，保证任意主题下文字都清晰。
+    """
+    lightness = QColor(bg_hex).lightness()
+    if lightness < 128:
+        return (
+            "rgba(255,255,255,0.88)",
+            "rgba(255,255,255,0.65)",
+            "rgba(255,255,255,0.45)",
+        )
+    return (
+        "rgba(0,0,0,0.75)",
+        "rgba(0,0,0,0.55)",
+        "rgba(0,0,0,0.45)",
+    )
 
 
 class _TitleBar(QWidget):
@@ -73,13 +111,15 @@ class _TitleBar(QWidget):
         self.setFixedHeight(_TITLE_H)
         self.setCursor(Qt.CursorShape.SizeAllCursor)
 
+        ink, ink_secondary, ink_muted = _ink_colors(color)
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 0, 6, 0)
         layout.setSpacing(4)
 
         self._label = QLabel("便签")
         self._label.setStyleSheet(
-            "color: rgba(0,0,0,0.55); font-size: 11px; font-weight: 600;"
+            f"color: {ink_secondary}; font-size: 11px; font-weight: 600;"
             "background: transparent; border: none;"
         )
         self._label.setSizePolicy(
@@ -90,10 +130,15 @@ class _TitleBar(QWidget):
         close_btn = QPushButton("✕")
         close_btn.setFixedSize(20, 20)
         close_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        hover_bg = (
+            "rgba(255,255,255,0.18)"
+            if QColor(color).lightness() < 128
+            else "rgba(0,0,0,0.15)"
+        )
         close_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: rgba(0,0,0,0.45);"
+            f"QPushButton {{ background: transparent; color: {ink_muted};"
             "border: none; border-radius: 10px; font-size: 12px; padding: 0; }"
-            "QPushButton:hover { background: rgba(0,0,0,0.15); color: rgba(0,0,0,0.85); }"
+            f"QPushButton:hover {{ background: {hover_bg}; color: {ink}; }}"
         )
         close_btn.clicked.connect(self.close_requested)
         layout.addWidget(close_btn)
@@ -252,8 +297,9 @@ class StickyNoteWindow(QWidget):
         # Content editor
         self._content_edit = QTextEdit(self._container)
         self._content_edit.setFrameShape(QTextEdit.Shape.NoFrame)
+        ink = _ink_colors(self._color)[0]
         self._content_edit.setStyleSheet(
-            f"QTextEdit {{ background: transparent; color: rgba(0,0,0,0.75);"
+            f"QTextEdit {{ background: transparent; color: {ink};"
             f"border: none; padding: 8px 10px; font-size: 13px; line-height: 1.5; }}"
         )
         self._content_edit.setPlaceholderText("在此记录…")
