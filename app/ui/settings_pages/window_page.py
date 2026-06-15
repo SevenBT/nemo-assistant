@@ -24,6 +24,14 @@ class WindowPage(AutoSettingPage):
                     "在任意应用选中文字后，光标旁自动弹出动作条（解释/翻译/存便签）",
                 ),
                 CardSpec(
+                    cfg.selectionTranslateTarget,
+                    FluentIcon.LANGUAGE,
+                    "划词翻译目标语言",
+                    "划词翻译时默认翻译成的语言",
+                    texts=["中文", "English", "日本語", "한국어", "Français",
+                           "Deutsch", "Español", "Русский"],
+                ),
+                CardSpec(
                     cfg.edgeSnapThreshold,
                     FluentIcon.CONSTRACT,
                     "吸附宽度阈值",

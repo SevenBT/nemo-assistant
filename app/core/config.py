@@ -264,6 +264,12 @@ class AppConfig(QConfig):
     selectionFloatEnabled = ConfigItem(
         "Selection", "FloatEnabled", True, BoolValidator()
     )
+    # 划词翻译的默认目标语言（翻译动作据此构造提示词）。
+    selectionTranslateTarget = OptionsConfigItem(
+        "Selection", "TranslateTarget", "中文",
+        OptionsValidator(["中文", "English", "日本語", "한국어", "Français",
+                          "Deutsch", "Español", "Русский"]),
+    )
 
     # -- Layout (persisted, not shown in settings UI) --
     noteListWidth = ConfigItem("Layout", "NoteListWidth", 100)

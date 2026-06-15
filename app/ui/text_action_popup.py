@@ -29,12 +29,14 @@ import logging
 import sys
 from collections.abc import Callable
 
-from PyQt6.QtCore import QPoint, QRect, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, QPoint, QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
+    QProgressBar,
     QPushButton,
+    QVBoxLayout,
 )
 
 from app.ui.text_actions import TEXT_ACTIONS
@@ -81,16 +83,26 @@ _GWL_EXSTYLE = -20
 _WS_EX_NOACTIVATE = 0x08000000
 
 
+_LONG_PRESS_MS = 300  # 长按阈值（ms）
+
+
 class TextActionPopup(QFrame):
     """无边框、不抢焦点的划词动作条。"""
 
-    action_chosen = pyqtSignal(str)  # 选中的动作 key
-    _hide_requested = pyqtSignal()   # 内部：从 mouse hook 线程请求关闭
+    action_chosen = pyqtSignal(str)       # 单击：气泡快查
+    long_press_chosen = pyqtSignal(str)   # 长按：小窗深入
+    _hide_requested = pyqtSignal()        # 内部：从 mouse hook 线程请求关闭
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cached_geo: QRect | None = None
+        self._cached_geo_physical: QRect | None = None
         self._mouse_hook: Callable | None = None
+        self._pressed_key: str | None = None
+        self._press_timer = QElapsedTimer()
+        self._progress_tick = QTimer(self)
+        self._progress_tick.setInterval(16)  # ~60fps
+        self._progress_tick.timeout.connect(self._update_progress)
         self._build_window()
         self._build_buttons()
         self._auto_hide = QTimer(self)
@@ -114,17 +126,36 @@ class TextActionPopup(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
     def _build_buttons(self):
-        row = QHBoxLayout(self)
-        row.setContentsMargins(3, 3, 3, 3)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(3, 3, 3, 3)
+        layout.setSpacing(0)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(1)
         for action in TEXT_ACTIONS:
             btn = QPushButton(action.icon)
-            btn.setToolTip(action.label)
+            btn.setToolTip(f"{action.label}（长按→小窗）")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(
-                lambda _checked, k=action.key: self._on_clicked(k)
+            btn.pressed.connect(
+                lambda k=action.key: self._on_btn_pressed(k)
             )
+            btn.released.connect(self._on_btn_released)
             row.addWidget(btn)
+        layout.addLayout(row)
+
+        # 长按进度条：2px 高，默认隐藏
+        self._progress_bar = QProgressBar(self)
+        self._progress_bar.setFixedHeight(2)
+        self._progress_bar.setRange(0, _LONG_PRESS_MS)
+        self._progress_bar.setValue(0)
+        self._progress_bar.setTextVisible(False)
+        self._progress_bar.setStyleSheet(
+            "QProgressBar { background: transparent; border: none; }"
+            "QProgressBar::chunk { background: #7AA2F7; border-radius: 1px; }"
+        )
+        self._progress_bar.hide()
+        layout.addWidget(self._progress_bar)
 
     # ── Win32 防激活 ────────────────────────────────────────────────────
 
@@ -199,21 +230,50 @@ class TextActionPopup(QFrame):
             self._hide_requested.emit()
             return
         if button == _mouse.LEFT:
-            geo = self._cached_geo  # 抓本地引用，避免跨线程竞争
+            geo = self._cached_geo_physical  # 物理像素几何，抓本地引用避免竞争
             if geo is not None:
                 x, y = _mouse.get_position()
                 if not geo.contains(x, y):
                     self._hide_requested.emit()
 
-    # ── 动作处理 ────────────────────────────────────────────────────────
+    # ── 动作处理（长按检测） ──────────────────────────────────────────────
 
-    def _on_clicked(self, key: str):
+    def _on_btn_pressed(self, key: str):
+        """按钮按下：启动计时与进度动画（动作在松开时按时长决定）。"""
+        self._pressed_key = key
+        self._press_timer.start()
+        self._progress_bar.setValue(0)
+        self._progress_bar.show()
+        self._progress_tick.start()
+
+    def _on_btn_released(self):
+        """按钮松开：按按住时长决定 —— 短按→气泡，长按→小窗。
+
+        在松开时（而非定时器到点时）判定，可彻底避免「手稍慢的单击被误判为
+        长按、意外跳进小窗」。进度条填满即提示「已达长按，松手进小窗」。
+        """
+        self._progress_tick.stop()
+        self._progress_bar.hide()
+        self._progress_bar.setValue(0)
+        key = self._pressed_key
+        self._pressed_key = None
+        if key is None:
+            return
+        elapsed = self._press_timer.elapsed()
         self._auto_hide.stop()
         self.hide()
-        self.action_chosen.emit(key)
+        if elapsed >= _LONG_PRESS_MS:
+            self.long_press_chosen.emit(key)  # 长按：小窗深入
+        else:
+            self.action_chosen.emit(key)       # 单击：气泡快查
+
+    def _update_progress(self):
+        """更新长按进度条动画；填满后切到强调色提示可松手进小窗。"""
+        elapsed = self._press_timer.elapsed()
+        self._progress_bar.setValue(min(elapsed, _LONG_PRESS_MS))
 
     def mousePressEvent(self, event):
-        """点击浮标背景（非按钮区域）立即关闭；按钮有其自己的 clicked 处理。"""
+        """点击浮标背景（非按钮区域）立即关闭；按钮有其自己的 pressed 处理。"""
         super().mousePressEvent(event)
         self.hide()
 
@@ -252,6 +312,22 @@ class TextActionPopup(QFrame):
                 py = geo.top()
 
         self._cached_geo = QRect(px, py, w, h)
+
+        # 全局 mouse hook 拿到的是物理像素，需换算出物理坐标的几何供比对——
+        # 否则在缩放屏（125%/150%）上点击按钮也会被判成「弹窗外」，hook 在按下
+        # 瞬间就 hide 弹窗，与按钮 pressed/released 抢跑：表现为「单击不触发 /
+        # 长按仍出气泡」。
+        scale = 1.0
+        try:
+            if screen is not None:
+                scale = screen.devicePixelRatio()
+        except Exception:
+            pass
+        self._cached_geo_physical = QRect(
+            round(px * scale), round(py * scale),
+            round(w * scale), round(h * scale),
+        )
+
         self.move(px, py)
         self.show()
         self.raise_()

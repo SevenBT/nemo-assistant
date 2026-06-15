@@ -111,6 +111,29 @@ class ChatSessionController(QObject):
 
         self.submit(text_action.render(text))
 
+    def inject_exchange(self, user_text: str, assistant_text: str):
+        """注入一对已完成的问答到当前会话（不触发 LLM）。
+
+        用于气泡「在小窗继续」：把气泡里已经得到的问答原样搬进小窗会话，
+        用户可直接追问，无需重复请求 LLM。
+        """
+        sid = self._current_session_id
+        if not sid:
+            return
+
+        user_msg = Message(role=MessageRole.USER, content=user_text)
+        self._sessions.add_message(sid, user_msg)
+        self._chat.add_message(user_msg)
+
+        ai_msg = Message(role=MessageRole.ASSISTANT, content=assistant_text)
+        self._sessions.add_message(sid, ai_msg)
+        self._chat.add_message(ai_msg)
+
+        session = self._sessions.get(sid)
+        if session is not None:
+            self._session_panel.update_title(sid, session.title)
+        self._input.focus()
+
     def delete_session(self, sid: str):
         self._sessions.delete(sid)
         sessions = self._sessions.get_sessions()

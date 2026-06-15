@@ -129,11 +129,12 @@ class MainWindow(FluentWindow):
         self._screenshot_controller.set_chat_callbacks(
             vision_callback=self._chat_session_controller.start_vision_session,
         )
-        # 划词即行动：取词 → 弹动作条 → 分发到 AI 会话或笔记库
+        # 划词即行动：取词 → 弹动作条 → 分发到气泡/小窗/笔记库
         self._selection_controller = SelectionController(
             self,
             note_mgr=self._notes,
             text_session_callback=self._chat_session_controller.start_text_session,
+            mini_session_callback=self.dispatch_text_to_mini,
             notify=self._notify_signal.emit,
         )
         self._scheduler.set_tool_manager(self._registry)
@@ -565,6 +566,27 @@ class MainWindow(FluentWindow):
         sessions = self._sessions.get_sessions()
         self._session_panel.load(sessions, session.id)
         self._chat_session_controller.switch_session(session.id)
+
+    def dispatch_text_to_mini(self, text: str, text_action, *, prefill_reply: str = ""):
+        """划词长按 / 气泡续聊：把选中文字送入小窗会话。
+
+        进入 mini 模式（若尚未在其中），复用 mini 专用「快速提问」会话。
+        - prefill_reply 为空：直接发出查询，等 LLM 回复（长按路径）。
+        - prefill_reply 非空：注入已有问答，不重复请求 LLM（气泡续聊路径）。
+        """
+        if not self.isVisible():
+            self.show()
+        if self._mode != "mini":
+            self.enter_mini_mode()
+        self.raise_()
+        self.activateWindow()
+
+        if prefill_reply:
+            self._chat_session_controller.inject_exchange(
+                text_action.render(text), prefill_reply
+            )
+        else:
+            self._chat_session_controller.submit(text_action.render(text))
 
     def _apply_mini_geometry(self):
         """按配置应用 mini 固定尺寸，尽量保持当前左上角位置。"""
