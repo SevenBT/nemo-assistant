@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import logging
 
-from PyQt6.QtCore import QObject
+from PyQt6.QtCore import QObject, QPoint
 from PyQt6.QtGui import QCursor
+from PyQt6.QtWidgets import QApplication
 
 from app.core.selection_capture import capture_selection
 from app.ui.text_action_popup import TextActionPopup
@@ -71,9 +72,23 @@ class SelectionController(QObject):
     def trigger_at(self, x: int, y: int, text: str = ""):
         """浮标路径：拖选松开后在指定屏幕坐标弹出动作条。
 
+        x, y 来自 mouse hook / UIA，是**物理像素**（不受 DPI 缩放影响）。
+        Qt 的 move() / screenAt 等接口都使用逻辑像素，因此必须按屏幕缩放比
+        换算（150% → ÷1.5，200% → ÷2.0），否则浮标会偏移到错误位置。
+
         text 为 SelectionMonitor 用 UIA 预取到的选中文字：非空则点击动作时直接
         用它，省去再发 Ctrl+C；为空（UIA 不可用）则点击时退回 Ctrl+C 兜底取词。
         """
+        # Convert physical pixels → logical pixels for Qt
+        try:
+            screen = QApplication.screenAt(QPoint(x, y)) \
+                or QApplication.primaryScreen()
+            if screen is not None:
+                scale = screen.devicePixelRatio()
+                if scale > 1.0:
+                    x, y = round(x / scale), round(y / scale)
+        except Exception:
+            pass
         self._trigger(x, y, captured=text)
 
     def _trigger(self, x: int, y: int, *, captured: str):

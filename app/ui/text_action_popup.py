@@ -70,9 +70,8 @@ _POPUP_STYLE = """
     }
 """
 
-# 浮标相对光标的偏移：落在光标正下方。
-_CURSOR_OFFSET_X = 8
-_CURSOR_OFFSET_Y = 20
+# 浮标与选区之间的间距（px）。
+_GAP_PX = 4
 
 # 鼠标移开后自动消失的延迟（ms）。
 _AUTO_HIDE_MS = 2000
@@ -221,26 +220,36 @@ class TextActionPopup(QFrame):
     # ── 定位 ────────────────────────────────────────────────────────────
 
     def show_at(self, x: int, y: int):
-        """在屏幕坐标 (x, y) 正下方弹出，自动避开屏幕边缘。"""
+        """在屏幕坐标紧贴选区下方弹出。
+
+        Args:
+            x: 选区末行水平中心（UIA 路径），或鼠标 X（热键回退路径）。
+            y: 选区底边（UIA 路径），或鼠标 Y（热键回退路径）。
+
+        浮标居中对齐 x，顶边紧贴 y 下方 _GAP_PX 处。
+        屏幕底边空间不足时自动翻到选区上方，左右超屏则贴边。
+        """
         self.adjustSize()
         w, h = self.width(), self.height()
-        px = x + _CURSOR_OFFSET_X
-        py = y + _CURSOR_OFFSET_Y
+        px = x - w // 2         # 水平居中
+        py = y + _GAP_PX        # 紧贴选区下方
 
         # ★ 用目标坐标查屏幕，不能用 mapToGlobal(self.rect().center())——
         # 此时弹窗尚未 move，其当前全局位置是 show 前残留的旧位置，
         # 用旧位置 screenAt 可能拿到错误的屏幕 → wrong availableGeometry
         # → 边缘修正把弹窗推到奇怪位置（表现就是「位置随机」）。
-        screen = QApplication.screenAt(QPoint(px, py)) \
+        screen = QApplication.screenAt(QPoint(px + w // 2, py)) \
             or QApplication.primaryScreen()
         if screen is not None:
             geo = screen.availableGeometry()
             if px + w > geo.right():
                 px = geo.right() - w
+            if px < geo.left():
+                px = geo.left()
             if py + h > geo.bottom():
-                py = y - _CURSOR_OFFSET_Y - h
-            px = max(px, geo.left())
-            py = max(py, geo.top())
+                py = y - h - _GAP_PX  # 翻到选区上方
+            if py < geo.top():
+                py = geo.top()
 
         self._cached_geo = QRect(px, py, w, h)
         self.move(px, py)

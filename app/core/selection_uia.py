@@ -51,6 +51,47 @@ def get_selected_text() -> str:
     return clean_selection(_selection_via_text_pattern(control))
 
 
+def get_selection_bounds() -> tuple[int, int, int, int] | None:
+    """查询前台控件当前选区的屏幕包围盒，用于定位浮标。
+
+    返回 (left, top, right, bottom)，取**最后一个**选区矩形的底边（即
+    选区末行的最下方）。取不到（UIA 不可用 / 控件不支持 BoundingRectangles
+    / 无选区）返回 None，调用方退回鼠标坐标。
+
+    纯查询：不按键、不读剪贴板、不改变焦点。
+    """
+    if not _UIA_OK:
+        return None
+    try:
+        control = _auto.GetFocusedControl()
+    except Exception:
+        return None
+    if control is None:
+        return None
+    try:
+        pattern = control.GetTextPattern()
+    except Exception:
+        return None
+    if pattern is None:
+        return None
+    try:
+        ranges = pattern.GetSelection()
+    except Exception:
+        return None
+    if not ranges:
+        return None
+    # 选区末行的底边位置：取最后一个 range 的最后一个矩形。
+    last_range = ranges[-1]
+    try:
+        rects = last_range.BoundingRectangles
+    except Exception:
+        return None
+    if not rects:
+        return None
+    rect = rects[-1]
+    return (rect.left, rect.top, rect.right, rect.bottom)
+
+
 def _selection_via_text_pattern(control) -> str:
     """文档 / 富文本 / 输入框：TextPattern.GetSelection 拿选中区间的文字。
 

@@ -142,8 +142,13 @@ class SelectionMonitor(QObject):
 
         UIA 不可用时（库缺失 / 应用不支持）带空文字发信号，由控制器在点击时
         用 Ctrl+C 兜底取词，保住旧行为。
+
+        —— 弹窗定位 ——
+        优先用 UIA BoundingRectangles 获取选区末行在屏幕上的精确位置，
+        弹窗紧贴选区下方。BoundingRectangles 不可用时退回鼠标松手坐标。
         """
         text = ""
+        px, py = x, y  # 回退：鼠标松手坐标
         if selection_uia.is_available():
             try:
                 text = selection_uia.get_selected_text()
@@ -152,5 +157,14 @@ class SelectionMonitor(QObject):
             # UIA 可用却查到空 → 没真选中文字（切标签等），静默不弹。
             if not text:
                 return
+            # 拿到了文字，试试也拿到选区屏幕位置——同一控件，大概率可用。
+            try:
+                bounds = selection_uia.get_selection_bounds()
+                if bounds is not None:
+                    left, top, right, bottom = bounds
+                    px = (left + right) // 2  # 水平居中于选区末行
+                    py = bottom               # 紧贴选区底边
+            except Exception:
+                pass
         # marshal 回主线程：Qt 信号跨线程自动用 queued connection。
-        self.selection_gesture.emit(x, y, text)
+        self.selection_gesture.emit(px, py, text)
