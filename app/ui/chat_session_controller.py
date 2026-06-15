@@ -97,6 +97,20 @@ class ChatSessionController(QObject):
             self._input.set_text(vision_action.prompt)
             self._input.focus()
 
+    def start_text_session(self, text: str, text_action):
+        """划词：为一段选中文字新建会话并切过去，按动作处理。
+
+        与识图（start_vision_session）平行：那边挂图片附件，这边把选中文字
+        填入 prompt。解释/翻译等动作直接发出去，结果显示在浮窗聊天区。
+        「存便签」等无 prompt 的本地动作不应走到这里，由调用方按 key 分发。
+        """
+        session = self._sessions.create(title=text_action.session_title)
+        sessions = self._sessions.get_sessions()
+        self._session_panel.load(sessions, session.id)
+        self.switch_session(session.id)
+
+        self.submit(text_action.render(text))
+
     def delete_session(self, sid: str):
         self._sessions.delete(sid)
         sessions = self._sessions.get_sessions()

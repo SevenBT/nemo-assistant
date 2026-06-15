@@ -18,6 +18,12 @@ class WindowPage(AutoSettingPage):
                     "窗口拖到屏幕边缘时自动吸附",
                 ),
                 CardSpec(
+                    cfg.selectionFloatEnabled,
+                    FluentIcon.QUICK_NOTE,
+                    "划词浮标",
+                    "在任意应用选中文字后，光标旁自动弹出动作条（解释/翻译/存便签）",
+                ),
+                CardSpec(
                     cfg.edgeSnapThreshold,
                     FluentIcon.CONSTRACT,
                     "吸附宽度阈值",

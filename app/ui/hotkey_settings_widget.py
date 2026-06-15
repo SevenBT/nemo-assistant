@@ -22,6 +22,7 @@ _ACTIONS = [
     ("new_note",      "新建便签"),
     ("toggle_window", "显示/隐藏窗口"),
     ("quick_ask",     "快速提问"),
+    ("selection",     "划词动作"),
 ]
 
 

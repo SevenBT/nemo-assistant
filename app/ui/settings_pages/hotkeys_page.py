@@ -16,6 +16,7 @@ class _HotkeyConfigAdapter:
             "new_note": cfg.get(cfg.hotkeyNewNote),
             "toggle_window": cfg.get(cfg.hotkeyToggleWindow),
             "quick_ask": cfg.get(cfg.hotkeyQuickAsk),
+            "selection": cfg.get(cfg.hotkeySelection),
         }
 
     def update_hotkeys(self, updates: dict) -> None:
@@ -24,6 +25,7 @@ class _HotkeyConfigAdapter:
             "new_note": cfg.hotkeyNewNote,
             "toggle_window": cfg.hotkeyToggleWindow,
             "quick_ask": cfg.hotkeyQuickAsk,
+            "selection": cfg.hotkeySelection,
         }
         for action, combo in updates.items():
             if action in _MAP:

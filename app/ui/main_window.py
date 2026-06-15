@@ -43,6 +43,8 @@ from app.ui.notes_dialog import NotesPanel
 from app.core.hotkey_manager import HotkeyManager
 from app.ui.resize_filter import ResizeFilter
 from app.ui.screenshot_controller import ScreenshotController
+from app.ui.selection_controller import SelectionController
+from app.core.selection_monitor import SelectionMonitor
 from app.ui.toolbox_panel import ToolboxPanel
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_window import SettingsWindow
@@ -126,6 +128,13 @@ class MainWindow(FluentWindow):
         # 识图：每次截图动作新建一个会话，附上图片并按动作处理（自动发送或等输入）
         self._screenshot_controller.set_chat_callbacks(
             vision_callback=self._chat_session_controller.start_vision_session,
+        )
+        # 划词即行动：取词 → 弹动作条 → 分发到 AI 会话或笔记库
+        self._selection_controller = SelectionController(
+            self,
+            note_mgr=self._notes,
+            text_session_callback=self._chat_session_controller.start_text_session,
+            notify=self._notify_signal.emit,
         )
         self._scheduler.set_tool_manager(self._registry)
         self._note_created_signal.connect(self._notes_panel.refresh)
@@ -366,7 +375,17 @@ class MainWindow(FluentWindow):
         self._hotkey_mgr.toggle_window_triggered.connect(self._toggle_window_visibility)
         self._hotkey_mgr.quick_ask_triggered.connect(self._quick_ask)
         self._hotkey_mgr.toggle_mini_triggered.connect(self.toggle_mini_mode)
+        self._hotkey_mgr.selection_triggered.connect(
+            self._selection_controller.trigger_at_cursor
+        )
         self._hotkey_mgr.start()
+
+        # 划词浮标：鼠标拖选后在光标附近弹出动作条（可在设置中开关）
+        self._selection_monitor = SelectionMonitor(self)
+        self._selection_monitor.selection_gesture.connect(
+            self._selection_controller.trigger_at
+        )
+        self._selection_monitor.set_enabled(cfg.get(cfg.selectionFloatEnabled))
 
     def _new_note_via_hotkey(self):
         self._sticky_note_controller.create_from_hotkey()
@@ -653,6 +672,10 @@ class MainWindow(FluentWindow):
         if dlg.exec():
             if self._snap_mgr is not None:
                 self._snap_mgr.set_enabled(cfg.get(cfg.edgeSnap))
+            if self._selection_monitor is not None:
+                self._selection_monitor.set_enabled(
+                    cfg.get(cfg.selectionFloatEnabled)
+                )
             self._reapply_theme()
             if not self.isVisible():
                 self.show()
@@ -845,6 +868,8 @@ class MainWindow(FluentWindow):
     def cleanup(self):
         """停止所有后台 worker，在应用退出前调用。"""
         self._hotkey_mgr.stop()
+        if hasattr(self, "_selection_monitor"):
+            self._selection_monitor.stop()
         self._chat_session_controller.cleanup()
 
     def _on_quit(self):

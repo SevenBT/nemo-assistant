@@ -258,6 +258,12 @@ class AppConfig(QConfig):
     )
     hotkeyQuickAsk = ConfigItem("Hotkeys", "QuickAsk", "ctrl+alt+q")
     hotkeyToggleMini = ConfigItem("Hotkeys", "ToggleMini", "ctrl+alt+w")
+    hotkeySelection = ConfigItem("Hotkeys", "Selection", "ctrl+alt+e")
+
+    # -- Selection (划词即行动) --
+    selectionFloatEnabled = ConfigItem(
+        "Selection", "FloatEnabled", True, BoolValidator()
+    )
 
     # -- Layout (persisted, not shown in settings UI) --
     noteListWidth = ConfigItem("Layout", "NoteListWidth", 100)
