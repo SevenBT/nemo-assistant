@@ -182,11 +182,6 @@ class TitleBar(QWidget):
         )
         nav_layout.addWidget(self._screenshot_btn)
 
-        self._mini_btn = self._make_tool_btn(
-            FluentIcon.ZOOM_OUT, "切换 Mini 模式", self._win.toggle_mini_mode
-        )
-        nav_layout.addWidget(self._mini_btn)
-
         root.addWidget(nav_row)
 
         # Aliases required by FluentWindow's nativeEvent and setTitleBar internals.

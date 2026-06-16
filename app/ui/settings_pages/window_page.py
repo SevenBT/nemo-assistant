@@ -56,30 +56,6 @@ class WindowPage(AutoSettingPage):
                     "窗口高度",
                     "应用窗口的默认高度",
                 ),
-                CardSpec(
-                    cfg.miniWidth,
-                    FluentIcon.MINIMIZE,
-                    "Mini 窗口宽度",
-                    "Mini 模式常驻小窗的宽度",
-                ),
-                CardSpec(
-                    cfg.miniHeight,
-                    FluentIcon.MINIMIZE,
-                    "Mini 窗口高度",
-                    "Mini 模式常驻小窗的高度",
-                ),
-                CardSpec(
-                    cfg.miniFontSize,
-                    FluentIcon.FONT,
-                    "Mini 字体大小",
-                    "Mini 模式回复区的字号",
-                ),
-                CardSpec(
-                    cfg.miniOpacity,
-                    FluentIcon.TRANSPARENT,
-                    "Mini 窗口不透明度",
-                    "Mini 模式整窗不透明度（百分比，越小越透）",
-                ),
             ],
             parent,
         )

@@ -196,20 +196,6 @@ class AppConfig(QConfig):
     windowHeight = RangeConfigItem(
         "Window", "Height", 700, RangeValidator(400, 1200)
     )
-    # Mini 模式：常驻桌面的小窗，尺寸与字号独立可配
-    miniWidth = RangeConfigItem(
-        "Window", "MiniWidth", 320, RangeValidator(220, 500)
-    )
-    miniHeight = RangeConfigItem(
-        "Window", "MiniHeight", 420, RangeValidator(240, 600)
-    )
-    miniFontSize = RangeConfigItem(
-        "Window", "MiniFontSize", 12, RangeValidator(9, 16)
-    )
-    # Mini 模式整窗不透明度（百分比，50–100；100 = 完全不透明）
-    miniOpacity = RangeConfigItem(
-        "Window", "MiniOpacity", 90, RangeValidator(50, 100)
-    )
 
     # -- API --
     apiType = OptionsConfigItem(
@@ -262,7 +248,6 @@ class AppConfig(QConfig):
         "Hotkeys", "ToggleWindow", "ctrl+alt+space"
     )
     hotkeyQuickAsk = ConfigItem("Hotkeys", "QuickAsk", "ctrl+alt+q")
-    hotkeyToggleMini = ConfigItem("Hotkeys", "ToggleMini", "ctrl+alt+w")
     hotkeySelection = ConfigItem("Hotkeys", "Selection", "ctrl+alt+e")
 
     # -- Selection (划词即行动) --

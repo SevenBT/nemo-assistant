@@ -3,13 +3,13 @@
 两条触发路径（全局热键 / 划词浮标）汇聚到这里，复用同一套取词与分发逻辑：
 
     触发 → 弹出动作条 → 用户交互：
-        单击（气泡快查）→ 取词 → ResultBubble 就地显示结果（不建会话）
-        长按（小窗深入）→ 取词 → 小窗接管，可追问
-        📌 存便签        → 取词 → 直接写入笔记库（静默，仅 toast 提示）
+        点击 AI 动作 → 取词 → ResultBubble 就地显示结果（不建会话）
+                       气泡里可再「转主窗」继续深入
+        📌 存便签     → 取词 → 直接写入笔记库（静默，仅 toast 提示）
 
 与 ScreenshotController 平行：那边处理截图后动作，这边处理选中文字后动作。
 
-★ 取词时机：弹窗只在用户点击/长按动作按钮后才调 capture_selection()，
+★ 取词时机：弹窗只在用户点击动作按钮后才调 capture_selection()，
 即「只在真要动作时碰一次剪贴板」。弹窗本身不读任何内容。
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ _NOTE_TITLE_MAX = 20
 
 
 class SelectionController(QObject):
-    """统筹划词动作：弹窗 → 取词 → 分发到气泡/小窗/笔记库。"""
+    """统筹划词动作：弹窗 → 取词 → 分发到气泡/笔记库。"""
 
     def __init__(
         self,
@@ -40,7 +40,6 @@ class SelectionController(QObject):
         *,
         note_mgr,
         text_session_callback,
-        mini_session_callback=None,
         main_session_callback=None,
         notify=None,
     ):
@@ -49,9 +48,7 @@ class SelectionController(QObject):
             window: 主窗口，AI 动作需要 show/raise 它。
             note_mgr: NoteManager，用于「存便签」。
             text_session_callback: 形如 start_text_session(text, action)。
-                长按直接走小窗的兜底（mini 回调缺失时）。
-            mini_session_callback: 形如 dispatch_to_mini(text, action, *, prefill_reply)。
-                长按时直接把查询发到小窗；气泡「在小窗继续」也走它。
+                气泡续聊回调缺失时的兜底（新建会话 + 主窗）。
             main_session_callback: 形如 dispatch_to_main(text, action, llm_reply, *, force_new)。
                 气泡「在主窗继续 / 新建」把问答注入划词速记会话。
             notify: 可选 (title, body) -> None，用于 toast 提示。
@@ -60,16 +57,13 @@ class SelectionController(QObject):
         self._window = window
         self._notes = note_mgr
         self._text_session = text_session_callback
-        self._mini_session = mini_session_callback
         self._main_session = main_session_callback
         self._notify = notify
 
         self._popup = TextActionPopup(window)
         self._popup.action_chosen.connect(self._on_action_bubble)
-        self._popup.long_press_chosen.connect(self._on_action_mini)
 
         self._bubble = ResultBubble(window)
-        self._bubble.continue_in_mini.connect(self._on_bubble_continue)
         self._bubble.continue_in_main.connect(self._on_bubble_continue_main)
 
         # UIA 在手势命中时已取到的选中文字（若可用）；点击动作时优先消费它，
@@ -156,43 +150,7 @@ class SelectionController(QObject):
             self._popup_x, self._popup_y, text, action_key
         )
 
-    # ── 长按 → 小窗深入 ────────────────────────────────────────────────
-
-    def _on_action_mini(self, key: str):
-        """长按按钮：直接发到小窗（走完整会话流程，可追问）。"""
-        action = get_text_action(key)
-        if action is None:
-            logger.warning("划词：未知动作 %s", key)
-            return
-
-        text = self._get_text()
-        if not text:
-            return
-
-        if action.goes_to_ai:
-            self._dispatch_to_mini(text, action)
-        elif key == "note":
-            self._save_as_note(text)
-
-    def _dispatch_to_mini(self, text: str, action):
-        """将请求发送到小窗模式。"""
-        if self._mini_session is not None:
-            self._mini_session(text, action)
-        else:
-            # 退回到原始行为：新建会话 + 主窗口
-            self._dispatch_to_ai(text, action)
-
-    # ── 气泡 "在小窗继续" ──────────────────────────────────────────────
-
-    def _on_bubble_continue(self, source_text: str, llm_reply: str, action_key: str):
-        """气泡中点击"在小窗继续"：将已有问答注入小窗会话。"""
-        action = get_text_action(action_key)
-        if action is None:
-            return
-        if self._mini_session is not None:
-            self._mini_session(source_text, action, prefill_reply=llm_reply)
-        else:
-            self._dispatch_to_ai(source_text, action)
+    # ── 气泡 "在主窗继续" ──────────────────────────────────────────────
 
     def _on_bubble_continue_main(
         self, source_text: str, llm_reply: str, action_key: str, force_new: bool

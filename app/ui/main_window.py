@@ -38,7 +38,6 @@ from app.ui.chat_session_controller import ChatSessionController
 from app.ui.chat_widget import ChatWidget
 from app.ui.edge_snap import EdgeSnapManager
 from app.ui.input_widget import InputWidget
-from app.ui.mini_panel import MiniPanel
 from app.ui.notes_dialog import NotesPanel
 from app.core.hotkey_manager import HotkeyManager
 from app.ui.resize_filter import ResizeFilter
@@ -129,12 +128,11 @@ class MainWindow(FluentWindow):
         self._screenshot_controller.set_chat_callbacks(
             vision_callback=self._chat_session_controller.start_vision_session,
         )
-        # 划词即行动：取词 → 弹动作条 → 分发到气泡/小窗/笔记库
+        # 划词即行动：取词 → 弹动作条 → 分发到气泡/主窗/笔记库
         self._selection_controller = SelectionController(
             self,
             note_mgr=self._notes,
             text_session_callback=self._chat_session_controller.start_text_session,
-            mini_session_callback=self.dispatch_text_to_mini,
             main_session_callback=self.dispatch_text_to_main,
             notify=self._notify_signal.emit,
         )
@@ -150,7 +148,6 @@ class MainWindow(FluentWindow):
         self._confirm_request.connect(self._on_confirm_request)
         self._setup_hotkeys()
         self._restore_pinned_notes()
-        self._setup_mini_mode()
 
         # 实时字体大小：内容/编辑器字号变化时重新应用主题 QSS
         cfg.contentFontSize.valueChanged.connect(self._on_font_size_changed)
@@ -379,7 +376,6 @@ class MainWindow(FluentWindow):
         self._hotkey_mgr.new_note_triggered.connect(self._new_note_via_hotkey)
         self._hotkey_mgr.toggle_window_triggered.connect(self._toggle_window_visibility)
         self._hotkey_mgr.quick_ask_triggered.connect(self._quick_ask)
-        self._hotkey_mgr.toggle_mini_triggered.connect(self.toggle_mini_mode)
         self._hotkey_mgr.selection_triggered.connect(
             self._selection_controller.trigger_at_cursor
         )
@@ -415,231 +411,23 @@ class MainWindow(FluentWindow):
         self.activateWindow()
         self._input.focus()
 
-    # ──────────────────────────────────────────── Mini 模式
-    def _setup_mini_mode(self):
-        """初始化 Mini 模式状态与面板（默认正常模式）。"""
-        self._mode = "normal"
-        self._mini_session_id: str | None = None
-        # 进入 mini 前的正常几何，退出时还原
-        self._pre_mini_geo = None
-
-        self._mini_panel = MiniPanel(self)
-        self._mini_panel.new_session_requested.connect(self._mini_new_session)
-        self._mini_panel.exit_mini_requested.connect(self.exit_mini_mode)
-        self._mini_panel.minimize_requested.connect(self._minimize)
-        self._mini_panel.close_requested.connect(self._hide_to_tray)
-        # 作为 stackedWidget 的一个页面注册（隐藏于导航之外）
-        self.stackedWidget.addWidget(self._mini_panel)
-        self._mini_panel.hide()
-
-        # mini 字号变化时实时应用
-        cfg.miniFontSize.valueChanged.connect(
-            lambda _v=None: self._mini_panel.apply_font_size(cfg.get(cfg.miniFontSize))
-        )
-        # mini 尺寸变化时，若正处于 mini 模式则实时重设窗口大小
-        cfg.miniWidth.valueChanged.connect(self._on_mini_size_changed)
-        cfg.miniHeight.valueChanged.connect(self._on_mini_size_changed)
-        # mini 不透明度变化时，若正处于 mini 模式则实时应用
-        cfg.miniOpacity.valueChanged.connect(self._on_mini_opacity_changed)
-
-    def _on_mini_size_changed(self, _value=None):
-        if self._mode == "mini":
-            self._set_fixed_size(False)  # 先解除旧的固定约束
-            self._apply_mini_geometry()
-
-    def _on_mini_opacity_changed(self, _value=None):
-        if self._mode == "mini":
-            self.setWindowOpacity(cfg.get(cfg.miniOpacity) / 100.0)
-
-    def toggle_mini_mode(self):
-        """全局热键 / 按钮入口：在正常与 mini 模式间切换。"""
-        if not self.isVisible():
-            self.show()
-        if self._mode == "mini":
-            self.exit_mini_mode()
-        else:
-            self.enter_mini_mode()
-        self.raise_()
-        self.activateWindow()
-
-    def enter_mini_mode(self):
-        """切入 mini 模式：固定小尺寸、置顶、精简布局，复用同一 controller。"""
-        if self._mode == "mini":
-            return
-
-        # 取消最大化 / 边缘吸附，记下还原几何
-        if self.is_maximized:
-            self._toggle_maximize()
-        if self._snap_mgr is not None and self._snap_mgr.is_snapped:
-            self._snap_mgr.unsnap_full()
-        self._pre_mini_geo = self._normal_geometry()
-
-        self._mode = "mini"
-
-        # 选定 / 创建 mini 专用会话
-        sid = self._mini_session_id
-        if not sid or self._sessions.get(sid) is None:
-            session = self._sessions.create(title="快速提问")
-            sid = session.id
-            self._mini_session_id = sid
-
-        # 把共享的 InputWidget 从正常布局移入 mini 面板
-        self._chat_col.removeWidget(self._input)
-        self._mini_panel.set_input_widget(self._input)
-
-        # 切换 controller 的渲染目标到 mini 视图
-        self._chat_session_controller.bind_targets(
-            chat=self._mini_panel.chat,
-            input_widget=self._input,
-            tool_status=self._tool_status,
-        )
-
-        # 标题栏隐藏、内容区切到 mini 页
-        self._title_bar.hide()
-        self.widgetLayout.setContentsMargins(0, 0, 0, 0)
-        self.stackedWidget.setCurrentWidget(self._mini_panel)
-        self._mini_panel.show()
-        self._mini_panel.apply_font_size(cfg.get(cfg.miniFontSize))
-
-        # 重建 mini 视图并恢复任何进行中的流式状态
-        self._chat_session_controller.switch_session(sid)
-
-        # 禁用边缘吸附与边框调整大小，固定尺寸
-        self._resize_filter.set_enabled(False)
-        if self._snap_mgr is not None:
-            self._snap_mgr.set_enabled(False)
-        self._apply_mini_geometry()
-
-        # 置顶
-        self._set_always_on_top(True)
-
-        # 整窗半透明（常驻桌面的轻透视觉）
-        self.setWindowOpacity(cfg.get(cfg.miniOpacity) / 100.0)
-
-    def exit_mini_mode(self):
-        """切回正常模式：还原尺寸、布局、渲染目标与置顶状态。"""
-        if self._mode != "mini":
-            return
-        self._mode = "normal"
-
-        # 还原整窗不透明度
-        self.setWindowOpacity(1.0)
-
-        # 取消置顶
-        self._set_always_on_top(False)
-
-        # 还原固定尺寸约束
-        self._set_fixed_size(False)
-        self._resize_filter.set_enabled(True)
-        if self._snap_mgr is not None:
-            self._snap_mgr.set_enabled(cfg.get(cfg.edgeSnap))
-
-        # 把 InputWidget 移回正常布局
-        self._mini_panel.hide()
-        self._input.setParent(None)
-        self._chat_col.addWidget(self._input)
-
-        # 渲染目标切回正常聊天视图
-        self._chat_session_controller.bind_targets(
-            chat=self._chat,
-            input_widget=self._input,
-            tool_status=self._tool_status,
-        )
-
-        # 还原标题栏与内容区
-        self._title_bar.show()
-        self._title_bar.move(0, 0)
-        self._title_bar.resize(self.width(), self._title_bar.height())
-        self.widgetLayout.setContentsMargins(0, self._title_bar.height(), 0, 0)
-        self.switchTo(self._pages[0])
-        self._title_bar.set_active_view(0)
-
-        # 还原会话视图：mini 用的会话继续显示在正常模式
-        self._chat_session_controller.switch_session(
-            self._mini_session_id or self._chat_session_controller.current_session_id
-        )
-
-        # 还原几何
-        if self._pre_mini_geo is not None and self._pre_mini_geo.isValid():
-            self.setGeometry(self._pre_mini_geo)
-
-    def _mini_new_session(self):
-        """mini 工具栏「新建会话」：开新会话，仍停留在 mini 模式。"""
-        session = self._sessions.create(title="快速提问")
-        self._mini_session_id = session.id
-        sessions = self._sessions.get_sessions()
-        self._session_panel.load(sessions, session.id)
-        self._chat_session_controller.switch_session(session.id)
-
-    def dispatch_text_to_mini(self, text: str, text_action, *, prefill_reply: str = ""):
-        """划词长按 / 气泡续聊：把选中文字送入小窗会话。
-
-        进入 mini 模式（若尚未在其中），复用 mini 专用「快速提问」会话。
-        - prefill_reply 为空：直接发出查询，等 LLM 回复（长按路径）。
-        - prefill_reply 非空：注入已有问答，不重复请求 LLM（气泡续聊路径）。
-        """
-        if not self.isVisible():
-            self.show()
-        if self._mode != "mini":
-            self.enter_mini_mode()
-        self.raise_()
-        self.activateWindow()
-
-        if prefill_reply:
-            self._chat_session_controller.inject_exchange(
-                text_action.render(text), prefill_reply
-            )
-        else:
-            self._chat_session_controller.submit(text_action.render(text))
-
+    # ──────────────────────────────────────────── 划词速记
     def dispatch_text_to_main(
         self, text: str, text_action, llm_reply: str, *, force_new: bool = False
     ):
-        """气泡「在主窗继续」：在正常模式下把问答注入划词速记会话。
+        """气泡「在主窗继续」：把问答注入划词速记会话。
 
         - force_new=False：复用最近的划词速记会话（默认，避免会话爆炸）。
         - force_new=True：强制新建一个划词速记会话。
         """
-        if not self.isVisible():
-            self.show()
-        # 正处于小窗模式时先切回正常模式，再注入到划词速记会话
-        if self._mode == "mini":
-            self.exit_mini_mode()
+        # 复用统一的显示逻辑：解除边缘吸附 / 从最小化还原 / show + 置前。
+        # 仅判 isVisible() 不够——最小化或吸附态下它仍为 True，窗口却没真正露出。
+        self._show_window()
         self.raise_()
         self.activateWindow()
         self._chat_session_controller.continue_in_selection_session(
             text, text_action, llm_reply, force_new=force_new
         )
-
-    def _apply_mini_geometry(self):
-        """按配置应用 mini 固定尺寸，尽量保持当前左上角位置。"""
-        w = cfg.get(cfg.miniWidth)
-        h = cfg.get(cfg.miniHeight)
-        pos = self.pos()
-        self._set_fixed_size(True, w, h)
-        # 防止超出屏幕：右/下边界回拉
-        sg = QApplication.primaryScreen().availableGeometry()
-        x = min(pos.x(), sg.x() + sg.width() - w)
-        y = min(pos.y(), sg.y() + sg.height() - h)
-        x = max(x, sg.x())
-        y = max(y, sg.y())
-        self.setGeometry(x, y, w, h)
-
-    def _set_fixed_size(self, fixed: bool, w: int = 0, h: int = 0):
-        """切换固定尺寸约束。fixed=False 时还原为正常的最小尺寸。"""
-        if fixed:
-            self.setMinimumSize(w, h)
-            self.setMaximumSize(w, h)
-        else:
-            self.setMaximumSize(16777215, 16777215)
-            self.setMinimumSize(320, 420)
-
-    def _set_always_on_top(self, on_top: bool):
-        """切换窗口置顶。无边框窗口下重设 flag 后需要重新 show。"""
-        was_visible = self.isVisible()
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on_top)
-        if was_visible:
-            self.show()
 
     def _restore_pinned_notes(self):
         self._sticky_note_controller.restore_pinned()
@@ -753,9 +541,6 @@ class MainWindow(FluentWindow):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        # mini 模式下标题栏隐藏，无需调整其宽度
-        if getattr(self, '_mode', 'normal') == "mini":
-            return
         # FluentWindow 会偏移 titleBar 为导航面板展开按钮留空间，
         # 但由于侧栏已隐藏，需要保持标题栏全宽。
         if hasattr(self, '_title_bar'):
@@ -889,11 +674,7 @@ class MainWindow(FluentWindow):
         cfg.set(cfg.sessionPanelWidth, max(session_width, 120))
 
     def _normal_geometry(self):
-        """当前的"正常"几何：剔除最大化 / 边缘吸附 / mini 带来的非常规尺寸。"""
-        if getattr(self, '_mode', 'normal') == "mini":
-            geo = getattr(self, '_pre_mini_geo', None)
-            if geo is not None and geo.isValid():
-                return geo
+        """当前的"正常"几何：剔除最大化 / 边缘吸附带来的非常规尺寸。"""
         if self.is_maximized:
             # 最大化时还原目标存在 _pre_max_geo
             geo = getattr(self, '_pre_max_geo', None)

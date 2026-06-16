@@ -1,7 +1,11 @@
 """划词结果气泡 — 就地显示 LLM 快查结果的轻量浮窗。
 
-在选区附近弹出，流式显示翻译/解释结果。不创建会话、不走完整 prompt 体系。
-用户看完即走（零痕迹），或点击图标按钮转入小窗继续对话。
+在选区附近弹出，流式显示解释/翻译结果。不创建会话、不走完整 prompt 体系。
+用户看完即走（零痕迹），或点击图标按钮转入主窗继续对话。
+
+气泡尺寸随回复内容自适应增大：宽度按最宽一行自然宽度增长（单调不回缩，
+避免流式过程中左右抖动），高度按换行后实际行数增长，两者都受最大值约束，
+超出则在气泡内滚动。
 
 视觉风格跟随应用主题，定位逻辑复用 TextActionPopup 同款策略。
 焦点策略与 TextActionPopup 一致：WS_EX_NOACTIVATE，不抢焦点。
@@ -40,9 +44,13 @@ except ImportError:
 _GWL_EXSTYLE = -20
 _WS_EX_NOACTIVATE = 0x08000000
 
-# 布局参数
-_BUBBLE_WIDTH = 320
-_BUBBLE_MAX_HEIGHT = 200
+# 布局参数：气泡宽高自适应内容，但限制上下界。
+_BUBBLE_MIN_WIDTH = 240
+_BUBBLE_MAX_WIDTH = 420
+_BUBBLE_MIN_HEIGHT = 80
+_BUBBLE_MAX_HEIGHT = 420
+_H_MARGIN = 16   # 内容区左右内边距之和（8 + 8）
+_V_CHROME = 44   # 上下内边距 + footer 工具栏高度的预留
 _GAP_PX = 4
 
 
@@ -107,8 +115,6 @@ class ResultBubble(QFrame):
     _stream_error = pyqtSignal(str)
     _hide_requested = pyqtSignal()  # 全局点击监听
 
-    # 请求转入小窗继续对话，携带 (selected_text, llm_reply, action_key)
-    continue_in_mini = pyqtSignal(str, str, str)
     # 请求转入主窗划词速记会话，携带 (selected_text, llm_reply, action_key, force_new)
     # force_new=False 复用最近的划词速记会话，True 强制新建。
     continue_in_main = pyqtSignal(str, str, str, bool)
@@ -126,6 +132,10 @@ class ResultBubble(QFrame):
         self._full_text = ""
         self._source_text = ""
         self._action_key = ""
+        # 锚点（选区下方的逻辑坐标）与当前自适应宽度（单调增长）
+        self._anchor_x = 0
+        self._anchor_y = 0
+        self._content_width = _BUBBLE_MIN_WIDTH
 
         self._build_window()
         self._build_ui()
@@ -149,7 +159,8 @@ class ResultBubble(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
-        self.setFixedWidth(_BUBBLE_WIDTH)
+        self.setMinimumWidth(_BUBBLE_MIN_WIDTH)
+        self.setMaximumWidth(_BUBBLE_MAX_WIDTH)
         self.setMaximumHeight(_BUBBLE_MAX_HEIGHT)
 
     def _build_ui(self):
@@ -175,15 +186,6 @@ class ResultBubble(QFrame):
         footer.setContentsMargins(0, 2, 0, 0)
         footer.setSpacing(4)
         footer.addStretch()
-
-        # "在小窗继续"按钮
-        self._continue_btn = QPushButton("↗")  # ↗ 箭头
-        self._continue_btn.setToolTip("在小窗继续对话")
-        self._continue_btn.setObjectName("bubbleContinueBtn")
-        self._continue_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._continue_btn.setFixedSize(24, 24)
-        self._continue_btn.clicked.connect(self._on_continue)
-        footer.addWidget(self._continue_btn)
 
         # "在主窗继续"按钮（复用最近的划词速记会话）
         self._main_btn = QPushButton("⤢")  # ⤢ 放大
@@ -231,17 +233,6 @@ class ResultBubble(QFrame):
                 font-size: 13px;
                 border: none;
             }}
-            #bubbleContinueBtn {{
-                background: transparent;
-                border: none;
-                color: {text_secondary};
-                font-size: 14px;
-                border-radius: 4px;
-            }}
-            #bubbleContinueBtn:hover {{
-                background: {surface_raised};
-                color: {accent};
-            }}
             #bubbleMainBtn {{
                 background: transparent;
                 border: none;
@@ -253,6 +244,10 @@ class ResultBubble(QFrame):
                 background: {surface_raised};
                 color: {accent};
             }}
+            #bubbleMainBtn:disabled {{
+                background: transparent;
+                color: {border_color};
+            }}
             #bubbleNewBtn {{
                 background: transparent;
                 border: none;
@@ -263,6 +258,10 @@ class ResultBubble(QFrame):
             #bubbleNewBtn:hover {{
                 background: {surface_raised};
                 color: {accent};
+            }}
+            #bubbleNewBtn:disabled {{
+                background: transparent;
+                color: {border_color};
             }}
         """
         self.setStyleSheet(qss)
@@ -308,6 +307,10 @@ class ResultBubble(QFrame):
         self._streaming = True
         self._content.clear()
         self._content.setPlaceholderText("···")  # ···
+        # 重置自适应宽度起点（每次新查询从最小宽度开始单调增长）
+        self._content_width = _BUBBLE_MIN_WIDTH
+        # 流式期间禁用「转主窗」按钮，避免搬运半截回复；结束后再启用。
+        self._set_actions_enabled(False)
 
         self._apply_theme_style()
         self._position_at(x, y)
@@ -335,16 +338,26 @@ class ResultBubble(QFrame):
     # ── 定位 ────────────────────────────────────────────────────────────
 
     def _position_at(self, x: int, y: int):
-        """定位气泡到选区下方，复用 TextActionPopup 同款边缘修正逻辑。"""
-        self.adjustSize()
-        w = self.width()
-        # 高度按内容自适应，但限制最大值
-        h = min(self.sizeHint().height(), _BUBBLE_MAX_HEIGHT)
-        self.setFixedHeight(max(h, 80))  # 至少 80px 以显示加载状态
-        h = self.height()
+        """记下锚点（选区下方）并按初始尺寸定位。
 
-        px = x - w // 2
-        py = y + _GAP_PX
+        锚点是选区水平中心 / 底边的逻辑坐标，后续随内容增大时由
+        _reposition() 复用它重新摆放气泡（始终相对同一锚点对齐）。
+        """
+        self._anchor_x = x
+        self._anchor_y = y
+        self.setFixedWidth(self._content_width)
+        self.setFixedHeight(_BUBBLE_MIN_HEIGHT)
+        self._reposition()
+
+    def _reposition(self):
+        """按当前宽高与锚点重新摆放气泡，并做屏幕边缘修正。
+
+        水平居中对齐锚点 x；默认置于锚点 y 下方，底部空间不足则翻到上方；
+        左右越界则贴边。同步刷新供 mouse hook 比对的物理像素几何。
+        """
+        w, h = self.width(), self.height()
+        px = self._anchor_x - w // 2
+        py = self._anchor_y + _GAP_PX
 
         screen = QApplication.screenAt(QPoint(px + w // 2, py)) \
             or QApplication.primaryScreen()
@@ -355,7 +368,7 @@ class ResultBubble(QFrame):
             if px < geo.left():
                 px = geo.left()
             if py + h > geo.bottom():
-                py = y - h - _GAP_PX  # 翻到选区上方
+                py = self._anchor_y - h - _GAP_PX  # 翻到选区上方
             if py < geo.top():
                 py = geo.top()
 
@@ -385,38 +398,59 @@ class ResultBubble(QFrame):
         cursor = self._content.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self._content.setTextCursor(cursor)
-        # 动态调整高度
-        self._adjust_height()
+        # 动态调整宽高
+        self._adjust_size()
 
-    def _adjust_height(self):
-        """根据内容调整气泡高度（不超过最大值）。"""
+    def _natural_width(self) -> int:
+        """内容中最宽一行的像素宽度（不换行的自然宽度）。"""
+        fm = self._content.fontMetrics()
+        longest = 0
+        for line in self._full_text.split("\n"):
+            adv = fm.horizontalAdvance(line)
+            if adv > longest:
+                longest = adv
+        return longest
+
+    def _adjust_size(self):
+        """随内容自适应气泡宽高，受最大值约束，超出则内部滚动。
+
+        宽度单调增长（只增不减），避免流式逐字到达时左右边界来回抖动。
+        高度按当前宽度下的换行结果计算。任一尺寸变化都重新定位。
+        """
+        # 宽度：按最宽行自然宽度增长，clamp 到 [min, max]，且不回缩
+        target_w = self._natural_width() + _H_MARGIN + 4
+        target_w = max(_BUBBLE_MIN_WIDTH, min(target_w, _BUBBLE_MAX_WIDTH))
+        target_w = max(target_w, self._content_width)
+        self._content_width = target_w
+        if self.width() != target_w:
+            self.setFixedWidth(target_w)
+
+        # 高度：在当前宽度下测量文档实际高度，clamp 到 [min, max]
         doc_height = self._content.document().size().height()
-        # 内容高度 + 边距 + footer
-        target = int(doc_height) + 40
-        target = max(80, min(target, _BUBBLE_MAX_HEIGHT))
-        if self.height() != target:
-            self.setFixedHeight(target)
-            # 重新定位（保持顶部不动）
-            if self._cached_geo is not None:
-                self._cached_geo.setHeight(target)
+        target_h = int(doc_height) + _V_CHROME
+        target_h = max(_BUBBLE_MIN_HEIGHT, min(target_h, _BUBBLE_MAX_HEIGHT))
+        if self.height() != target_h:
+            self.setFixedHeight(target_h)
+
+        self._reposition()
 
     def _on_stream_done(self):
         self._streaming = False
         self._content.setPlaceholderText("")
+        # 回复完整，启用「转主窗」按钮。
+        self._set_actions_enabled(True)
 
     def _on_stream_error(self, msg: str):
         self._streaming = False
         if not self._full_text:
             self._content.setPlainText(f"[错误] {msg}")
+        # 有内容才允许转主窗；纯错误（无任何回复）保持禁用，避免搬空内容。
+        self._set_actions_enabled(bool(self._full_text))
 
-    # ── "在小窗继续" ───────────────────────────────────────────────────
-
-    def _on_continue(self):
-        """将当前问答交接到小窗。"""
-        self.continue_in_mini.emit(
-            self._source_text, self._full_text, self._action_key
-        )
-        self.hide()
+    def _set_actions_enabled(self, enabled: bool):
+        """启用/禁用「转主窗」与「新建」按钮（流式期间禁用，置灰不可点）。"""
+        self._main_btn.setEnabled(enabled)
+        self._new_btn.setEnabled(enabled)
 
     def _on_continue_main(self):
         """将当前问答交接到主窗口，复用最近的划词速记会话。"""
