@@ -12,13 +12,18 @@
 被解释成 SIGINT 打断 app），不改剪贴板（不打扰正常复制粘贴），不抢焦点。
 
 代价：依赖目标应用对 UIA 的支持。主流浏览器、Office、记事本、原生输入框
-都支持；少数自绘控件 / 老 Electron / 远程桌面内的内容查不到选区，这种情况
-漏弹（漏弹而非误弹——宁可少弹也不在切标签时乱弹）。
+都支持；少数自绘控件 / 老 Electron / 远程桌面 / Canvas 渲染的网页 / 浏览器
+内置 PDF / 跨域 iframe 查不到选区。对这类「读不到」的情况返回
+NO_TEXT_PATTERN，让调用方照常弹按钮、点击时用 Ctrl+C 兜底救回，而不是
+当成「没选中」漏弹。只有「控件支持 TextPattern 但选区为空」（切标签 /
+拖滚动条）才判为真没选中、静默不弹。
 
 COM 线程注意：本函数会在鼠标钩子线程被调用。uiautomation 库按线程自动
 CoInitialize，查到的文字由调用方 marshal 回 Qt 主线程再用。
 """
 from __future__ import annotations
+
+from enum import Enum, auto
 
 from app.core.selection_capture import MAX_SELECTION_CHARS, clean_selection
 
@@ -30,25 +35,44 @@ except Exception:
     _UIA_OK = False
 
 
+class SelectionStatus(Enum):
+    """UIA 取词的查询结果状态。
+
+    区分「读不到」与「真没选中」是关键：前者要弹按钮走 Ctrl+C 兜底救回，
+    后者（切标签 / 拖滚动条）静默不弹。把二者压成「空串」会让 Canvas 网页、
+    浏览器内置 PDF、跨域 iframe 等读不到选区的页面被误当成「没选中」而漏弹。
+    """
+
+    HAS_TEXT = auto()         # 取到非空选中文字
+    EMPTY_SELECTION = auto()  # 控件支持 TextPattern 但选区为空 → 真没选中，静默
+    NO_TEXT_PATTERN = auto()  # 控件不支持 TextPattern → 读不到，应弹按钮走兜底
+    NO_FOCUS = auto()         # 拿不到焦点控件 → 无从判断，静默
+    UNAVAILABLE = auto()      # UIA 库不可用 → 调用方整体退回 Ctrl+C 路径
+
+
 def is_available() -> bool:
     """UIA 是否可用。不可用时调用方应退回 Ctrl+C 取词路径。"""
     return _UIA_OK
 
 
-def get_selected_text() -> str:
-    """查询前台聚焦控件当前选中的文字。取不到返回空串。
+def query_selection() -> tuple[SelectionStatus, str]:
+    """查询前台聚焦控件当前选中的文字，返回三态结果。
 
     纯查询：不发按键、不读写剪贴板、不改变焦点。
+
+    返回 (状态, 文字)。仅 HAS_TEXT 时文字非空；其余状态文字为空串。
+    调用方据状态决定：HAS_TEXT 带文字弹窗；NO_TEXT_PATTERN/UNAVAILABLE
+    弹窗但走 Ctrl+C 兜底取词；EMPTY_SELECTION/NO_FOCUS 静默不弹。
     """
     if not _UIA_OK:
-        return ""
+        return (SelectionStatus.UNAVAILABLE, "")
     try:
         control = _auto.GetFocusedControl()
     except Exception:
-        return ""
+        return (SelectionStatus.NO_FOCUS, "")
     if control is None:
-        return ""
-    return clean_selection(_selection_via_text_pattern(control))
+        return (SelectionStatus.NO_FOCUS, "")
+    return _selection_via_text_pattern(control)
 
 
 def get_selection_bounds() -> tuple[int, int, int, int] | None:
@@ -92,8 +116,14 @@ def get_selection_bounds() -> tuple[int, int, int, int] | None:
     return (rect.left, rect.top, rect.right, rect.bottom)
 
 
-def _selection_via_text_pattern(control) -> str:
+def _selection_via_text_pattern(control) -> tuple[SelectionStatus, str]:
     """文档 / 富文本 / 输入框：TextPattern.GetSelection 拿选中区间的文字。
+
+    返回三态：
+      - 无 TextPattern（pattern 为 None / 取 pattern 抛异常）→ NO_TEXT_PATTERN，
+        交给调用方走 Ctrl+C 兜底（Canvas 网页、内置 PDF、自绘控件等）。
+      - 有 TextPattern 但选区为空 → EMPTY_SELECTION，真没选中（切标签等），静默。
+      - 取到非空文字 → HAS_TEXT。
 
     不用 ValuePattern 兜底——它返回控件的**全部**内容而非选区，会把没选中的
     部分也带出来，造成错误取词。宁可此处取不到（漏弹），不可取错。
@@ -101,15 +131,16 @@ def _selection_via_text_pattern(control) -> str:
     try:
         pattern = control.GetTextPattern()
     except Exception:
-        return ""
+        return (SelectionStatus.NO_TEXT_PATTERN, "")
     if pattern is None:
-        return ""
+        return (SelectionStatus.NO_TEXT_PATTERN, "")
     try:
         ranges = pattern.GetSelection()
     except Exception:
-        return ""
+        # pattern 在但取选区失败，仍属「读不到」，给兜底机会。
+        return (SelectionStatus.NO_TEXT_PATTERN, "")
     if not ranges:
-        return ""
+        return (SelectionStatus.EMPTY_SELECTION, "")
 
     parts = []
     for rng in ranges:
@@ -117,4 +148,7 @@ def _selection_via_text_pattern(control) -> str:
             parts.append(rng.GetText(MAX_SELECTION_CHARS))
         except Exception:
             continue
-    return "".join(parts)
+    text = clean_selection("".join(parts))
+    if not text:
+        return (SelectionStatus.EMPTY_SELECTION, "")
+    return (SelectionStatus.HAS_TEXT, text)

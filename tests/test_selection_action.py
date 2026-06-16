@@ -24,7 +24,11 @@ from app.core.selection_capture import (
     clean_selection,
     is_valid_selection,
 )
-from app.core.selection_monitor import is_drag_selection
+from app.core.selection_uia import (
+    SelectionStatus,
+    _selection_via_text_pattern,
+)
+from app.core.selection_monitor import is_drag_selection, should_emit
 
 
 # ── text_actions ────────────────────────────────────────────────────────
@@ -86,21 +90,136 @@ def test_clean_keeps_within_limit():
 
 # ── selection_capture: is_valid_selection ─────────────────────────────────
 
-def test_valid_when_new_content():
-    assert is_valid_selection("新选中的文字", "旧剪贴板") is True
+def test_valid_when_content_present():
+    # 取词前已 clear()，清空后出现非空内容即说明选中了文字。
+    assert is_valid_selection("新选中的文字") is True
 
 
 def test_invalid_when_empty():
-    assert is_valid_selection("", "旧剪贴板") is False
+    assert is_valid_selection("") is False
 
 
-def test_invalid_when_same_as_clipboard():
-    # Ctrl+C 没产生新复制（内容与劫持前相同）→ 多半没选中
-    assert is_valid_selection("相同内容", "相同内容") is False
+# ── selection_uia: query_selection 三态 ───────────────────────────────────
+
+def test_query_status_enum_members():
+    # 五态齐全：取到/真空选区/读不到/无焦点/库不可用
+    names = {s.name for s in SelectionStatus}
+    assert names == {
+        "HAS_TEXT",
+        "EMPTY_SELECTION",
+        "NO_TEXT_PATTERN",
+        "NO_FOCUS",
+        "UNAVAILABLE",
+    }, f"状态集不符: {names}"
 
 
-def test_invalid_when_same_after_strip():
-    assert is_valid_selection("文字", "  文字  ") is False
+class _FakeRange:
+    def __init__(self, text):
+        self._text = text
+
+    def GetText(self, _max):
+        return self._text
+
+
+class _FakePattern:
+    def __init__(self, ranges):
+        self._ranges = ranges
+
+    def GetSelection(self):
+        return self._ranges
+
+
+class _FakeControl:
+    """模拟 UIA 焦点控件。pattern=None 表示控件不支持 TextPattern。"""
+
+    def __init__(self, pattern, raises=False):
+        self._pattern = pattern
+        self._raises = raises
+
+    def GetTextPattern(self):
+        if self._raises:
+            raise RuntimeError("no pattern")
+        return self._pattern
+
+
+def test_has_text_when_selection_nonempty():
+    control = _FakeControl(_FakePattern([_FakeRange("选中的词")]))
+    status, text = _selection_via_text_pattern(control)
+    assert status is SelectionStatus.HAS_TEXT
+    assert text == "选中的词"
+
+
+def test_empty_selection_when_pattern_but_no_ranges():
+    # 支持 TextPattern 但没选区 → 真没选中（切标签/拖滚动条），静默
+    control = _FakeControl(_FakePattern([]))
+    status, text = _selection_via_text_pattern(control)
+    assert status is SelectionStatus.EMPTY_SELECTION
+    assert text == ""
+
+
+def test_empty_selection_when_ranges_yield_blank():
+    # 有选区但取出来是空白 → 视为没选中
+    control = _FakeControl(_FakePattern([_FakeRange("   ")]))
+    status, text = _selection_via_text_pattern(control)
+    assert status is SelectionStatus.EMPTY_SELECTION
+
+
+def test_no_text_pattern_when_pattern_is_none():
+    # Canvas 网页/内置 PDF/自绘控件：不支持 TextPattern → 应走 Ctrl+C 兜底
+    control = _FakeControl(None)
+    status, text = _selection_via_text_pattern(control)
+    assert status is SelectionStatus.NO_TEXT_PATTERN
+    assert text == ""
+
+
+def test_no_text_pattern_when_get_pattern_raises():
+    control = _FakeControl(None, raises=True)
+    status, _ = _selection_via_text_pattern(control)
+    assert status is SelectionStatus.NO_TEXT_PATTERN
+
+
+# ── selection_capture: MimeData 备份还原 ──────────────────────────────────
+
+def test_backup_restore_preserves_all_formats():
+    """兜底取词的备份/还原要保住所有格式（text + html），不退化成纯文本。"""
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import QMimeData
+    from app.core.selection_capture import _backup_clipboard, _restore_clipboard
+
+    app = QApplication.instance() or QApplication([])
+    clipboard = app.clipboard()
+
+    # 用户原本复制了带格式的富文本（同时含 text 与 html）
+    original = QMimeData()
+    original.setText("纯文本版本")
+    original.setHtml("<b>富文本版本</b>")
+    clipboard.setMimeData(original)
+
+    backup = _backup_clipboard(clipboard)
+
+    # 模拟取词过程污染剪贴板
+    clipboard.clear()
+    clipboard.setText("取词期间的临时内容")
+
+    # 还原后两种格式都应原样回来
+    _restore_clipboard(clipboard, backup)
+    restored = clipboard.mimeData()
+    assert restored.text() == "纯文本版本"
+    assert restored.hasHtml() and "富文本版本" in restored.html()
+
+
+def test_restore_empty_backup_clears_clipboard():
+    """原本剪贴板为空时，还原应清空，不残留取词内容。"""
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import QMimeData
+    from app.core.selection_capture import _restore_clipboard
+
+    app = QApplication.instance() or QApplication([])
+    clipboard = app.clipboard()
+    clipboard.setText("取词残留")
+
+    _restore_clipboard(clipboard, QMimeData())  # 空备份
+    assert clipboard.text() == ""
 
 
 # ── selection_monitor: is_drag_selection ─────────────────────────────────
@@ -127,6 +246,29 @@ def test_drag_too_slow_rejected():
 def test_drag_uses_chebyshev_distance():
     # 纵向位移足够也算（max(|dx|,|dy|)）
     assert is_drag_selection(dx=0, dy=50, duration=0.3) is True
+
+
+# ── selection_monitor: should_emit（光标门槛防误弹）─────────────────────────
+
+def test_emit_when_has_text_regardless_of_cursor():
+    # UIA 确认有选中文字 → 必弹，不受光标门槛限制
+    assert should_emit(SelectionStatus.HAS_TEXT, was_text_cursor=True) is True
+    assert should_emit(SelectionStatus.HAS_TEXT, was_text_cursor=False) is True
+
+
+def test_emit_fallback_only_with_text_cursor():
+    # 读不到选区时：文本光标才弹（内置 PDF/Canvas），箭头光标静默（拖标题栏/桌面）
+    assert should_emit(SelectionStatus.NO_TEXT_PATTERN, was_text_cursor=True) is True
+    assert should_emit(SelectionStatus.NO_TEXT_PATTERN, was_text_cursor=False) is False
+    assert should_emit(SelectionStatus.UNAVAILABLE, was_text_cursor=True) is True
+    assert should_emit(SelectionStatus.UNAVAILABLE, was_text_cursor=False) is False
+
+
+def test_no_emit_when_empty_or_no_focus():
+    # 真没选中 / 无焦点控件 → 无论光标如何都静默
+    for status in (SelectionStatus.EMPTY_SELECTION, SelectionStatus.NO_FOCUS):
+        assert should_emit(status, was_text_cursor=True) is False
+        assert should_emit(status, was_text_cursor=False) is False
 
 
 if __name__ == "__main__":

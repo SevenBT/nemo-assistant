@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import time
 
+from PyQt6.QtCore import QMimeData
 from PyQt6.QtWidgets import QApplication
 
 try:
@@ -48,15 +49,43 @@ def clean_selection(text: str) -> str:
     return cleaned
 
 
-def is_valid_selection(captured: str, previous_clipboard: str) -> bool:
+def is_valid_selection(captured: str) -> bool:
     """判定本次 Ctrl+C 是否真的取到了新选区。
 
-    纯函数，便于单测。规则：取到非空、且与劫持前的剪贴板内容不同
-    （内容相同说明 Ctrl+C 没产生新复制，多半没选中文字）。
+    纯函数，便于单测。取词前已 clipboard.clear()，所以「清空后出现非空内容」
+    即说明 Ctrl+C 产生了新复制——选中了文字。不再与劫持前的剪贴板内容比较：
+    那样会把「选中的词恰好等于上次复制的词」误判为没选中（漏弹）。
     """
-    if not captured:
-        return False
-    return captured != previous_clipboard.strip()
+    return bool(captured)
+
+
+def _backup_clipboard(clipboard) -> QMimeData:
+    """深拷贝当前剪贴板的所有格式，供取词后原样还原。
+
+    不能直接持有 clipboard.mimeData() 返回的对象（生命周期由 Qt 管理，会随
+    剪贴板变化失效）。逐 format 拷到新建的 QMimeData：text/html、图片、文件
+    列表、富文本等都能完整保留，避免兜底取词后把用户原本复制的图片/文件
+    退化成纯文本甚至丢失。
+    """
+    backup = QMimeData()
+    source = clipboard.mimeData()
+    if source is None:
+        return backup
+    try:
+        for fmt in source.formats():
+            backup.setData(fmt, source.data(fmt))
+    except Exception:
+        # 极端情况下某格式读取失败，至少保住已拷到的部分。
+        pass
+    return backup
+
+
+def _restore_clipboard(clipboard, backup: QMimeData) -> None:
+    """还原剪贴板。备份为空（原本就没内容）时清空，避免残留取词内容。"""
+    if backup.formats():
+        clipboard.setMimeData(backup)
+    else:
+        clipboard.clear()
 
 
 def capture_selection() -> str:
@@ -67,13 +96,14 @@ def capture_selection() -> str:
     弹出并被点击，焦点就被抢走，Ctrl+C 会发给我们自己的 app，取不到选区。
 
     返回清洗后的选中文字；若未取到（没选中 / 复制失败 / keyboard 不可用）
-    返回空串。原始剪贴板内容在取词后立即同步还原。
+    返回空串。原始剪贴板内容（含图片/文件/富文本等所有格式）在取词后立即
+    同步还原。
     """
     if not _KB_OK:
         return ""
 
     clipboard = QApplication.clipboard()
-    backup = clipboard.text()
+    backup = _backup_clipboard(clipboard)
 
     # 坑1：释放热键残留的修饰键，否则 ctrl+c 被污染成 ctrl+alt+c。
     for mod in _MODIFIERS:
@@ -95,19 +125,19 @@ def capture_selection() -> str:
         # 坑2：复制是异步的，轮询等待剪贴板出现内容。
         captured = _poll_clipboard(clipboard)
     except KeyboardInterrupt:
-        clipboard.setText(backup)
+        _restore_clipboard(clipboard, backup)
         return ""
     except Exception:
-        clipboard.setText(backup)
+        _restore_clipboard(clipboard, backup)
         return ""
 
     cleaned = clean_selection(captured)
 
     # 取词完毕，立即同步还原原始剪贴板（不用延迟定时器：上一次的延迟还原会
     # 在下一次取词的轮询窗口里把旧内容塞回剪贴板，导致取到「上次的词」）。
-    clipboard.setText(backup)
+    _restore_clipboard(clipboard, backup)
 
-    if is_valid_selection(cleaned, backup):
+    if is_valid_selection(cleaned):
         return cleaned
     return ""
 
