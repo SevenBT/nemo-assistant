@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 
 DEFAULT_SESSION_TITLE = "新会话"
 
-# 会话来源：用于在会话列表里把手动会话与划词速记分开展示。
+# 会话来源：用于在会话列表里把手动会话与快速会话分开展示。
 SOURCE_MANUAL = "manual"        # 主窗手动新建 / 默认
-SOURCE_SELECTION = "selection"  # 划词气泡续聊产生
+SOURCE_READING = "reading"      # 划词「连续解释」的快速会话（连续上下文）
 
 
 @dataclass

@@ -14,6 +14,8 @@ if sys.platform == "win32":
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from qfluentwidgets import FluentIcon
+
 from app.ui.text_actions import (
     TEXT_ACTIONS,
     TextAction,
@@ -33,9 +35,14 @@ from app.core.selection_monitor import is_drag_selection, should_emit
 
 # ── text_actions ────────────────────────────────────────────────────────
 
-def test_text_actions_contains_three_presets():
+def test_text_actions_contains_four_presets():
     keys = {a.key for a in TEXT_ACTIONS}
-    assert keys == {"explain", "translate", "note"}, f"动作集不符: {keys}"
+    assert keys == {
+        "explain",
+        "continue_explain",
+        "new_continue_explain",
+        "note",
+    }, f"动作集不符: {keys}"
 
 
 def test_get_text_action_lookup():
@@ -45,20 +52,59 @@ def test_get_text_action_lookup():
     assert get_text_action("nonexistent") is None
 
 
-def test_explain_and_translate_go_to_ai():
+def test_explain_goes_to_ai():
     assert get_text_action("explain").goes_to_ai is True
-    assert get_text_action("translate").goes_to_ai is True
+
+
+def test_explain_is_oneshot_not_compose():
+    explain = get_text_action("explain")
+    assert explain.mode == "oneshot"
+    assert explain.is_compose is False
+    assert explain.forces_new_reading is False
+
+
+def test_continue_is_compose_no_prompt():
+    cont = get_text_action("continue_explain")
+    assert cont.mode == "compose"
+    assert cont.is_compose is True
+    assert cont.forces_new_reading is False
+    # 续入会话不预设提示词（意图由用户自己输入：解释/润色/答问题…）
+    assert cont.default_prompt == ""
+    assert cont.goes_to_ai is False
+
+
+def test_new_session_compose_forces_new():
+    new = get_text_action("new_continue_explain")
+    assert new.mode == "compose_new"
+    assert new.is_compose is True
+    assert new.forces_new_reading is True
+    assert new.default_prompt == ""
+
+
+def test_only_explain_uses_explain_prompt():
+    # 仅「解释」用预设/自定义提示词；续入/新建无提示词
+    explain = get_text_action("explain")
+    assert "{text}" in explain.default_prompt
+    assert get_text_action("continue_explain").default_prompt == ""
+    assert get_text_action("new_continue_explain").default_prompt == ""
 
 
 def test_note_is_local_not_ai():
     note = get_text_action("note")
     assert note.goes_to_ai is False, "存便签不应走 AI"
-    assert note.prompt == "", "存便签 prompt 应为空"
+    assert note.default_prompt == "", "存便签 prompt 应为空"
+    assert note.mode == "local"
+    assert note.is_compose is False
 
 
 def test_render_fills_text_placeholder():
-    action = TextAction("x", "💡", "X", "前缀：{text} 后缀", "标题")
+    action = TextAction("x", FluentIcon.DICTIONARY, "X", "前缀：{text} 后缀", "标题")
     assert action.render("内容") == "前缀：内容 后缀"
+
+
+def test_render_appends_when_no_placeholder():
+    action = TextAction("x", FluentIcon.DICTIONARY, "X", "无占位提示词", "标题")
+    assert action.render("内容") == "无占位提示词\n\n内容"
 
 
 def test_explain_prompt_embeds_selection():

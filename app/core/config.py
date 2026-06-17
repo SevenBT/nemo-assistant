@@ -254,12 +254,23 @@ class AppConfig(QConfig):
     selectionFloatEnabled = ConfigItem(
         "Selection", "FloatEnabled", True, BoolValidator()
     )
-    # 划词翻译的默认目标语言（翻译动作据此构造提示词）。
-    selectionTranslateTarget = OptionsConfigItem(
-        "Selection", "TranslateTarget", "中文",
-        OptionsValidator(["中文", "English", "日本語", "한국어", "Français",
-                          "Deutsch", "Español", "Русский"]),
+    # 各划词动作的显隐开关（控制浮标上是否出现对应按钮）。
+    selectionExplainEnabled = ConfigItem(
+        "Selection", "ExplainEnabled", True, BoolValidator()
     )
+    selectionNoteEnabled = ConfigItem(
+        "Selection", "NoteEnabled", True, BoolValidator()
+    )
+    # 「连续解释」显隐开关（一组管「连续解释」与「＋新开连续」两个浮标按钮）。
+    selectionContinueExplainEnabled = ConfigItem(
+        "Selection", "ContinueExplainEnabled", True, BoolValidator()
+    )
+    # 「解释」动作的自定义提示词；空串表示用内置默认。
+    # 含 {text} 占位，运行时填入选中文字；若不含 {text} 则自动在末尾附上选中文字。
+    selectionExplainPrompt = ConfigItem("Selection", "ExplainPrompt", "")
+    # 当前激活的「阅读会话」id（连续解释的接续目标）；空串表示无激活会话。
+    # 至多一个会话激活；连续解释往它累积上下文，新开/切换会改写它。
+    activeReadingSessionId = ConfigItem("Selection", "ActiveReadingSessionId", "")
 
     # -- Layout (persisted, not shown in settings UI) --
     noteListWidth = ConfigItem("Layout", "NoteListWidth", 100)

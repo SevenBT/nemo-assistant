@@ -7,8 +7,13 @@
 选中的纯文本。prompt 中用 {text} 占位，运行时填入选中内容。
 
 prompt 为空的动作（如「存便签」）不走 AI，由调用方按 key 自行处理。
+
+显隐与提示词可由用户在「划词」设置页配置：get_active_text_actions() 返回
+当前启用的动作；render() 在有自定义提示词时优先采用它。
 """
 from dataclasses import dataclass
+
+from qfluentwidgets import FluentIcon
 
 from app.core.config import cfg
 
@@ -19,63 +24,133 @@ class TextAction:
 
     Attributes:
         key: stable identifier, used in the popup's action string.
-        icon: emoji shown on the popup button.
-        label: short button caption.
-        prompt: text sent to chat, with ``{text}`` filled by the selection.
-            可含 ``{target}`` 占位（翻译目标语言），运行时从配置填入。
-            Empty string means this action does NOT go through the LLM
-            (e.g. "save as note") — the caller dispatches by key instead.
+        icon: FluentIcon shown on the popup button.
+        label: short button caption (also used as tooltip).
+        default_prompt: text sent to chat, with ``{text}`` filled by the
+            selection. 用户可在设置页覆盖（见 render）。空串表示该动作不走
+            LLM（如「存便签」）——调用方按 key 自行处理。
         session_title: title for the fresh chat session this action creates.
+        mode: 处理方式——
+            "oneshot"   一次性：气泡显示，不落库、无上下文（解释）；
+            "compose"   续入：把选中文填进激活快速会话的输入框，等用户加
+                        指令手动发（意图不限——解释/润色/答问题…）；
+            "compose_new" 新建：新建并激活快速会话，再同 compose；
+            "local"     本地：不走 LLM，调用方按 key 处理（存便签）。
     """
     key: str
-    icon: str
+    icon: FluentIcon
     label: str
-    prompt: str
+    default_prompt: str
     session_title: str
+    mode: str = "oneshot"
 
     @property
     def goes_to_ai(self) -> bool:
         """有预设提示词的动作走 LLM；prompt 为空的（存便签）本地处理。"""
-        return bool(self.prompt)
+        return bool(self.default_prompt)
+
+    @property
+    def is_compose(self) -> bool:
+        """续入/新建：填入快速会话输入框，等用户手动发（不自动请求）。"""
+        return self.mode in ("compose", "compose_new")
+
+    @property
+    def forces_new_reading(self) -> bool:
+        """「新建会话」每次都新建并激活一个快速会话。"""
+        return self.mode == "compose_new"
+
+    def _effective_prompt(self) -> str:
+        """取生效提示词：仅「解释」用（自定义优先，否则内置默认）。
+
+        续入/新建走 compose——不预设提示词，由用户在会话里自己输入指令，
+        故它们没有 prompt，render 也不会被调用。
+        """
+        if self.key == "explain":
+            custom = (cfg.get(cfg.selectionExplainPrompt) or "").strip()
+            if custom:
+                return custom
+        return self.default_prompt
 
     def render(self, text: str) -> str:
-        """Fill the {text} placeholder with the captured selection.
+        """用选中文字填充提示词。
 
-        翻译动作的 {target} 占位由配置 selectionTranslateTarget 填入，
-        与气泡路径共用同一份目标语言设置。
+        提示词含 {text} 占位则就地替换；不含则把选中文字附在末尾——这样
+        用户写自定义提示词时即便忘了占位也能正常工作。用 replace 而非 format，
+        避免自定义文本里的其它花括号触发 KeyError。
         """
-        target = cfg.get(cfg.selectionTranslateTarget) or "中文"
-        return self.prompt.format(text=text, target=target)
+        prompt = self._effective_prompt()
+        if "{text}" in prompt:
+            return prompt.replace("{text}", text)
+        return f"{prompt}\n\n{text}"
 
 
-# Default action set. "note" is local (no prompt); the rest go to the LLM.
+# Default action set.
+#   explain               一次性解释（气泡显示，不落库，用预设/自定义提示词）
+#   continue_explain      续入会话（把选中文填进激活的快速会话，手动发，意图不限）
+#   new_continue_explain  新建会话（新建并激活快速会话，再同上）
+#   note                  本地（无 prompt，写入笔记库）
+_EXPLAIN_PROMPT = "请用简洁的语言解释下面这段文字的含义：\n\n{text}"
+
 TEXT_ACTIONS: tuple[TextAction, ...] = (
     TextAction(
         key="explain",
-        icon="💡",
+        icon=FluentIcon.DICTIONARY,
         label="解释",
-        prompt="请解释下面这段文字的含义：\n\n{text}",
+        default_prompt=_EXPLAIN_PROMPT,
         session_title="解释选中",
+        mode="oneshot",
     ),
     TextAction(
-        key="translate",
-        icon="🌐",
-        label="翻译",
-        prompt="请将下面这段文字翻译成{target}，只输出译文：\n\n{text}",
-        session_title="翻译选中",
+        key="continue_explain",
+        icon=FluentIcon.CHAT,
+        label="续入会话",
+        default_prompt="",  # compose：无预设提示词，用户自己加指令
+        session_title="快速会话",
+        mode="compose",
+    ),
+    TextAction(
+        key="new_continue_explain",
+        icon=FluentIcon.ADD,
+        label="新建会话",
+        default_prompt="",  # compose：无预设提示词
+        session_title="快速会话",
+        mode="compose_new",
     ),
     TextAction(
         key="note",
-        icon="📌",
+        icon=FluentIcon.QUICK_NOTE,
         label="存便签",
-        prompt="",  # 本地：不走 AI，直接写入笔记库
+        default_prompt="",  # 本地：不走 AI，直接写入笔记库
         session_title="",
+        mode="local",
     ),
 )
 
 _ACTION_BY_KEY = {a.key: a for a in TEXT_ACTIONS}
 
+# 每个动作对应的显隐配置项（控制浮标上是否出现该按钮）。
+# 「连续解释」与「新开连续」共用一个开关（同一功能的两个入口）。
+_ENABLED_ITEM = {
+    "explain": "selectionExplainEnabled",
+    "continue_explain": "selectionContinueExplainEnabled",
+    "new_continue_explain": "selectionContinueExplainEnabled",
+    "note": "selectionNoteEnabled",
+}
+
 
 def get_text_action(key: str) -> TextAction | None:
     """Look up a text action by its key."""
     return _ACTION_BY_KEY.get(key)
+
+
+def get_active_text_actions() -> tuple[TextAction, ...]:
+    """返回当前启用的动作（按设置页的显隐开关过滤）。"""
+    active = []
+    for action in TEXT_ACTIONS:
+        item_name = _ENABLED_ITEM.get(action.key)
+        if item_name is None:
+            active.append(action)
+            continue
+        if cfg.get(getattr(cfg, item_name)):
+            active.append(action)
+    return tuple(active)

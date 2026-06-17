@@ -40,31 +40,33 @@ class SelectionController(QObject):
         *,
         note_mgr,
         text_session_callback,
-        main_session_callback=None,
+        compose_callback=None,
         notify=None,
+        on_note_saved=None,
     ):
         """
         Args:
             window: 主窗口，AI 动作需要 show/raise 它。
             note_mgr: NoteManager，用于「存便签」。
             text_session_callback: 形如 start_text_session(text, action)。
-                气泡续聊回调缺失时的兜底（新建会话 + 主窗）。
-            main_session_callback: 形如 dispatch_to_main(text, action, llm_reply, *, force_new)。
-                气泡「在主窗继续 / 新建」把问答注入划词速记会话。
+                compose 回调缺失时的兜底（新建普通会话 + 主窗）。
+            compose_callback: 形如 compose_in_reading(text, *, force_new)。续入/新建
+                把选中文填进（激活或新建的）快速会话输入框，等用户手动发。
             notify: 可选 (title, body) -> None，用于 toast 提示。
+            on_note_saved: 可选 () -> None，存便签后通知刷新笔记列表。
         """
         super().__init__(window)
         self._window = window
         self._notes = note_mgr
         self._text_session = text_session_callback
-        self._main_session = main_session_callback
+        self._compose = compose_callback
         self._notify = notify
+        self._on_note_saved = on_note_saved
 
         self._popup = TextActionPopup(window)
         self._popup.action_chosen.connect(self._on_action_bubble)
 
         self._bubble = ResultBubble(window)
-        self._bubble.continue_in_main.connect(self._on_bubble_continue_main)
 
         # UIA 在手势命中时已取到的选中文字（若可用）；点击动作时优先消费它，
         # 取不到才退回 Ctrl+C 兜底。热键路径无此预取，恒为空。
@@ -129,45 +131,48 @@ class SelectionController(QObject):
     # ── 单击 → 气泡快查 ────────────────────────────────────────────────
 
     def _on_action_bubble(self, key: str):
-        """单击按钮：气泡就地显示结果，或存便签。"""
+        """单击按钮：按动作 mode 分流——一次性气泡 / 续入会话 / 新建会话 / 存便签。"""
         action = get_text_action(key)
         if action is None:
             logger.warning("划词：未知动作 %s", key)
+            return
+
+        if action.mode == "local":
+            text = self._get_text()
+            if text:
+                self._save_as_note(text)
             return
 
         text = self._get_text()
         if not text:
             return
 
-        if action.goes_to_ai:
-            self._show_bubble(text, key)
-        elif key == "note":
-            self._save_as_note(text)
+        if action.is_compose:
+            self._compose_in_session(text, action)
+        elif action.goes_to_ai:
+            self._show_oneshot(text, key)
 
-    def _show_bubble(self, text: str, action_key: str):
-        """在弹出位置显示结果气泡。"""
-        self._bubble.show_result(
+    def _show_oneshot(self, text: str, action_key: str):
+        """一次性解释：气泡自行请求并显示，不落库。"""
+        self._bubble.show_oneshot(
             self._popup_x, self._popup_y, text, action_key
         )
 
-    # ── 气泡 "在主窗继续" ──────────────────────────────────────────────
+    def _compose_in_session(self, text: str, action):
+        """续入/新建：唤主窗、切到（激活或新建的）快速会话、把选中文填进输入框。
 
-    def _on_bubble_continue_main(
-        self, source_text: str, llm_reply: str, action_key: str, force_new: bool
-    ):
-        """气泡中点击"在主窗继续 / 新建"：注入到划词速记会话。
-
-        force_new=False 复用最近的划词速记会话，True 强制新建。
+        不预设提示词、不自动发送——由你在输入框补充指令（解释/润色/答问题…）
+        后手动点发送。action.forces_new_reading 为真时强制新建并激活快速会话。
         """
-        action = get_text_action(action_key)
-        if action is None:
+        if self._compose is None:
+            logger.warning("划词：未配置 compose_callback，退回一次性")
+            self._show_oneshot(text, action.key)
             return
-        if self._main_session is not None:
-            self._main_session(source_text, action, llm_reply, force_new=force_new)
-        else:
-            self._dispatch_to_ai(source_text, action)
-
-    # ── 原始行为（兜底） ──────────────────────────────────────────────
+        if not self._window.isVisible():
+            self._window.show()
+        self._window.raise_()
+        self._window.activateWindow()
+        self._compose(text, force_new=action.forces_new_reading)
 
     def _dispatch_to_ai(self, text: str, action):
         """原始行为：新建会话，主窗口显示。"""
@@ -187,6 +192,9 @@ class SelectionController(QObject):
             title = text[:_NOTE_TITLE_MAX].strip() or "划词便签"
             self._notes.create(title=title, content=text, note_type="note")
             self._toast("已存便签", title)
+            # 立即刷新笔记列表，否则要等下次无关刷新才出现（表现为延迟十几秒）。
+            if self._on_note_saved is not None:
+                self._on_note_saved()
         except Exception as e:  # pragma: no cover - 防御性
             logger.error("划词存便签失败：%s", e)
             self._toast("划词", "存便签失败")

@@ -60,6 +60,77 @@ class _CURSORINFO(ctypes.Structure):
     ]
 
 
+class _ICONINFO(ctypes.Structure):
+    _fields_ = [
+        ("fIcon", wintypes.BOOL),
+        ("xHotspot", wintypes.DWORD),
+        ("yHotspot", wintypes.DWORD),
+        ("hbmMask", wintypes.HBITMAP),
+        ("hbmColor", wintypes.HBITMAP),
+    ]
+
+
+class _BITMAP(ctypes.Structure):
+    _fields_ = [
+        ("bmType", wintypes.LONG),
+        ("bmWidth", wintypes.LONG),
+        ("bmHeight", wintypes.LONG),
+        ("bmWidthBytes", wintypes.LONG),
+        ("bmPlanes", wintypes.WORD),
+        ("bmBitsPixel", wintypes.WORD),
+        ("bmBits", ctypes.c_void_p),
+    ]
+
+
+# I 形光标热点到底边的距离取不到时的兜底偏移（px，物理像素，约半行高）。
+_FALLBACK_CARET_HALF_PX = 11
+
+
+def caret_hotspot_to_bottom() -> int:
+    """估算当前 I 形光标「热点到底边」的物理像素距离，用于把兜底锚点下移到行底。
+
+    文本拖选时鼠标是 I 形光标，其热点在行的垂直中心；松手坐标因此落在文字
+    中线而非底边，浮标贴其下方会盖住下半行。本函数查系统光标位图算出
+    「热点 → 光标底边」的距离，加到锚点 y 上即可把浮标推到整行下方。
+
+    查询失败（API 失败 / 句柄无效）返回 _FALLBACK_CARET_HALF_PX 兜底。
+    在钩子线程同步调用，趁光标仍是松手瞬间的形状。
+    """
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+    try:
+        info = _CURSORINFO()
+        info.cbSize = ctypes.sizeof(_CURSORINFO)
+        if not user32.GetCursorInfo(ctypes.byref(info)) or not info.hCursor:
+            return _FALLBACK_CARET_HALF_PX
+        icon = _ICONINFO()
+        if not user32.GetIconInfo(info.hCursor, ctypes.byref(icon)):
+            return _FALLBACK_CARET_HALF_PX
+        bmp = _BITMAP()
+        height = 0
+        # 优先用彩色位图高度；无彩色位图（单色光标）时掩码位图高度是实际的两倍
+        # （AND + XOR 两段堆叠），取一半。
+        try:
+            handle = icon.hbmColor or icon.hbmMask
+            mono = not icon.hbmColor
+            if handle and gdi32.GetObjectW(
+                handle, ctypes.sizeof(_BITMAP), ctypes.byref(bmp)
+            ):
+                height = bmp.bmHeight // 2 if mono else bmp.bmHeight
+        finally:
+            if icon.hbmMask:
+                gdi32.DeleteObject(icon.hbmMask)
+            if icon.hbmColor:
+                gdi32.DeleteObject(icon.hbmColor)
+        if height <= 0:
+            return _FALLBACK_CARET_HALF_PX
+        # 热点在中心，底边距离 = 总高 - 热点 y；异常时退回半高。
+        below = height - int(icon.yHotspot)
+        return below if 0 < below <= height else height // 2
+    except Exception:
+        return _FALLBACK_CARET_HALF_PX
+
+
 def is_text_cursor() -> bool:
     """当前系统光标是否为标准 I 形（文本）光标。
 
@@ -226,8 +297,9 @@ class SelectionMonitor(QObject):
             拖滚动条），或拿不到焦点控件 → 静默不弹。
 
         —— 弹窗定位 ——
-        优先用 UIA BoundingRectangles 获取选区末行在屏幕上的精确位置，
-        弹窗紧贴选区下方。BoundingRectangles 不可用时退回鼠标松手坐标。
+        优先用 UIA 取整片选区的并集包围盒，弹窗居中于选区水平中心、紧贴其底边。
+        包围盒不可用时退回「按下点 + 松手点」推算的锚点（水平中点、垂直取较低
+        者）——两者都与拖选方向无关，浮标不会因方向不同而偏移或盖住文字。
         """
         try:
             status, text = selection_uia.query_selection()
@@ -238,16 +310,24 @@ class SelectionMonitor(QObject):
         if not should_emit(status, self._press_text_cursor):
             return
 
-        px, py = x, y  # 回退：鼠标松手坐标
+        # 回退锚点：用「按下点 + 松手点」的包围盒，水平取中点、垂直取较低者
+        # （选区底边）。直接用松手点会让锚点随拖选方向变（右→左选松手在左侧、
+        # 下→上选松手在顶部），导致浮标偏左或盖住文字；用两点包围盒则与方向无关。
+        #
+        # 但文本拖选时鼠标是 I 形光标、热点在行垂直中心，松手 y 落在文字中线而非
+        # 底边——直接贴其下方会盖住下半行。故再下移「热点→光标底边」的距离，把
+        # 锚点推到整行下方。
+        px = (self._press_x + x) // 2
+        py = max(self._press_y, y) + caret_hotspot_to_bottom()
         # 取到文字时试着拿选区屏幕位置——同一控件，大概率可用。
         # 读不到选区的分支（无 TextPattern / UIA 不可用）没有可查的位置，
-        # 直接用鼠标坐标定位。
+        # 直接用包围盒锚点定位。
         if status == selection_uia.SelectionStatus.HAS_TEXT:
             try:
                 bounds = selection_uia.get_selection_bounds()
                 if bounds is not None:
                     left, top, right, bottom = bounds
-                    px = (left + right) // 2  # 水平居中于选区末行
+                    px = (left + right) // 2  # 水平居中于整片选区
                     py = bottom               # 紧贴选区底边
             except Exception:
                 pass

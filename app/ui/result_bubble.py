@@ -21,8 +21,6 @@ from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
-    QHBoxLayout,
-    QPushButton,
     QTextEdit,
     QVBoxLayout,
 )
@@ -30,6 +28,7 @@ from PyQt6.QtWidgets import (
 from app.core.config import cfg
 from app.core.llm_gateway import CancellationToken, LLMGateway
 from app.ui import style
+from app.ui.text_actions import get_text_action
 
 logger = logging.getLogger(__name__)
 
@@ -52,19 +51,6 @@ _BUBBLE_MAX_HEIGHT = 420
 _H_MARGIN = 16   # 内容区左右内边距之和（8 + 8）
 _V_CHROME = 44   # 上下内边距 + footer 工具栏高度的预留
 _GAP_PX = 4
-
-
-def _build_prompt(action_key: str, text: str) -> str:
-    """构造气泡专用精简提示词（不含系统提示、记忆、工具描述）。
-
-    翻译目标语言取自配置 selectionTranslateTarget。
-    """
-    if action_key == "explain":
-        return f"请用简洁的语言解释下面这段文字的含义，简要回答：\n\n{text}"
-    if action_key == "translate":
-        target = cfg.get(cfg.selectionTranslateTarget) or "中文"
-        return f"请将下面这段文字翻译成{target}，简要回答，只输出译文：\n\n{text}"
-    return ""
 
 
 class _BubbleWorker(threading.Thread):
@@ -115,10 +101,6 @@ class ResultBubble(QFrame):
     _stream_error = pyqtSignal(str)
     _hide_requested = pyqtSignal()  # 全局点击监听
 
-    # 请求转入主窗划词速记会话，携带 (selected_text, llm_reply, action_key, force_new)
-    # force_new=False 复用最近的划词速记会话，True 强制新建。
-    continue_in_main = pyqtSignal(str, str, str, bool)
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cached_geo: QRect | None = None
@@ -130,8 +112,6 @@ class ResultBubble(QFrame):
         self._worker: _BubbleWorker | None = None
         self._streaming = False
         self._full_text = ""
-        self._source_text = ""
-        self._action_key = ""
         # 锚点（选区下方的逻辑坐标）与当前自适应宽度（单调增长）
         self._anchor_x = 0
         self._anchor_y = 0
@@ -181,32 +161,6 @@ class ResultBubble(QFrame):
         self._content.setObjectName("bubbleContent")
         layout.addWidget(self._content)
 
-        # 底部工具栏
-        footer = QHBoxLayout()
-        footer.setContentsMargins(0, 2, 0, 0)
-        footer.setSpacing(4)
-        footer.addStretch()
-
-        # "在主窗继续"按钮（复用最近的划词速记会话）
-        self._main_btn = QPushButton("⤢")  # ⤢ 放大
-        self._main_btn.setToolTip("在主窗口继续（划词速记）")
-        self._main_btn.setObjectName("bubbleMainBtn")
-        self._main_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._main_btn.setFixedSize(24, 24)
-        self._main_btn.clicked.connect(self._on_continue_main)
-        footer.addWidget(self._main_btn)
-
-        # "在主窗新建会话"按钮（强制开一个新的划词速记会话）
-        self._new_btn = QPushButton("＋")  # ＋ 新建
-        self._new_btn.setToolTip("在主窗口新建会话")
-        self._new_btn.setObjectName("bubbleNewBtn")
-        self._new_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._new_btn.setFixedSize(24, 24)
-        self._new_btn.clicked.connect(self._on_continue_main_new)
-        footer.addWidget(self._new_btn)
-
-        layout.addLayout(footer)
-
     # ── 主题适配 ────────────────────────────────────────────────────────
 
     def _apply_theme_style(self):
@@ -217,9 +171,6 @@ class ResultBubble(QFrame):
         bg = theme["surface_solid"]
         border_color = theme["border_solid"]
         text_color = theme["text"]
-        text_secondary = theme["text_secondary"]
-        accent = theme["accent"]
-        surface_raised = theme["surface_raised"]
 
         # 背景/边框由 paintEvent 显式绘制（QSS 背景在 WA_TranslucentBackground
         # 下不稳定，会透出桌面）。这里只缓存颜色给 paintEvent。
@@ -232,36 +183,6 @@ class ResultBubble(QFrame):
                 color: {text_color};
                 font-size: 13px;
                 border: none;
-            }}
-            #bubbleMainBtn {{
-                background: transparent;
-                border: none;
-                color: {text_secondary};
-                font-size: 14px;
-                border-radius: 4px;
-            }}
-            #bubbleMainBtn:hover {{
-                background: {surface_raised};
-                color: {accent};
-            }}
-            #bubbleMainBtn:disabled {{
-                background: transparent;
-                color: {border_color};
-            }}
-            #bubbleNewBtn {{
-                background: transparent;
-                border: none;
-                color: {text_secondary};
-                font-size: 16px;
-                border-radius: 4px;
-            }}
-            #bubbleNewBtn:hover {{
-                background: {surface_raised};
-                color: {accent};
-            }}
-            #bubbleNewBtn:disabled {{
-                background: transparent;
-                color: {border_color};
             }}
         """
         self.setStyleSheet(qss)
@@ -289,40 +210,34 @@ class ResultBubble(QFrame):
 
     # ── 公开 API ────────────────────────────────────────────────────────
 
-    def show_result(self, x: int, y: int, text: str, action_key: str):
-        """在指定位置弹出气泡并开始流式获取 LLM 结果。
+    def show_oneshot(self, x: int, y: int, text: str, action_key: str):
+        """一次性解释：弹气泡、自行发起请求、流式显示，不落库、无按钮。
 
         Args:
             x: 选区水平中心（逻辑像素）。
             y: 选区底边（逻辑像素）。
             text: 选中的文字。
-            action_key: 动作标识（"explain" / "translate"）。
+            action_key: 动作标识（如 "explain"）。
         """
-        # 取消上一次未完成的请求
         self._cancel_current()
-
-        self._source_text = text
-        self._action_key = action_key
+        # 起始：清空内容、复位宽度、定位、显示。
         self._full_text = ""
         self._streaming = True
         self._content.clear()
-        self._content.setPlaceholderText("···")  # ···
-        # 重置自适应宽度起点（每次新查询从最小宽度开始单调增长）
+        self._content.setPlaceholderText("···")
         self._content_width = _BUBBLE_MIN_WIDTH
-        # 流式期间禁用「转主窗」按钮，避免搬运半截回复；结束后再启用。
-        self._set_actions_enabled(False)
-
         self._apply_theme_style()
         self._position_at(x, y)
         self.show()
         self.raise_()
 
-        # 启动 LLM 请求
-        prompt = _build_prompt(action_key, text)
-        if not prompt:
+        # 气泡用 action.render(text)，与「解释」共用同一份（含自定义）提示词。
+        action = get_text_action(action_key)
+        if action is None or not action.goes_to_ai:
             self._content.setPlainText("不支持的动作")
             self._streaming = False
             return
+        prompt = action.render(text)
 
         messages = [{"role": "user", "content": prompt}]
         self._cancel_token = CancellationToken()
@@ -437,34 +352,11 @@ class ResultBubble(QFrame):
     def _on_stream_done(self):
         self._streaming = False
         self._content.setPlaceholderText("")
-        # 回复完整，启用「转主窗」按钮。
-        self._set_actions_enabled(True)
 
     def _on_stream_error(self, msg: str):
         self._streaming = False
         if not self._full_text:
             self._content.setPlainText(f"[错误] {msg}")
-        # 有内容才允许转主窗；纯错误（无任何回复）保持禁用，避免搬空内容。
-        self._set_actions_enabled(bool(self._full_text))
-
-    def _set_actions_enabled(self, enabled: bool):
-        """启用/禁用「转主窗」与「新建」按钮（流式期间禁用，置灰不可点）。"""
-        self._main_btn.setEnabled(enabled)
-        self._new_btn.setEnabled(enabled)
-
-    def _on_continue_main(self):
-        """将当前问答交接到主窗口，复用最近的划词速记会话。"""
-        self.continue_in_main.emit(
-            self._source_text, self._full_text, self._action_key, False
-        )
-        self.hide()
-
-    def _on_continue_main_new(self):
-        """将当前问答交接到主窗口，强制新建划词速记会话。"""
-        self.continue_in_main.emit(
-            self._source_text, self._full_text, self._action_key, True
-        )
-        self.hide()
 
     # ── 取消 / 清理 ────────────────────────────────────────────────────
 

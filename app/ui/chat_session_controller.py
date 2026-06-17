@@ -5,14 +5,14 @@ from PyQt6.QtCore import QObject
 from app.core.agent_loop import AgentLoop
 from app.core.config import cfg
 from app.models.message import Message, MessageRole, ToolCall
-from app.models.session import SOURCE_SELECTION
+from app.models.session import SOURCE_MANUAL, SOURCE_READING
 from app.ui.manual_params_dialog import ManualParamsDialog
 from app.ui.session_settings_dialog import SessionSettingsDialog
 
 _CANCELLED_MARKER = "（已取消）"
 
-# 划词速记会话标题（划词气泡续聊归到此类，与手动会话分开）。
-SELECTION_SESSION_TITLE = "划词速记"
+# 划词「连续解释」的快速会话标题。
+READING_SESSION_TITLE = "快速会话"
 
 
 class ChatSessionController(QObject):
@@ -75,12 +75,30 @@ class ChatSessionController(QObject):
             sessions = [session]
         self._session_panel.load(sessions, sessions[0].id)
         self.switch_session(sessions[0].id)
+        # 恢复激活的阅读会话标记（●）；指向的会话已不存在则清空。
+        active_id = cfg.get(cfg.activeReadingSessionId) or ""
+        if active_id and self._sessions.get(active_id) is None:
+            active_id = ""
+            cfg.set(cfg.activeReadingSessionId, "")
+        self._session_panel.set_active_reading(active_id)
 
-    def new_session(self):
-        session = self._sessions.create()
+    def new_session(self, source: str = SOURCE_MANUAL):
+        """新建会话并切过去。
+
+        source=SOURCE_READING（在「快速会话」tab 点 +）时建为快速会话并
+        自动激活（●），让随后的划词连续解释接续到这个带主题铺垫的会话。
+        """
+        if source == SOURCE_READING:
+            session = self._sessions.create(
+                title=READING_SESSION_TITLE, source=SOURCE_READING
+            )
+        else:
+            session = self._sessions.create()
         sessions = self._sessions.get_sessions()
         self._session_panel.load(sessions, session.id)
         self.switch_session(session.id)
+        if source == SOURCE_READING:
+            self.set_active_reading(session.id)
 
     def start_vision_session(self, attachments: list, vision_action):
         """识图：为每次截图动作新建一个会话并切过去，附上图片。
@@ -121,27 +139,6 @@ class ChatSessionController(QObject):
         else:
             self.submit(text_action.render(text))
 
-    def continue_in_selection_session(
-        self, text: str, text_action, llm_reply: str, *, force_new: bool = False
-    ) -> str:
-        """气泡「在主窗继续」：把已有问答注入划词速记会话（source=selection）。
-
-        默认复用最近的划词速记会话（避免会话爆炸）；force_new=True 时强制开新的。
-        返回归入的会话 id，供调用方据此切换/记录。
-        """
-        session = None
-        if not force_new:
-            session = self._sessions.latest_by_source(SOURCE_SELECTION)
-        if session is None:
-            session = self._sessions.create(
-                title=SELECTION_SESSION_TITLE, source=SOURCE_SELECTION
-            )
-        sessions = self._sessions.get_sessions()
-        self._session_panel.load(sessions, session.id)
-        self.switch_session(session.id)
-        self.inject_exchange(text_action.render(text), llm_reply)
-        return session.id
-
     def inject_exchange(self, user_text: str, assistant_text: str):
         """注入一对已完成的问答到当前会话（不触发 LLM）。
 
@@ -168,6 +165,10 @@ class ChatSessionController(QObject):
     def delete_session(self, sid: str):
         deleted = self._sessions.get(sid)
         deleted_source = deleted.source if deleted is not None else None
+
+        # 删掉的若是激活中的阅读会话，清空激活指针。
+        if cfg.get(cfg.activeReadingSessionId) == sid:
+            self.set_active_reading("")
 
         self._sessions.delete(sid)
         sessions = self._sessions.get_sessions()
@@ -297,18 +298,18 @@ class ChatSessionController(QObject):
 
         ai_msg = Message(role=MessageRole.ASSISTANT, content="")
         self._sessions.add_message(sid, ai_msg)
-        self._current_ai_msg = ai_msg
-        self._current_ai_bubble = None
-        self._current_ai_text = ""
-        self._input.set_running(True)
-        self._tool_status.hide()
-        self._chat.start_typing()
 
         self._session_live[sid] = {
             "ai_msg": ai_msg,
             "ai_text": "",
             "first_chunk_sent": False,
         }
+        self._current_ai_msg = ai_msg
+        self._current_ai_bubble = None
+        self._current_ai_text = ""
+        self._input.set_running(True)
+        self._tool_status.hide()
+        self._chat.start_typing()
 
         session = self._sessions.get(sid)
         if self._consolidator is not None:
@@ -329,6 +330,39 @@ class ChatSessionController(QObject):
         self._workers[sid] = worker
         self._connect_worker(sid, worker)
         worker.start()
+
+    # ── 划词「续入/新建会话」：填入快速会话输入框，等用户手动发 ──────────────
+    def compose_in_reading(self, text: str, *, force_new: bool) -> str:
+        """续入/新建：切到（激活或新建的）快速会话，把选中文填进输入框。
+
+        不预设提示词、不自动发送——用户在输入框补充指令后自己点发送，走正常
+        submit。force_new=True 或无激活会话时新建并激活快速会话，否则接续激活会话。
+
+        返回归入的快速会话 id。
+        """
+        sid = self._resolve_reading_session(force_new)
+        self._session_panel.load(self._sessions.get_sessions(), sid)
+        self.switch_session(sid)
+        # 把选中文原样填进输入框，光标置末尾、聚焦，等用户补指令。
+        self._input.set_text(text)
+        return sid
+
+    def _resolve_reading_session(self, force_new: bool) -> str:
+        """返回续入/新建要写入的快速会话 id：接续激活会话或新建并激活。"""
+        if not force_new:
+            active_id = cfg.get(cfg.activeReadingSessionId) or ""
+            if active_id and self._sessions.get(active_id) is not None:
+                return active_id
+        session = self._sessions.create(
+            title=READING_SESSION_TITLE, source=SOURCE_READING
+        )
+        self.set_active_reading(session.id)
+        return session.id
+
+    def set_active_reading(self, sid: str):
+        """设为当前激活的快速会话（至多一个）；刷新列表的激活标记。"""
+        cfg.set(cfg.activeReadingSessionId, sid)
+        self._session_panel.set_active_reading(sid)
 
     def cleanup(self):
         for sid in list(self._workers):

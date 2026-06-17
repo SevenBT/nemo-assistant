@@ -29,17 +29,20 @@ import logging
 import sys
 from collections.abc import Callable
 
-from PyQt6.QtCore import QPoint, QRect, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
-    QPushButton,
     QVBoxLayout,
 )
+from qfluentwidgets import TransparentToolButton
 
 from app.ui import style
-from app.ui.text_actions import TEXT_ACTIONS
+from app.ui.float_tooltip import FloatTooltip
+from app.ui.text_actions import get_active_text_actions
 
 logger = logging.getLogger(__name__)
 
@@ -54,26 +57,28 @@ except ImportError:
 def _build_popup_style(theme: dict) -> str:
     """根据主题生成浮标 QSS。
 
-    紧凑无文字浮标：图标 15px，内边距 3px 起。背景用浮起面、文字用主文本色、
+    紧凑无文字浮标：图标 14px，内边距 2px 起。背景用浮起面、文字用主文本色、
     hover 用强调色淡底，与应用整体主题一致。
+
+    底色/边框仍跟随主题；浮标靠外层卡片的投影 + 实边框从网页背景里「浮」出来，
+    不靠颜色对比（见 _build_layout 的卡片结构与阴影）。
     """
     return f"""
-    #textActionBar {{
+    #textActionCard {{
         background: {theme["surface_raised"]};
-        border-radius: 6px;
+        border-radius: 5px;
         border: 1px solid {theme["border_solid"]};
     }}
-    #textActionBar QPushButton {{
+    #textActionCard TransparentToolButton {{
         background: transparent;
         border: none;
         color: {theme["text"]};
-        font-size: 15px;
-        padding: 3px 5px;
+        padding: 2px 3px;
         border-radius: 4px;
-        min-width: 26px;
-        min-height: 26px;
+        min-width: 20px;
+        min-height: 20px;
     }}
-    #textActionBar QPushButton:hover {{
+    #textActionCard TransparentToolButton:hover {{
         background: {theme["accent_subtle"]};
         color: {theme["accent"]};
     }}
@@ -81,6 +86,15 @@ def _build_popup_style(theme: dict) -> str:
 
 # 浮标与选区之间的间距（px）。
 _GAP_PX = 4
+
+# 外壳留给投影扩散的透明边距（px）。卡片四周各留这么多空间，阴影才不被裁切。
+_SHADOW_MARGIN_PX = 9
+# 投影模糊半径与下沉偏移（px）。
+_SHADOW_BLUR_PX = 14
+_SHADOW_OFFSET_Y = 2
+
+# 按钮图标尺寸（px）。
+_ICON_PX = 14
 
 # 鼠标移开后自动消失的延迟（ms）。
 _AUTO_HIDE_MS = 2000
@@ -101,8 +115,9 @@ class TextActionPopup(QFrame):
         self._cached_geo: QRect | None = None
         self._cached_geo_physical: QRect | None = None
         self._mouse_hook: Callable | None = None
+        self._tooltip = FloatTooltip()
         self._build_window()
-        self._build_buttons()
+        self._build_layout()
         self._auto_hide = QTimer(self)
         self._auto_hide.setSingleShot(True)
         self._auto_hide.timeout.connect(self.hide)
@@ -112,8 +127,6 @@ class TextActionPopup(QFrame):
 
     def _build_window(self):
         self.setObjectName("textActionBar")
-        self._apply_theme_style()
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setWindowFlags(
             Qt.WindowType.Tool
             | Qt.WindowType.FramelessWindowHint
@@ -123,21 +136,76 @@ class TextActionPopup(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-    def _build_buttons(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(3, 3, 3, 3)
-        layout.setSpacing(0)
+    def _build_layout(self):
+        """建外层布局；按钮行在每次 show_at 时重建（见 _rebuild_buttons）。
 
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(1)
-        for action in TEXT_ACTIONS:
-            btn = QPushButton(action.icon)
-            btn.setToolTip(action.label)
+        结构：透明外壳(self) → 留边距 → 卡片(self._card，承载底色/边框/圆角+阴影)
+        → 按钮行。外壳透明且四周留 _SHADOW_MARGIN_PX，投影才有空间扩散不被裁。
+        """
+        shell = QVBoxLayout(self)
+        shell.setContentsMargins(
+            _SHADOW_MARGIN_PX, _SHADOW_MARGIN_PX,
+            _SHADOW_MARGIN_PX, _SHADOW_MARGIN_PX,
+        )
+        shell.setSpacing(0)
+
+        self._card = QFrame(self)
+        self._card.setObjectName("textActionCard")
+        self._card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        shadow = QGraphicsDropShadowEffect(self._card)
+        shadow.setBlurRadius(_SHADOW_BLUR_PX)
+        shadow.setXOffset(0)
+        shadow.setYOffset(_SHADOW_OFFSET_Y)
+        shadow.setColor(QColor(0, 0, 0, 110))
+        self._card.setGraphicsEffect(shadow)
+        shell.addWidget(self._card)
+
+        card_layout = QVBoxLayout(self._card)
+        card_layout.setContentsMargins(2, 2, 2, 2)
+        card_layout.setSpacing(0)
+
+        self._row = QHBoxLayout()
+        self._row.setContentsMargins(0, 0, 0, 0)
+        self._row.setSpacing(0)
+        card_layout.addLayout(self._row)
+
+    def _rebuild_buttons(self) -> int:
+        """按当前启用的动作重建按钮行，返回按钮数。
+
+        每次 show_at 重建，使设置页改了显隐开关后能即时生效。
+        """
+        while self._row.count():
+            child = self._row.takeAt(0)
+            w = child.widget()
+            if w is not None:
+                w.deleteLater()
+
+        actions = get_active_text_actions()
+        for action in actions:
+            btn = TransparentToolButton(action.icon, self)
+            btn.setIconSize(QSize(_ICON_PX, _ICON_PX))
+            # 不用原生 setToolTip（不抢焦点的浮标上不触发），改用自建 tooltip：
+            # 把标签记在按钮上，hover 时由 eventFilter 调度显示。
+            btn._action_label = action.label
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda _checked=False, k=action.key: self._on_clicked(k))
-            row.addWidget(btn)
-        layout.addLayout(row)
+            btn.installEventFilter(self)
+            btn.clicked.connect(
+                lambda _checked=False, k=action.key: self._on_clicked(k)
+            )
+            self._row.addWidget(btn)
+        return len(actions)
+
+    def eventFilter(self, obj, event):
+        """按钮 hover 进/出 → 调度 / 取消自建 tooltip。"""
+        etype = event.type()
+        if etype == QEvent.Type.Enter:
+            label = getattr(obj, "_action_label", "")
+            if label:
+                top_left = obj.mapToGlobal(QPoint(0, 0))
+                self._tooltip.schedule(label, top_left, obj.height())
+        elif etype in (QEvent.Type.Leave, QEvent.Type.MouseButtonPress):
+            self._tooltip.cancel()
+        return super().eventFilter(obj, event)
 
     # ── 主题适配 ────────────────────────────────────────────────────────
 
@@ -155,6 +223,7 @@ class TextActionPopup(QFrame):
 
     def hideEvent(self, event):
         super().hideEvent(event)
+        self._tooltip.cancel()
         self._remove_click_watcher()
 
     def _apply_no_activate(self):
@@ -250,11 +319,16 @@ class TextActionPopup(QFrame):
         浮标居中对齐 x，顶边紧贴 y 下方 _GAP_PX 处。
         屏幕底边空间不足时自动翻到选区上方，左右超屏则贴边。
         """
+        # 按当前显隐配置重建按钮；全部关闭则不弹。
+        if self._rebuild_buttons() == 0:
+            return
         self._apply_theme_style()
         self.adjustSize()
         w, h = self.width(), self.height()
-        px = x - w // 2         # 水平居中
-        py = y + _GAP_PX        # 紧贴选区下方
+        # w/h 含外壳两侧各 _SHADOW_MARGIN_PX 透明边距：水平边距对称，居中不受影响；
+        # 垂直方向需减去上边距，卡片(而非外壳)顶边才落在 y + _GAP_PX 处。
+        px = x - w // 2
+        py = y + _GAP_PX - _SHADOW_MARGIN_PX
 
         # ★ 用目标坐标查屏幕，不能用 mapToGlobal(self.rect().center())——
         # 此时弹窗尚未 move，其当前全局位置是 show 前残留的旧位置，
@@ -269,7 +343,7 @@ class TextActionPopup(QFrame):
             if px < geo.left():
                 px = geo.left()
             if py + h > geo.bottom():
-                py = y - h - _GAP_PX  # 翻到选区上方
+                py = y - h - _GAP_PX + _SHADOW_MARGIN_PX  # 翻到选区上方
             if py < geo.top():
                 py = geo.top()
 

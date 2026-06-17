@@ -78,9 +78,13 @@ def query_selection() -> tuple[SelectionStatus, str]:
 def get_selection_bounds() -> tuple[int, int, int, int] | None:
     """查询前台控件当前选区的屏幕包围盒，用于定位浮标。
 
-    返回 (left, top, right, bottom)，取**最后一个**选区矩形的底边（即
-    选区末行的最下方）。取不到（UIA 不可用 / 控件不支持 BoundingRectangles
-    / 无选区）返回 None，调用方退回鼠标坐标。
+    返回 (left, top, right, bottom)，为**整片选区所有矩形的并集**——跨所有
+    选区 range、所有行的最小外接矩形。这样无论从哪个方向拖选（左→右 / 右→左 /
+    上→下 / 下→上），包围盒都一致，调用方据此把浮标放到选区水平中心的正下方，
+    不会因方向不同而偏移或盖住文字。
+
+    取不到（UIA 不可用 / 控件不支持 BoundingRectangles / 无选区）返回 None，
+    调用方退回鼠标坐标。
 
     纯查询：不按键、不读剪贴板、不改变焦点。
     """
@@ -104,16 +108,26 @@ def get_selection_bounds() -> tuple[int, int, int, int] | None:
         return None
     if not ranges:
         return None
-    # 选区末行的底边位置：取最后一个 range 的最后一个矩形。
-    last_range = ranges[-1]
-    try:
-        rects = last_range.BoundingRectangles
-    except Exception:
+
+    # 合并所有 range 的所有矩形为一个并集包围盒，与选择方向无关。
+    left = top = None
+    right = bottom = None
+    for rng in ranges:
+        try:
+            rects = rng.BoundingRectangles
+        except Exception:
+            continue
+        for rect in rects:
+            if left is None:
+                left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
+                continue
+            left = min(left, rect.left)
+            top = min(top, rect.top)
+            right = max(right, rect.right)
+            bottom = max(bottom, rect.bottom)
+    if left is None:
         return None
-    if not rects:
-        return None
-    rect = rects[-1]
-    return (rect.left, rect.top, rect.right, rect.bottom)
+    return (left, top, right, bottom)
 
 
 def _selection_via_text_pattern(control) -> tuple[SelectionStatus, str]:

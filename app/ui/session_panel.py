@@ -22,19 +22,24 @@ from qfluentwidgets import (
 )
 from app.ui.components.context_menu import ContextMenu
 
-from app.models.session import SOURCE_MANUAL, SOURCE_SELECTION, Session
+from app.models.session import (
+    SOURCE_MANUAL,
+    SOURCE_READING,
+    Session,
+)
 
 
 class SessionPanel(QFrame):
     """Left sidebar – session list with Fluent Design components."""
 
     session_selected = pyqtSignal(str)
-    session_create_requested = pyqtSignal()
+    session_create_requested = pyqtSignal(str)  # 当前 tab 的来源（manual / reading）
     session_delete_requested = pyqtSignal(str)
     session_rename_requested = pyqtSignal(str, str)
     session_settings_requested = pyqtSignal(str)
     session_pin_requested = pyqtSignal(str, bool)   # sid, pinned
     session_reorder_requested = pyqtSignal(list)    # ordered list[str] of pinned ids
+    session_activate_reading_requested = pyqtSignal(str)  # 设为连续阅读目标
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,6 +48,7 @@ class SessionPanel(QFrame):
         self._sessions: list[Session] = []
         self._search_keyword = ""
         self._current_tab = SOURCE_MANUAL  # 当前 Tab 过滤的来源
+        self._active_reading_id = ""       # 激活中的阅读会话 id（● 标记）
         self._build()
 
         from app.core.config import cfg
@@ -78,14 +84,16 @@ class SessionPanel(QFrame):
         new_btn.installEventFilter(
             ToolTipFilter(new_btn, showDelay=400, position=ToolTipPosition.BOTTOM)
         )
-        new_btn.clicked.connect(self.session_create_requested)
+        new_btn.clicked.connect(
+            lambda: self.session_create_requested.emit(self._current_tab)
+        )
         header.addWidget(new_btn)
         layout.addLayout(header)
 
         # 来源 Tab：我的会话（手动） / 划词速记（划词气泡续聊）
         self._pivot = SegmentedWidget()
         self._pivot.addItem(SOURCE_MANUAL, "我的会话")
-        self._pivot.addItem(SOURCE_SELECTION, "划词速记")
+        self._pivot.addItem(SOURCE_READING, "快速会话")
         self._pivot.setCurrentItem(SOURCE_MANUAL)
         self._pivot.currentItemChanged.connect(self._on_tab_changed)
         layout.addWidget(self._pivot)
@@ -164,11 +172,19 @@ class SessionPanel(QFrame):
         title = self._short(s.title)
         if s.pinned:
             title = f"📌 {title}"
+        # 阅读会话：激活中的前面加 ● 标记（连续解释的当前接续目标）。
+        if s.source == SOURCE_READING and s.id == self._active_reading_id:
+            title = f"● {title}"
         item = QListWidgetItem(title)
         item.setData(Qt.ItemDataRole.UserRole, s.id)
         item.setData(Qt.ItemDataRole.UserRole + 1, s.pinned)
         item.setToolTip(s.title)
         return item
+
+    def set_active_reading(self, sid: str):
+        """更新激活的阅读会话 id 并重渲染列表（刷新 ● 标记）。"""
+        self._active_reading_id = sid or ""
+        self._reload_list()
 
     def update_title(self, session_id: str, title: str):
         for i in range(self._list.count()):
@@ -178,6 +194,8 @@ class SessionPanel(QFrame):
                 display = self._short(title)
                 if pinned:
                     display = f"📌 {display}"
+                if session_id == self._active_reading_id:
+                    display = f"● {display}"
                 item.setText(display)
                 item.setToolTip(title)
                 break
@@ -220,6 +238,17 @@ class SessionPanel(QFrame):
         pinned = item.data(Qt.ItemDataRole.UserRole + 1)
 
         menu = ContextMenu(parent=self)
+
+        # 阅读会话：可设为「连续阅读」激活目标（已激活的不再重复显示）。
+        source = next(
+            (s.source for s in self._sessions if s.id == sid), None
+        )
+        if source == SOURCE_READING and sid != self._active_reading_id:
+            menu.addAction(Action(
+                FluentIcon.PLAY, "设为连续阅读",
+                triggered=lambda: self.session_activate_reading_requested.emit(sid),
+            ))
+            menu.addSeparator()
 
         pin_icon = FluentIcon.UNPIN if pinned else FluentIcon.PIN
         pin_text = "取消置顶" if pinned else "置顶"

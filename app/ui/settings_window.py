@@ -27,6 +27,7 @@ class SettingsWindow(QDialog):
         ("工具", "tools"),
         ("快捷键", "hotkeys"),
         ("窗口", "window"),
+        ("划词", "selection"),
     ]
 
     def __init__(self, hotkey_mgr=None, registry=None, parent=None):
@@ -81,6 +82,7 @@ class SettingsWindow(QDialog):
         from app.ui.settings_pages.tools_page import ToolsPage
         from app.ui.settings_pages.hotkeys_page import HotkeysPage
         from app.ui.settings_pages.window_page import WindowPage
+        from app.ui.settings_pages.selection_page import SelectionPage
 
         self._stack.addWidget(AppearancePage(self))
         self._stack.addWidget(EditorPage(self))
@@ -88,15 +90,19 @@ class SettingsWindow(QDialog):
         self._stack.addWidget(ToolsPage(self._registry, self))
         self._stack.addWidget(HotkeysPage(self._hotkey_mgr, self))
         self._stack.addWidget(WindowPage(self))
+        self._selection_page = SelectionPage(self)
+        self._stack.addWidget(self._selection_page)
 
     def _on_nav_changed(self, index: int):
         self._stack.setCurrentIndex(index)
 
     def accept(self):
+        self._selection_page.save()
         cfg.save()
         super().accept()
 
     def closeEvent(self, event):
+        self._selection_page.save()
         cfg.set(cfg.settingsWidth, self.width())
         cfg.set(cfg.settingsHeight, self.height())
         cfg.set(cfg.settingsPage, self._nav.currentRow())

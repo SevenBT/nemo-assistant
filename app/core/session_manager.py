@@ -83,16 +83,6 @@ class SessionManager:
         self._save(session)
         return session
 
-    def latest_by_source(self, source: str) -> Optional[Session]:
-        """返回指定来源中最近更新的会话，没有则返回 None。
-
-        用于划词速记复用：续聊默认归到最近的同来源会话，避免会话爆炸。
-        """
-        candidates = [s for s in self._sessions.values() if s.source == source]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda s: s.updated_at)
-
     def delete(self, session_id: str):
         self._sessions.pop(session_id, None)
         p = self._path(session_id)

@@ -31,6 +31,7 @@ from app.core.llm_gateway import LLMGateway
 from app.core.note_manager import NoteManager
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
+from app.models.session import SOURCE_MANUAL
 from app.tools.context import ToolContext, ToolEvents
 from app.tools.loader import load_builtin_tools, load_user_script_tools
 from app.tools.registry import ToolRegistry
@@ -133,8 +134,9 @@ class MainWindow(FluentWindow):
             self,
             note_mgr=self._notes,
             text_session_callback=self._chat_session_controller.start_text_session,
-            main_session_callback=self.dispatch_text_to_main,
+            compose_callback=self._chat_session_controller.compose_in_reading,
             notify=self._notify_signal.emit,
+            on_note_saved=self._note_created_signal.emit,
         )
         self._scheduler.set_tool_manager(self._registry)
         self._note_created_signal.connect(self._notes_panel.refresh)
@@ -307,6 +309,9 @@ class MainWindow(FluentWindow):
         self._session_panel.session_settings_requested.connect(self._on_session_settings)
         self._session_panel.session_pin_requested.connect(self._on_session_pin)
         self._session_panel.session_reorder_requested.connect(self._on_session_reorder)
+        self._session_panel.session_activate_reading_requested.connect(
+            self._on_activate_reading
+        )
         self._chat_splitter.addWidget(self._session_panel)
 
         self._chat_col = QVBoxLayout()
@@ -411,24 +416,6 @@ class MainWindow(FluentWindow):
         self.activateWindow()
         self._input.focus()
 
-    # ──────────────────────────────────────────── 划词速记
-    def dispatch_text_to_main(
-        self, text: str, text_action, llm_reply: str, *, force_new: bool = False
-    ):
-        """气泡「在主窗继续」：把问答注入划词速记会话。
-
-        - force_new=False：复用最近的划词速记会话（默认，避免会话爆炸）。
-        - force_new=True：强制新建一个划词速记会话。
-        """
-        # 复用统一的显示逻辑：解除边缘吸附 / 从最小化还原 / show + 置前。
-        # 仅判 isVisible() 不够——最小化或吸附态下它仍为 True，窗口却没真正露出。
-        self._show_window()
-        self.raise_()
-        self.activateWindow()
-        self._chat_session_controller.continue_in_selection_session(
-            text, text_action, llm_reply, force_new=force_new
-        )
-
     def _restore_pinned_notes(self):
         self._sticky_note_controller.restore_pinned()
 
@@ -444,8 +431,8 @@ class MainWindow(FluentWindow):
     def _init_sessions(self):
         self._chat_session_controller.init_sessions()
 
-    def _new_session(self):
-        self._chat_session_controller.new_session()
+    def _new_session(self, source: str = SOURCE_MANUAL):
+        self._chat_session_controller.new_session(source)
 
     def _delete_session(self, sid: str):
         self._chat_session_controller.delete_session(sid)
@@ -461,6 +448,9 @@ class MainWindow(FluentWindow):
 
     def _on_session_reorder(self, ordered_ids: list):
         self._chat_session_controller.reorder_sessions(ordered_ids)
+
+    def _on_activate_reading(self, sid: str):
+        self._chat_session_controller.set_active_reading(sid)
 
     def _on_session_select(self, sid: str):
         self._chat_session_controller.select_session(sid)
