@@ -29,12 +29,20 @@ import logging
 import sys
 from collections.abc import Callable
 
-from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import (
+    QEvent,
+    QPoint,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
+from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QVBoxLayout,
 )
@@ -92,6 +100,10 @@ _SHADOW_MARGIN_PX = 9
 # 投影模糊半径与下沉偏移（px）。
 _SHADOW_BLUR_PX = 14
 _SHADOW_OFFSET_Y = 2
+# 投影最浓处的黑色不透明度（0-255），向外渐隐到 0。
+_SHADOW_MAX_ALPHA = 110
+# 卡片圆角半径（px），需与 QSS 的 border-radius 保持一致。
+_CARD_RADIUS_PX = 5
 
 # 按钮图标尺寸（px）。
 _ICON_PX = 14
@@ -152,12 +164,10 @@ class TextActionPopup(QFrame):
         self._card = QFrame(self)
         self._card.setObjectName("textActionCard")
         self._card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
-        shadow = QGraphicsDropShadowEffect(self._card)
-        shadow.setBlurRadius(_SHADOW_BLUR_PX)
-        shadow.setXOffset(0)
-        shadow.setYOffset(_SHADOW_OFFSET_Y)
-        shadow.setColor(QColor(0, 0, 0, 110))
-        self._card.setGraphicsEffect(shadow)
+        # 投影由 paintEvent 手绘（不用 QGraphicsDropShadowEffect）：后者在
+        # WA_TranslucentBackground 的分层窗口上会让脏区扩散超出窗口边界，
+        # 触发 UpdateLayeredWindowIndirect failed 警告。手绘只画在窗口内的
+        # 透明边距区，不越界。
         shell.addWidget(self._card)
 
         card_layout = QVBoxLayout(self._card)
@@ -213,6 +223,37 @@ class TextActionPopup(QFrame):
         """根据当前主题刷新浮标样式（每次显示前调用）。"""
         theme = style.get_current_theme()
         self.setStyleSheet(_build_popup_style(theme))
+
+    def paintEvent(self, event):
+        """在透明外壳的边距区手绘卡片投影。
+
+        卡片本体（底色/边框/圆角）仍由 QSS 在 _card 上绘制；这里只负责画它
+        身后的柔和投影。用一圈圈向外扩散、不透明度递减的圆角描边模拟模糊，
+        全部落在窗口内的透明边距里，绝不越界——这是替代
+        QGraphicsDropShadowEffect 以消除分层窗口越界刷新警告的关键。
+        """
+        super().paintEvent(event)
+        if self._card is None:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # 卡片几何（外壳坐标系），投影以它为基准向外扩散。
+        base = QRectF(self._card.geometry())
+        base.translate(0, _SHADOW_OFFSET_Y)
+        for i in range(_SHADOW_BLUR_PX, 0, -1):
+            # i 越大越靠外、越淡；二次衰减让近处更实、远处更虚。
+            ratio = (i / _SHADOW_BLUR_PX) ** 2
+            alpha = int(_SHADOW_MAX_ALPHA * (1.0 - ratio))
+            if alpha <= 0:
+                continue
+            color = QColor(0, 0, 0, alpha)
+            painter.setPen(color)
+            ring = base.adjusted(-i, -i, i, i)
+            painter.drawRoundedRect(
+                ring, _CARD_RADIUS_PX + i, _CARD_RADIUS_PX + i
+            )
+        painter.end()
 
     # ── Win32 防激活 ────────────────────────────────────────────────────
 

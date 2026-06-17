@@ -168,10 +168,7 @@ class SelectionController(QObject):
             logger.warning("划词：未配置 compose_callback，退回一次性")
             self._show_oneshot(text, action.key)
             return
-        if not self._window.isVisible():
-            self._window.show()
-        self._window.raise_()
-        self._window.activateWindow()
+        self._restore_window()
         self._compose(text, force_new=action.forces_new_reading)
 
     def _dispatch_to_ai(self, text: str, action):
@@ -179,11 +176,21 @@ class SelectionController(QObject):
         if self._text_session is None:
             logger.warning("划词：未配置 text_session_callback")
             return
-        if not self._window.isVisible():
+        self._restore_window()
+        self._text_session(text, action)
+
+    def _restore_window(self):
+        """唤起主窗：最小化时 showNormal 还原，隐藏时 show，再抢焦点。
+
+        Qt 中最小化的窗口 isVisible() 仍为 True，只 raise_/activateWindow
+        无法还原，必须先 showNormal()——与 main_window 切换可见性的处理一致。
+        """
+        if self._window.isMinimized():
+            self._window.showNormal()
+        elif not self._window.isVisible():
             self._window.show()
         self._window.raise_()
         self._window.activateWindow()
-        self._text_session(text, action)
 
     # ── 存便签 ────────────────────────────────────────────────────────
 
