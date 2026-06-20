@@ -28,12 +28,22 @@ class SettingsWindow(QDialog):
         ("快捷键", "hotkeys"),
         ("窗口", "window"),
         ("划词", "selection"),
+        ("归档会话", "archived"),
     ]
 
-    def __init__(self, hotkey_mgr=None, registry=None, parent=None):
+    def __init__(
+        self,
+        hotkey_mgr=None,
+        registry=None,
+        session_mgr=None,
+        on_sessions_changed=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self._hotkey_mgr = hotkey_mgr
         self._registry = registry
+        self._session_mgr = session_mgr
+        self._on_sessions_changed = on_sessions_changed
         self.setWindowTitle("设置")
         self.setMinimumSize(640, 480)
         self.resize(cfg.get(cfg.settingsWidth), cfg.get(cfg.settingsHeight))
@@ -83,6 +93,7 @@ class SettingsWindow(QDialog):
         from app.ui.settings_pages.hotkeys_page import HotkeysPage
         from app.ui.settings_pages.window_page import WindowPage
         from app.ui.settings_pages.selection_page import SelectionPage
+        from app.ui.settings_pages.archived_page import ArchivedPage
 
         self._stack.addWidget(AppearancePage(self))
         self._stack.addWidget(EditorPage(self))
@@ -92,6 +103,9 @@ class SettingsWindow(QDialog):
         self._stack.addWidget(WindowPage(self))
         self._selection_page = SelectionPage(self)
         self._stack.addWidget(self._selection_page)
+        self._stack.addWidget(
+            ArchivedPage(self._session_mgr, self._on_sessions_changed, self)
+        )
 
     def _on_nav_changed(self, index: int):
         self._stack.setCurrentIndex(index)

@@ -41,17 +41,26 @@ class SessionManager:
 
     # ------------------------------------------------------------------ CRUD
     def get_sessions(self) -> list[Session]:
-        """返回会话列表：置顶的在前（按 sort_order），其余按 updated_at 降序。"""
+        """返回活跃会话列表（不含归档）：置顶在前（按 sort_order），其余按 updated_at 降序。"""
+        active = [s for s in self._sessions.values() if not s.archived]
         pinned = sorted(
-            [s for s in self._sessions.values() if s.pinned],
+            [s for s in active if s.pinned],
             key=lambda s: s.sort_order,
         )
         unpinned = sorted(
-            [s for s in self._sessions.values() if not s.pinned],
+            [s for s in active if not s.pinned],
             key=lambda s: s.updated_at,
             reverse=True,
         )
         return pinned + unpinned
+
+    def get_archived_sessions(self) -> list[Session]:
+        """返回已归档会话，按归档前的 updated_at 降序。"""
+        return sorted(
+            [s for s in self._sessions.values() if s.archived],
+            key=lambda s: s.updated_at,
+            reverse=True,
+        )
 
     def pin_session(self, session_id: str, pinned: bool):
         """设置/取消置顶。"""
@@ -88,6 +97,24 @@ class SessionManager:
         p = self._path(session_id)
         if p.exists():
             p.unlink()
+
+    def archive(self, session_id: str):
+        """归档会话（软删除）：从列表移除但保留数据，可在设置中恢复。
+
+        归档会取消置顶，避免恢复后仍占据置顶序位。
+        """
+        session = self._sessions.get(session_id)
+        if session:
+            session.archived = True
+            session.pinned = False
+            self._save(session)
+
+    def unarchive(self, session_id: str):
+        """恢复已归档会话，重新出现在会话列表中。"""
+        session = self._sessions.get(session_id)
+        if session:
+            session.archived = False
+            self._save(session)
 
     def rename(self, session_id: str, title: str):
         session = self._sessions.get(session_id)

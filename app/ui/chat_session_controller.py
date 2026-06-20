@@ -5,7 +5,7 @@ from PyQt6.QtCore import QObject
 from app.core.agent_loop import AgentLoop
 from app.core.config import cfg
 from app.models.message import Message, MessageRole, ToolCall
-from app.models.session import SOURCE_MANUAL, SOURCE_READING
+from app.models.session import DEFAULT_SESSION_TITLE, SOURCE_MANUAL, SOURCE_READING
 from app.ui.manual_params_dialog import ManualParamsDialog
 from app.ui.session_settings_dialog import SessionSettingsDialog
 
@@ -87,7 +87,19 @@ class ChatSessionController(QObject):
 
         source=SOURCE_READING（在「快速会话」tab 点 +）时建为快速会话并
         自动激活（●），让随后的划词连续解释接续到这个带主题铺垫的会话。
+
+        若当前 tab 下已存在一个空白会话（无消息、默认标题），则直接切过去，
+        不再重复新建——避免点 + 攒出一堆空会话。
         """
+        existing = self._find_blank_session(source)
+        if existing is not None:
+            sessions = self._sessions.get_sessions()
+            self._session_panel.load(sessions, existing.id)
+            self.switch_session(existing.id)
+            if source == SOURCE_READING:
+                self.set_active_reading(existing.id)
+            return
+
         if source == SOURCE_READING:
             session = self._sessions.create(
                 title=READING_SESSION_TITLE, source=SOURCE_READING
@@ -99,6 +111,23 @@ class ChatSessionController(QObject):
         self.switch_session(session.id)
         if source == SOURCE_READING:
             self.set_active_reading(session.id)
+
+    def _find_blank_session(self, source: str):
+        """返回该来源下首个空白会话（无消息且仍是默认标题），没有则 None。
+
+        reading 来源用 READING_SESSION_TITLE 作默认标题，manual 用
+        DEFAULT_SESSION_TITLE；标题被改过或已有消息都视为非空白，不复用。
+        """
+        default_title = (
+            READING_SESSION_TITLE if source == SOURCE_READING
+            else DEFAULT_SESSION_TITLE
+        )
+        for s in self._sessions.get_sessions():
+            if s.source != source:
+                continue
+            if not s.messages and s.title == default_title:
+                return s
+        return None
 
     def start_vision_session(self, attachments: list, vision_action):
         """识图：为每次截图动作新建一个会话并切过去，附上图片。
@@ -163,6 +192,7 @@ class ChatSessionController(QObject):
         self._input.focus()
 
     def delete_session(self, sid: str):
+        """删除会话 = 归档（软删除）：移出列表但保留数据，可在设置中恢复。"""
         deleted = self._sessions.get(sid)
         deleted_source = deleted.source if deleted is not None else None
 
@@ -170,7 +200,7 @@ class ChatSessionController(QObject):
         if cfg.get(cfg.activeReadingSessionId) == sid:
             self.set_active_reading("")
 
-        self._sessions.delete(sid)
+        self._sessions.archive(sid)
         sessions = self._sessions.get_sessions()
         if not sessions:
             session = self._sessions.create()
@@ -183,6 +213,22 @@ class ChatSessionController(QObject):
         )
         self._session_panel.load(sessions, target.id)
         self.switch_session(target.id)
+
+    def refresh_panel(self):
+        """重载会话列表，保持当前选中。
+
+        归档管理（恢复 / 彻底删除）在设置页操作后调用，让主窗列表同步。
+        若当前会话恰好被彻底删除，则切到列表首个会话。
+        """
+        sessions = self._sessions.get_sessions()
+        if not sessions:
+            sessions = [self._sessions.create()]
+        ids = {s.id for s in sessions}
+        target = self._current_session_id if self._current_session_id in ids \
+            else sessions[0].id
+        self._session_panel.load(sessions, target)
+        if target != self._current_session_id:
+            self.switch_session(target)
 
     def rename_session(self, sid: str, title: str):
         self._sessions.rename(sid, title)

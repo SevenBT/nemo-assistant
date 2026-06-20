@@ -20,6 +20,7 @@ class Session:
     pinned: bool = False  # 是否置顶
     sort_order: int = 0   # 自定义排序序号（越小越靠前）
     source: str = SOURCE_MANUAL  # 会话来源（manual / selection）
+    archived: bool = False  # 是否已归档（软删除：不显示在列表，可在设置中恢复）
 
     def to_dict(self) -> dict:
         return {
@@ -32,6 +33,7 @@ class Session:
             "pinned": self.pinned,
             "sort_order": self.sort_order,
             "source": self.source,
+            "archived": self.archived,
         }
 
     @classmethod
@@ -49,4 +51,5 @@ class Session:
             pinned=d.get("pinned", False),
             sort_order=d.get("sort_order", 0),
             source=d.get("source", SOURCE_MANUAL),
+            archived=d.get("archived", False),
         )

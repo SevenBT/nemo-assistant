@@ -490,6 +490,8 @@ class MainWindow(FluentWindow):
         dlg = SettingsWindow(
             hotkey_mgr=self._hotkey_mgr,
             registry=self._registry,
+            session_mgr=self._sessions,
+            on_sessions_changed=self._chat_session_controller.refresh_panel,
             parent=self,
         )
         if dlg.exec():
