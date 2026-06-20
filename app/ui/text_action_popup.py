@@ -33,13 +33,11 @@ from PyQt6.QtCore import (
     QEvent,
     QPoint,
     QRect,
-    QRectF,
     QSize,
     Qt,
     QTimer,
     pyqtSignal,
 )
-from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
@@ -68,8 +66,7 @@ def _build_popup_style(theme: dict) -> str:
     紧凑无文字浮标：图标 14px，内边距 2px 起。背景用浮起面、文字用主文本色、
     hover 用强调色淡底，与应用整体主题一致。
 
-    底色/边框仍跟随主题；浮标靠外层卡片的投影 + 实边框从网页背景里「浮」出来，
-    不靠颜色对比（见 _build_layout 的卡片结构与阴影）。
+    底色/边框仍跟随主题；浮标靠实边框从网页背景里「浮」出来，不靠颜色对比。
     """
     return f"""
     #textActionCard {{
@@ -95,13 +92,6 @@ def _build_popup_style(theme: dict) -> str:
 # 浮标与选区之间的间距（px）。
 _GAP_PX = 4
 
-# 外壳留给投影扩散的透明边距（px）。卡片四周各留这么多空间，阴影才不被裁切。
-_SHADOW_MARGIN_PX = 9
-# 投影模糊半径与下沉偏移（px）。
-_SHADOW_BLUR_PX = 14
-_SHADOW_OFFSET_Y = 2
-# 投影最浓处的黑色不透明度（0-255），向外渐隐到 0。
-_SHADOW_MAX_ALPHA = 110
 # 卡片圆角半径（px），需与 QSS 的 border-radius 保持一致。
 _CARD_RADIUS_PX = 5
 
@@ -151,23 +141,16 @@ class TextActionPopup(QFrame):
     def _build_layout(self):
         """建外层布局；按钮行在每次 show_at 时重建（见 _rebuild_buttons）。
 
-        结构：透明外壳(self) → 留边距 → 卡片(self._card，承载底色/边框/圆角+阴影)
-        → 按钮行。外壳透明且四周留 _SHADOW_MARGIN_PX，投影才有空间扩散不被裁。
+        结构：外壳(self) → 卡片(self._card，承载底色/边框/圆角) → 按钮行。
+        外壳无边距，卡片直接铺满窗口。
         """
         shell = QVBoxLayout(self)
-        shell.setContentsMargins(
-            _SHADOW_MARGIN_PX, _SHADOW_MARGIN_PX,
-            _SHADOW_MARGIN_PX, _SHADOW_MARGIN_PX,
-        )
+        shell.setContentsMargins(0, 0, 0, 0)
         shell.setSpacing(0)
 
         self._card = QFrame(self)
         self._card.setObjectName("textActionCard")
         self._card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
-        # 投影由 paintEvent 手绘（不用 QGraphicsDropShadowEffect）：后者在
-        # WA_TranslucentBackground 的分层窗口上会让脏区扩散超出窗口边界，
-        # 触发 UpdateLayeredWindowIndirect failed 警告。手绘只画在窗口内的
-        # 透明边距区，不越界。
         shell.addWidget(self._card)
 
         card_layout = QVBoxLayout(self._card)
@@ -223,37 +206,6 @@ class TextActionPopup(QFrame):
         """根据当前主题刷新浮标样式（每次显示前调用）。"""
         theme = style.get_current_theme()
         self.setStyleSheet(_build_popup_style(theme))
-
-    def paintEvent(self, event):
-        """在透明外壳的边距区手绘卡片投影。
-
-        卡片本体（底色/边框/圆角）仍由 QSS 在 _card 上绘制；这里只负责画它
-        身后的柔和投影。用一圈圈向外扩散、不透明度递减的圆角描边模拟模糊，
-        全部落在窗口内的透明边距里，绝不越界——这是替代
-        QGraphicsDropShadowEffect 以消除分层窗口越界刷新警告的关键。
-        """
-        super().paintEvent(event)
-        if self._card is None:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        # 卡片几何（外壳坐标系），投影以它为基准向外扩散。
-        base = QRectF(self._card.geometry())
-        base.translate(0, _SHADOW_OFFSET_Y)
-        for i in range(_SHADOW_BLUR_PX, 0, -1):
-            # i 越大越靠外、越淡；二次衰减让近处更实、远处更虚。
-            ratio = (i / _SHADOW_BLUR_PX) ** 2
-            alpha = int(_SHADOW_MAX_ALPHA * (1.0 - ratio))
-            if alpha <= 0:
-                continue
-            color = QColor(0, 0, 0, alpha)
-            painter.setPen(color)
-            ring = base.adjusted(-i, -i, i, i)
-            painter.drawRoundedRect(
-                ring, _CARD_RADIUS_PX + i, _CARD_RADIUS_PX + i
-            )
-        painter.end()
 
     # ── Win32 防激活 ────────────────────────────────────────────────────
 
@@ -366,10 +318,9 @@ class TextActionPopup(QFrame):
         self._apply_theme_style()
         self.adjustSize()
         w, h = self.width(), self.height()
-        # w/h 含外壳两侧各 _SHADOW_MARGIN_PX 透明边距：水平边距对称，居中不受影响；
-        # 垂直方向需减去上边距，卡片(而非外壳)顶边才落在 y + _GAP_PX 处。
+        # 浮标居中对齐 x，顶边落在 y + _GAP_PX 处。
         px = x - w // 2
-        py = y + _GAP_PX - _SHADOW_MARGIN_PX
+        py = y + _GAP_PX
 
         # ★ 用目标坐标查屏幕，不能用 mapToGlobal(self.rect().center())——
         # 此时弹窗尚未 move，其当前全局位置是 show 前残留的旧位置，
@@ -384,7 +335,7 @@ class TextActionPopup(QFrame):
             if px < geo.left():
                 px = geo.left()
             if py + h > geo.bottom():
-                py = y - h - _GAP_PX + _SHADOW_MARGIN_PX  # 翻到选区上方
+                py = y - h - _GAP_PX  # 翻到选区上方
             if py < geo.top():
                 py = geo.top()
 
