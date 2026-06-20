@@ -236,6 +236,11 @@ class ScreenshotOverlay(QWidget):
         self._start = QPoint()
         self._end = QPoint()
         self._state = "IDLE"  # IDLE | DRAGGING | SELECTED | RESIZING | OCR_EDIT
+        # Frozen full-desktop snapshot. Captured the instant the overlay opens
+        # and painted as the background, so selection happens on a still image —
+        # transient UI (menus/tooltips/video frames) stays exactly as the user
+        # framed it instead of changing under a live, see-through overlay.
+        self._frozen: QPixmap = QPixmap()
         self._toolbar: QFrame | None = None
         self._ocr_panel: QFrame | None = None
         self._ocr_edit: QTextEdit | None = None
@@ -248,6 +253,7 @@ class ScreenshotOverlay(QWidget):
         self._resize_cursor_shape: Qt.CursorShape | None = None
 
         self._setup_window()
+        self._capture_frozen()
         self._ocr_done.connect(self._on_ocr_ready)
         # Warm up OCR engine in background so first recognition is instant
         threading.Thread(target=_get_rapid_ocr, daemon=True).start()
@@ -337,6 +343,33 @@ class ScreenshotOverlay(QWidget):
             self._resize_cursor_shape = None
 
     # ── Screen capture ─────────────────────────────────────────────────
+
+    def _capture_frozen(self):
+        """Grab the whole virtual desktop once, before the overlay is shown.
+
+        This still image becomes the overlay background and the source every
+        action crops from — nothing is re-grabbed from the live screen, so the
+        result always matches what the user framed.
+        """
+        self._frozen = self._grab_rect(self.geometry())
+
+    def _crop_frozen(self, rect: QRect) -> QPixmap:
+        """Crop *rect* (global coords) out of the frozen desktop snapshot."""
+        if self._frozen.isNull():
+            # Fallback: no snapshot (shouldn't happen) → live grab.
+            return self._grab_rect(rect)
+        dpr = self._frozen.devicePixelRatio()
+        origin = self.geometry().topLeft()
+        # Map the global rect into frozen-pixmap device pixels.
+        src = QRect(
+            round((rect.x() - origin.x()) * dpr),
+            round((rect.y() - origin.y()) * dpr),
+            round(rect.width() * dpr),
+            round(rect.height() * dpr),
+        )
+        piece = self._frozen.copy(src)
+        piece.setDevicePixelRatio(dpr)
+        return piece
 
     def _grab_rect(self, rect: QRect) -> QPixmap:
         """Capture at native device-pixel resolution for maximum quality."""
@@ -488,13 +521,12 @@ class ScreenshotOverlay(QWidget):
             self._do_ocr()
             return
 
-        # pin / copy / save / vision:* — capture & emit immediately.
+        # pin / copy / save / vision:* — crop the frozen snapshot & emit.
         # vision actions carry the screenshot pixmap through to the AI path;
         # OCR (above) is a separate path that extracts text locally.
-        self.hide()
-        QApplication.processEvents()
-        pixmap = self._grab_rect(r)
+        pixmap = self._crop_frozen(r)
         self.captured.emit(pixmap, action, "", QPoint(r.topLeft()))
+        self.hide()
         QTimer.singleShot(0, self.close)
 
     # ── OCR ────────────────────────────────────────────────────────────
@@ -504,12 +536,8 @@ class ScreenshotOverlay(QWidget):
 
         self._clear_resize_cursor()
         r = self._normalized_rect()
-        self.hide()
-        QApplication.processEvents()
-        pixmap = self._grab_rect(r)
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        # Crop from the frozen snapshot — no need to hide/re-grab the live screen.
+        pixmap = self._crop_frozen(r)
 
         # Extract pixel data in main thread (Qt objects can't cross threads)
         img = pixmap.toImage()
@@ -644,6 +672,12 @@ class ScreenshotOverlay(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Draw the frozen desktop snapshot as the base layer; the dim overlay
+        # and selection chrome paint on top. This is what makes the screen look
+        # "locked" — selection happens against a still image, not the live screen.
+        if not self._frozen.isNull():
+            p.drawPixmap(self.rect(), self._frozen)
 
         r_local = self._normalized_rect_local()
 
