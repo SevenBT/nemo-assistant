@@ -37,5 +37,7 @@ PyQt6 无边框透明浮窗桌面应用。
 - **MarkdownEditor 是 QPlainTextEdit，没有 `setTextColor`**：`setTextColor`/`textColor` 是 `QTextEdit` 独有的方法，`QPlainTextEdit` 调用会 `AttributeError`。CLAUDE.md 里 sticky 用的「`setCurrentCharFormat` + `setTextColor`」方案只适用于 sticky 的 `TextEdit`（QTextEdit），**不能照搬到 MarkdownEditor**。QPlainTextEdit 的文字前景色加固用 `setCurrentCharFormat` + `mergeCurrentCharFormat`。
 - **PyQt6 `pyqtSignal(int,...)` 收到 str 不报错、会静默变垃圾数**：声明为 int 的信号 `emit("5", ...)` 不抛 TypeError，而是把 `"5"` 转成无意义的大整数（如 `863819264`）。便签同步链路 note_id 实际是 `int`（`Note.id`），信号声明正确；但若类型标注误写成 `str`（`_current_note_id: str`、`note_id: str`），一旦有人照标注真传 str，同步会无声损坏。标注务必与运行时实际类型一致，都用 `int`。
 - **审查报告/旧记忆会误判，改前必须追运行时实际值**：自动调查报告可能凭类型标注或 CLAUDE.md 字面套用得出错误结论（如误判「信号类型不匹配导致同步失效」「该加 setTextColor」，实际前者运行时是 int 没坏、后者方法不存在会崩）。涉及信号类型、控件方法是否存在等，改前用最小脚本实测验证，不要盲信报告。
+- **QListWidget 拖动卡顿：别改绘制，照搬「能用原生移动」的那个列表**：笔记列表拖动卡了好几个会话都没修好，根因是历次都在改 delegate 绘制（关抗锯齿、去圆角、降级 paint）和落点判定，全是无效补丁。实测证伪：一次拖动里 `paint` 只占 0.4%（241 次调用 23ms / 拖动 5.5s），`_on_selection_changed` 拖动中触发 0 次，`cfg.get` 0.33µs——绘制和我们的代码全程几乎没干活。真因是笔记列表**重写了 `dropEvent` 做 `event.ignore()` + 整表 `_load()` 重建**，而同窗口的会话列表（`session_panel.py`）对 `InternalMove` **零重写**、让 Qt 原生移动行（`model().rowsMoved` 读新顺序）所以丝滑。正确方案：删掉所有自定义拖动重写（`mouseMoveEvent`/`startDrag`/`dropEvent` 和 delegate 的降级绘制），改用原生移动；文件夹结构靠「头不可拖动当分界 + 松手后按行位置重新推断每条笔记归属」在 `rowsMoved` 里持久化（`reorder_notes` 顺带改写 folder_id，故跨文件夹拖动＝移动归属）。注意在 `rowsMoved` 里重建列表会重入 model，用 `QTimer.singleShot(0, ...)` 延迟一拍再 `_load()`。**通用教训：两个相似控件一个顺一个卡时，先 diff 它们对 Qt 的重写差异，对齐到「不重写」的那个，别在被卡的那个上叠补丁。**
+
 
 

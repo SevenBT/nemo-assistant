@@ -2,17 +2,17 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal
-from PyQt6.QtGui import QColor, QGuiApplication
+from PyQt6.QtCore import Qt, QTimer, QEvent, QRect, QSize, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPen
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QFileDialog,
     QHBoxLayout,
-    QLabel,
     QListWidgetItem,
     QMessageBox,
     QSplitter,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -22,9 +22,11 @@ from qfluentwidgets import (
     CaptionLabel,
     FluentIcon,
     LineEdit,
+    ListItemDelegate,
     ListWidget,
     PushButton,
     RoundMenu,
+    SegmentedWidget,
     TextEdit,
     TogglePushButton,
     TransparentToolButton,
@@ -36,6 +38,23 @@ from app.models.note import Folder
 from app.ui.components.markdown_editor import MarkdownEditor
 from app.ui.components.markdown_preview import MarkdownPreview
 from app.ui.components.context_menu import ContextMenu
+
+
+# Note type tabs shown in the list header
+_TAB_NOTE = "note"
+_TAB_STICKY = "sticky"
+
+# Item data roles (UserRole+N) shared by the list and its delegate.
+# Rows are plain QListWidgetItems painted by NoteItemDelegate — no setItemWidget,
+# so dragging only repaints the lightweight delegate (mirrors the chat session list).
+_ROLE_ID = Qt.ItemDataRole.UserRole          # note id / folder id / None
+_ROLE_KIND = Qt.ItemDataRole.UserRole + 1    # "note" | "folder" | "uncategorized"
+_ROLE_FOLDER = Qt.ItemDataRole.UserRole + 2  # note's folder_id (drag-drop resolution)
+_ROLE_TITLE = Qt.ItemDataRole.UserRole + 3   # display title / folder name
+_ROLE_DATE = Qt.ItemDataRole.UserRole + 4    # formatted date (notes only)
+_ROLE_COLOR = Qt.ItemDataRole.UserRole + 5   # dot color (notes only)
+_ROLE_INDENT = Qt.ItemDataRole.UserRole + 6  # bool: indented inside a folder
+_ROLE_EXPANDED = Qt.ItemDataRole.UserRole + 7  # bool: folder expanded
 
 
 # Palette for note color dots — cycles by note id
@@ -67,122 +86,192 @@ def _html_to_plain(html: str) -> str:
 
 
 class _NoteList(ListWidget):
-    """Simple note list widget without drag-to-reorder."""
+    """Note list with drag-to-reorder, mirroring the (smooth) session list.
+
+    The session list (see SessionPanel) drags smoothly because it lets Qt move
+    the row natively (default ``dropEvent`` → ``model().rowsMoved``) and adds no
+    overrides. This list earlier overrode ``mouseMoveEvent`` / ``startDrag`` /
+    ``dropEvent`` (the latter ``event.ignore()``-d and rebuilt the whole list);
+    profiling showed paint was 0.4% of drag time, so the overrides were the only
+    thing differing from the smooth session list — they are gone now.
+
+    Folders are preserved: folder / "未分类" headers are non-draggable, so they
+    keep their relative order during a native move. After the move the panel
+    re-derives each note's folder from its row position (nearest folder header
+    above it) and persists — see ``NotesPanel._on_rows_moved``.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
+        self.set_drag_enabled(False)
 
-    def mouseMoveEvent(self, event):
-        # Suppress rubber-band selection on mouse drag to prevent
-        # accidental deselection that clears the editor.
-        # Multi-select is still available via Ctrl+click / Shift+click.
-        pass
-
-
-class _NoteItemWidget(QWidget):
-    """List item widget with a colored left stripe, title, and date."""
-
-    def __init__(self, title: str, date_str: str, color: str, indent: bool = False, parent=None):
-        super().__init__(parent)
-        self._color = color
-        layout = QHBoxLayout(self)
-        left_margin = 28 if indent else 10
-        layout.setContentsMargins(left_margin, 6, 8, 6)
-        layout.setSpacing(8)
-
-        # Colored dot indicator
-        self._dot = QLabel()
-        self._dot.setFixedSize(8, 8)
-        self._dot.setStyleSheet(
-            f"background: {color}; border-radius: 4px; min-width: 8px; max-width: 8px;"
-        )
-        layout.addWidget(self._dot, alignment=Qt.AlignmentFlag.AlignVCenter)
-
-        # Text block
-        text_col = QVBoxLayout()
-        text_col.setSpacing(1)
-        text_col.setContentsMargins(0, 0, 0, 0)
-
-        fs = cfg.get(cfg.navigationFontSize)
-        self._title_lbl = QLabel(title)
-        self._title_lbl.setStyleSheet(f"font-size: {fs}px; font-weight: 500; background: transparent;")
-        self._title_lbl.setWordWrap(False)
-        text_col.addWidget(self._title_lbl)
-
-        self._date_lbl = QLabel(date_str)
-        self._date_lbl.setStyleSheet(f"font-size: {max(fs - 3, 9)}px; color: #9CA3AF; background: transparent;")
-        text_col.addWidget(self._date_lbl)
-
-        layout.addLayout(text_col, 1)
-
-        # Let all child widgets pass mouse events through to the viewport
-        for child in self.findChildren(QWidget):
-            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-
-    def update_text(self, title: str, date_str: str):
-        self._title_lbl.setText(title)
-        self._date_lbl.setText(date_str)
+    def set_drag_enabled(self, enabled: bool):
+        if enabled:
+            self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+            self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        else:
+            self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
 
 
+class NoteItemDelegate(ListItemDelegate):
+    """Paints note / folder / uncategorized rows without per-row widgets.
 
-class _FolderItem(QWidget):
-    """List item widget for a folder entry with expand/collapse arrow."""
+    Using a delegate instead of ``setItemWidget`` keeps drag-reorder smooth: a
+    drag only repaints this lightweight delegate rather than moving and
+    re-laying-out nested QWidgets for every visible row.
 
-    def __init__(self, name: str, expanded: bool = False, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 8, 5)
-        layout.setSpacing(6)
+    Fonts, metrics, pens and theme colors are cached and only rebuilt when the
+    nav font size or theme changes — ``paint``/``sizeHint`` allocate nothing, so
+    repainting every visible row each frame during a drag stays cheap.
+    """
 
-        self._arrow = QLabel("▾" if expanded else "▸")
-        self._arrow.setStyleSheet("font-size: 18px; color: #9CA3AF; background: transparent; min-width: 14px;")
-        layout.addWidget(self._arrow, alignment=Qt.AlignmentFlag.AlignVCenter)
-
-        icon_lbl = QLabel()
-        icon_lbl.setFixedSize(16, 16)
-        icon_lbl.setStyleSheet("background: transparent;")
-        icon_lbl.setPixmap(FluentIcon.FOLDER.icon().pixmap(16, 16))
-        layout.addWidget(icon_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
-
-        fs = cfg.get(cfg.navigationFontSize)
-        self._name_lbl = QLabel(name)
-        self._name_lbl.setStyleSheet(f"font-size: {fs}px; font-weight: 500; background: transparent;")
-        self._name_lbl.setWordWrap(False)
-        layout.addWidget(self._name_lbl, 1)
-
-        for child in self.findChildren(QWidget):
-            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-
-    def set_expanded(self, expanded: bool):
-        self._arrow.setText("▾" if expanded else "▸")
-
-    def update_name(self, name: str):
-        self._name_lbl.setText(name)
-
-
-class _UncategorizedSection(QWidget):
-    """Section header for uncategorized notes — acts as a drop target for moving notes out of folders."""
+    _ROW_VPAD = 8       # vertical padding per row
+    _LINE_GAP = 3       # gap between title and date lines
+    _DOT = 8            # color dot diameter
+    _NOTE_LEFT = 10     # left margin for a top-level note
+    _NOTE_INDENT = 28   # left margin for a note inside a folder
+    _HEADER_LEFT = 10   # left margin for folder / section rows
+    _ARROW_W = 14
+    _ICON = 16
+    _GAP = 6
+    _MUTED = QColor("#9CA3AF")
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 8, 5)
-        layout.setSpacing(6)
+        self._folder_pixmap = FluentIcon.FOLDER.icon().pixmap(self._ICON, self._ICON)
+        self._cached_fs = -1
+        self._cached_dark = None
+        self._rebuild_cache()
 
-        spacer = QLabel("")
-        spacer.setFixedWidth(14)
-        spacer.setStyleSheet("background: transparent;")
-        layout.addWidget(spacer, alignment=Qt.AlignmentFlag.AlignVCenter)
-
+    def _rebuild_cache(self):
+        """Recompute cached fonts/metrics/pens for the current font size + theme."""
         fs = cfg.get(cfg.navigationFontSize)
-        name_lbl = QLabel("未分类")
-        name_lbl.setStyleSheet(f"font-size: {fs}px; font-weight: 500; color: #9CA3AF; background: transparent;")
-        name_lbl.setWordWrap(False)
-        layout.addWidget(name_lbl, 1)
+        self._cached_fs = fs
+        self._title_font = QFont()
+        self._title_font.setPixelSize(fs)
+        self._title_font.setWeight(QFont.Weight.DemiBold)
+        self._date_font = QFont()
+        self._date_font.setPixelSize(max(fs - 3, 9))
+        self._title_fm = QFontMetrics(self._title_font)
+        self._date_fm = QFontMetrics(self._date_font)
+        self._title_h = self._title_fm.height()
+        self._date_h = self._date_fm.height()
+        try:
+            from app.ui.style import get_text_color, _current_dark_mode
+            self._cached_dark = _current_dark_mode
+            self._text_pen = QPen(QColor(get_text_color()))
+        except Exception:
+            self._cached_dark = False
+            self._text_pen = QPen(QColor("#000000"))
+        self._muted_pen = QPen(self._MUTED)
+        self._sel_overlay = (QColor(255, 255, 255, 28) if self._cached_dark
+                             else QColor(0, 0, 0, 18))
+        self._note_row_h = self._ROW_VPAD * 2 + self._title_h + self._LINE_GAP + self._date_h
+        self._header_row_h = self._ROW_VPAD * 2 + max(self._title_h, self._ICON)
 
-        for child in self.findChildren(QWidget):
-            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    def _ensure_cache(self):
+        if cfg.get(cfg.navigationFontSize) != self._cached_fs:
+            self._rebuild_cache()
+
+    def refresh_theme(self):
+        """Called by the panel when the theme changes."""
+        self._rebuild_cache()
+
+    # -- sizing ------------------------------------------------------------
+    def sizeHint(self, option, index):
+        self._ensure_cache()
+        kind = index.data(_ROLE_KIND)
+        h = self._note_row_h if kind == "note" else self._header_row_h
+        return QSize(option.rect.width(), h)
+
+    # -- painting ----------------------------------------------------------
+    def paint(self, painter, option, index):
+        self._ensure_cache()
+        kind = index.data(_ROLE_KIND)
+        rect = option.rect
+        painter.save()
+        painter.setRenderHint(painter.RenderHint.Antialiasing, True)
+
+        # Selection background (only meaningful for note rows)
+        if kind == "note" and (option.state & QStyle.StateFlag.State_Selected):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._sel_overlay)
+            painter.drawRoundedRect(rect.adjusted(2, 1, -2, -1), 5, 5)
+
+        if kind == "note":
+            self._paint_note(painter, index, rect)
+        elif kind == "folder":
+            self._paint_folder(painter, index, rect)
+        else:
+            self._paint_uncategorized(painter, rect)
+        painter.restore()
+
+    def _paint_note(self, painter, index, rect):
+        indent = bool(index.data(_ROLE_INDENT))
+        left = self._NOTE_INDENT if indent else self._NOTE_LEFT
+        color = index.data(_ROLE_COLOR) or "#60A5FA"
+        title = index.data(_ROLE_TITLE) or ""
+        date = index.data(_ROLE_DATE) or ""
+
+        # Color dot, vertically centered
+        dot_x = rect.left() + left
+        dot_y = rect.center().y() - self._DOT // 2 + 1
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawRoundedRect(dot_x, dot_y, self._DOT, self._DOT,
+                                self._DOT / 2, self._DOT / 2)
+
+        text_x = dot_x + self._DOT + self._GAP + 2
+        text_w = max(rect.right() - text_x - 8, 0)
+        top = rect.top() + self._ROW_VPAD
+
+        # Title (elided by pixel width)
+        painter.setFont(self._title_font)
+        painter.setPen(self._text_pen)
+        elided = self._title_fm.elidedText(title, Qt.TextElideMode.ElideRight, text_w)
+        painter.drawText(QRect(text_x, top, text_w, self._title_h),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
+
+        # Date
+        painter.setFont(self._date_font)
+        painter.setPen(self._muted_pen)
+        painter.drawText(QRect(text_x, top + self._title_h + self._LINE_GAP, text_w, self._date_h),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, date)
+
+    def _paint_folder(self, painter, index, rect):
+        expanded = bool(index.data(_ROLE_EXPANDED))
+        name = index.data(_ROLE_TITLE) or ""
+        x = rect.left() + self._HEADER_LEFT
+        cy = rect.center().y()
+
+        # Arrow
+        painter.setFont(self._date_font)
+        painter.setPen(self._muted_pen)
+        painter.drawText(QRect(x, rect.top(), self._ARROW_W, rect.height()),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                         "▾" if expanded else "▸")
+        x += self._ARROW_W + self._GAP
+
+        # Folder icon
+        painter.drawPixmap(x, cy - self._ICON // 2, self._folder_pixmap)
+        x += self._ICON + self._GAP
+
+        # Name
+        painter.setFont(self._title_font)
+        painter.setPen(self._text_pen)
+        w = max(rect.right() - x - 8, 0)
+        elided = self._title_fm.elidedText(name, Qt.TextElideMode.ElideRight, w)
+        painter.drawText(QRect(x, rect.top(), w, rect.height()),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
+
+    def _paint_uncategorized(self, painter, rect):
+        x = rect.left() + self._HEADER_LEFT + self._ARROW_W + self._GAP
+        painter.setFont(self._title_font)
+        painter.setPen(self._muted_pen)
+        w = max(rect.right() - x - 8, 0)
+        painter.drawText(QRect(x, rect.top(), w, rect.height()),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "未分类")
+
 
 
 class NotesPanel(QWidget):
@@ -196,13 +285,13 @@ class NotesPanel(QWidget):
         super().__init__(parent)
         self._mgr = note_mgr
         self._current_note_id: int | None = None
-        self._trash_mode = False
         self._pin_windows: list = []
         self._current_search_keyword: str = ""
         self._current_folder_id: int | None = None  # used only for new-note placement
         self._expanded_folders: set[int] = set()
         self._saved_list_width: int | None = None
         self._preview_mode = False
+        self._current_tab = _TAB_NOTE  # list filter: note | sticky
         self._build()
         self._load()
 
@@ -221,45 +310,10 @@ class NotesPanel(QWidget):
         toolbar.setSpacing(6)
         toolbar.setContentsMargins(0, 0, 0, 0)
 
-        # Normal mode buttons — left-aligned
-        self._new_note_btn = PushButton(FluentIcon.EDIT, "新建笔记")
-        self._new_note_btn.clicked.connect(lambda: self._on_new("note"))
-        toolbar.addWidget(self._new_note_btn)
-
-        self._new_sticky_btn = PushButton(FluentIcon.PIN, "新建便签")
-        self._new_sticky_btn.clicked.connect(lambda: self._on_new("sticky"))
-        toolbar.addWidget(self._new_sticky_btn)
-
-        self._trash_btn = PushButton(FluentIcon.DELETE, "回收站")
-        self._trash_btn.clicked.connect(self._enter_trash)
-        toolbar.addWidget(self._trash_btn)
-
         self._preview_btn = TogglePushButton(FluentIcon.VIEW, "预览")
         self._preview_btn.clicked.connect(self._on_preview_clicked)
         self._preview_btn.hide()
         toolbar.addWidget(self._preview_btn)
-
-
-        # Trash mode buttons (hidden by default)
-        self._back_btn = PushButton(FluentIcon.RETURN, "返回")
-        self._back_btn.clicked.connect(self._exit_trash)
-        self._back_btn.hide()
-        toolbar.addWidget(self._back_btn)
-
-        self._restore_btn = PushButton(FluentIcon.HISTORY, "恢复")
-        self._restore_btn.clicked.connect(self._on_restore)
-        self._restore_btn.hide()
-        toolbar.addWidget(self._restore_btn)
-
-        self._purge_btn = PushButton(FluentIcon.DELETE, "永久删除")
-        self._purge_btn.clicked.connect(self._on_purge)
-        self._purge_btn.hide()
-        toolbar.addWidget(self._purge_btn)
-
-        self._purge_all_btn = PushButton(FluentIcon.BROOM, "清空回收站")
-        self._purge_all_btn.clicked.connect(self._on_purge_all)
-        self._purge_all_btn.hide()
-        toolbar.addWidget(self._purge_all_btn)
 
         toolbar.addStretch()
 
@@ -284,22 +338,33 @@ class NotesPanel(QWidget):
         self._list_panel.setMinimumWidth(120)
         list_panel_layout = QVBoxLayout(self._list_panel)
         list_panel_layout.setContentsMargins(6, 6, 6, 6)
-        list_panel_layout.setSpacing(4)
+        list_panel_layout.setSpacing(6)
 
-        # List header: new-folder icon button (right-aligned)
-        list_header = QHBoxLayout()
-        list_header.setContentsMargins(2, 0, 2, 0)
-        list_header.addStretch()
-        self._new_folder_btn = TransparentToolButton(FluentIcon.FOLDER_ADD)
-        self._new_folder_btn.setFixedSize(24, 24)
-        self._new_folder_btn.setToolTip("新建文件夹")
-        self._new_folder_btn.clicked.connect(self._on_new_folder)
-        list_header.addWidget(self._new_folder_btn)
-        list_panel_layout.addLayout(list_header)
+        # Type tabs + new (+) button on one row (mirror the session panel header)
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(2, 0, 2, 0)
+        header_row.setSpacing(6)
+
+        self._pivot = SegmentedWidget()
+        self._pivot.addItem(_TAB_NOTE, "笔记")
+        self._pivot.addItem(_TAB_STICKY, "便签")
+        self._pivot.setCurrentItem(self._current_tab)
+        self._pivot.currentItemChanged.connect(self._on_tab_changed)
+        header_row.addWidget(self._pivot)
+        header_row.addStretch()
+
+        self._new_btn = TransparentToolButton(FluentIcon.ADD)
+        self._new_btn.setFixedSize(28, 28)
+        self._new_btn.setToolTip("新建")
+        self._new_btn.clicked.connect(lambda: self._on_new(self._current_tab))
+        header_row.addWidget(self._new_btn)
+        list_panel_layout.addLayout(header_row)
 
         self._list = _NoteList()
         self._list.setObjectName("noteList")
-        self._list.setWordWrap(True)
+        # No word-wrap: titles are single-line elided by the delegate. Word-wrap
+        # forces expensive per-row layout measurement that makes dragging laggy.
+        self._list.setWordWrap(False)
         self._list.setUniformItemSizes(False)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -307,6 +372,10 @@ class NotesPanel(QWidget):
         self._list.itemClicked.connect(self._on_item_clicked)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_list_context_menu)
+        # Native row move (like the session list). After Qt moves the rows we
+        # re-derive each note's folder + order from the new row layout.
+        self._list.model().rowsMoved.connect(self._on_rows_moved)
+        self._list.set_drag_enabled(self._current_tab == _TAB_NOTE)
         list_panel_layout.addWidget(self._list)
 
         self._splitter.addWidget(self._list_panel)
@@ -358,9 +427,9 @@ class NotesPanel(QWidget):
         self._splitter.setStretchFactor(0, 0)  # note list: fixed width
         self._splitter.setStretchFactor(1, 1)  # editor: take all extra space
 
-        # Custom delegate to respect widget font on list
-        from app.ui.components.font_delegate import FontAwareListDelegate
-        self._list.setItemDelegate(FontAwareListDelegate(self._list))
+        # Custom delegate paints rows (no per-row widgets) for smooth dragging
+        self._delegate = NoteItemDelegate(self._list)
+        self._list.setItemDelegate(self._delegate)
         self._apply_list_font_size()
         cfg.navigationFontSize.valueChanged.connect(self._apply_list_font_size)
 
@@ -372,7 +441,7 @@ class NotesPanel(QWidget):
         editor_width = cfg.get(cfg.windowWidth) - list_width
 
         if not cfg.get(cfg.noteListVisible):
-            self._splitter.setSizes([0, list_width + editor_width])
+            self._set_list_collapsed(True, list_width + editor_width)
         else:
             self._splitter.setSizes([list_width, editor_width])
 
@@ -426,55 +495,72 @@ class NotesPanel(QWidget):
 
     # ------------------------------------------------------------------ load
     def _load(self):
+        # Refresh the delegate's cached theme colors once per reload (cheap),
+        # so a theme switch is picked up without per-paint theme lookups.
+        self._delegate.refresh_theme()
         self._list.blockSignals(True)
         self._list.clear()
 
-        if self._trash_mode:
-            notes = self._mgr.get_trash()
-            for note in notes:
-                self._add_note_item(note, indent=False)
-        elif self._current_search_keyword:
+        if self._current_search_keyword:
             notes = self._mgr.search_notes(keyword=self._current_search_keyword, note_types=None)
             for note in notes:
                 self._add_note_item(note, indent=False)
+        elif self._current_tab == _TAB_STICKY:
+            # 便签 tab: flat list of all stickies (no folder structure)
+            stickies = [n for n in self._mgr.get_notes() if n.note_type == _TAB_STICKY]
+            for note in stickies:
+                self._add_note_item(note, indent=False)
         else:
-            # Top-level: folders (with inline expansion) then uncategorized notes
+            # 笔记 tab — folders (with inline expansion) then uncategorized notes
             folders = self._mgr.get_folders()
             for folder in folders:
                 expanded = folder.id in self._expanded_folders
                 f_item = QListWidgetItem()
-                f_item.setData(Qt.ItemDataRole.UserRole, folder.id)
-                f_item.setData(Qt.ItemDataRole.UserRole + 1, "folder")
+                f_item.setData(_ROLE_ID, folder.id)
+                f_item.setData(_ROLE_KIND, "folder")
+                f_item.setData(_ROLE_TITLE, folder.name)
+                f_item.setData(_ROLE_EXPANDED, expanded)
+                # Folder headers are non-selectable, non-draggable and non-drop:
+                # they stay put during a native row move and serve as group
+                # boundaries. A note dragged below a header (into its run of
+                # child rows) is re-assigned to that folder by position in
+                # _on_rows_moved — so drag-into-folder works without Qt nesting.
                 f_item.setFlags(
-                    (f_item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsDragEnabled)
-                    | Qt.ItemFlag.ItemIsDropEnabled
+                    f_item.flags()
+                    & ~Qt.ItemFlag.ItemIsSelectable
+                    & ~Qt.ItemFlag.ItemIsDragEnabled
+                    & ~Qt.ItemFlag.ItemIsDropEnabled
                 )
                 self._list.addItem(f_item)
-                widget = _FolderItem(folder.name, expanded=expanded)
-                f_item.setSizeHint(widget.sizeHint())
-                self._list.setItemWidget(f_item, widget)
 
                 if expanded:
-                    folder_notes = self._mgr.get_notes_in_folder(folder.id)
+                    folder_notes = [
+                        n for n in self._mgr.get_notes_in_folder(folder.id)
+                        if n.note_type != _TAB_STICKY
+                    ]
                     for note in folder_notes:
                         self._add_note_item(note, indent=True)
 
-            # Uncategorized notes (folder_id IS NULL)
+            # Uncategorized notes (folder_id IS NULL), stickies excluded
             all_notes = self._mgr.get_notes()
-            uncategorized = [n for n in all_notes if n.folder_id is None]
+            uncategorized = [
+                n for n in all_notes
+                if n.folder_id is None and n.note_type != _TAB_STICKY
+            ]
 
-            # Add "未分类" section header when folders exist (provides a drop target)
+            # "未分类" section header (purely a visual divider now — no longer a
+            # drop target, matching folders/notes; drag only reorders).
             if folders:
                 uc_item = QListWidgetItem()
-                uc_item.setData(Qt.ItemDataRole.UserRole, None)
-                uc_item.setData(Qt.ItemDataRole.UserRole + 1, "uncategorized")
+                uc_item.setData(_ROLE_ID, None)
+                uc_item.setData(_ROLE_KIND, "uncategorized")
                 uc_item.setFlags(
-                    uc_item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsDragEnabled
+                    uc_item.flags()
+                    & ~Qt.ItemFlag.ItemIsSelectable
+                    & ~Qt.ItemFlag.ItemIsDragEnabled
+                    & ~Qt.ItemFlag.ItemIsDropEnabled
                 )
                 self._list.addItem(uc_item)
-                widget = _UncategorizedSection()
-                uc_item.setSizeHint(widget.sizeHint())
-                self._list.setItemWidget(uc_item, widget)
 
             for note in uncategorized:
                 self._add_note_item(note, indent=False)
@@ -483,7 +569,7 @@ class NotesPanel(QWidget):
 
         # Restore selection
         restore_item = None
-        if self._current_note_id is not None and not self._trash_mode:
+        if self._current_note_id is not None:
             for i in range(self._list.count()):
                 it = self._list.item(i)
                 if (it.data(Qt.ItemDataRole.UserRole + 1) == "note"
@@ -505,17 +591,22 @@ class NotesPanel(QWidget):
     def _add_note_item(self, note, indent: bool):
         """Add a note QListWidgetItem to self._list."""
         date_str = datetime.fromisoformat(note.updated_at).strftime("%m-%d %H:%M")
-        short = note.title[:20] + "…" if len(note.title) > 20 else note.title
-        color = _note_color(note.id)
         item = QListWidgetItem()
-        item.setData(Qt.ItemDataRole.UserRole, note.id)
-        item.setData(Qt.ItemDataRole.UserRole + 1, "note")
-        item.setData(Qt.ItemDataRole.UserRole + 2, note.folder_id)  # for drag-drop folder resolution
+        item.setData(_ROLE_ID, note.id)
+        item.setData(_ROLE_KIND, "note")
+        item.setData(_ROLE_FOLDER, note.folder_id)  # for drag-drop folder resolution
+        item.setData(_ROLE_TITLE, note.title)
+        item.setData(_ROLE_DATE, date_str)
+        item.setData(_ROLE_COLOR, _note_color(note.id))
+        item.setData(_ROLE_INDENT, indent)
         item.setToolTip(note.title)
+        # Notes are draggable (default ItemIsDragEnabled) but NOT drop targets:
+        # clearing ItemIsDropEnabled stops Qt from treating "drop ONTO this note"
+        # as nesting — between-row insertion (the reorder we want) still works via
+        # the list's root item. Folder membership is re-derived from the row's
+        # position after the move (see _on_rows_moved).
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
         self._list.addItem(item)
-        widget = _NoteItemWidget(short, date_str, color, indent=indent)
-        item.setSizeHint(widget.sizeHint())
-        self._list.setItemWidget(item, widget)
 
     def _on_new_folder(self):
         from PyQt6.QtWidgets import QInputDialog
@@ -553,7 +644,21 @@ class NotesPanel(QWidget):
 
     def _on_search(self, keyword: str):
         self._current_search_keyword = keyword
+        self._update_drag_enabled()
         self._load()
+
+    def _on_tab_changed(self, key: str):
+        """Switch the list between 笔记 / 便签 views."""
+        if key == self._current_tab:
+            return
+        self._current_tab = key
+        self._update_drag_enabled()
+        self._load()
+
+    def _update_drag_enabled(self):
+        """Drag-reorder/move only makes sense on the 笔记 tab, outside search."""
+        enabled = self._current_tab == _TAB_NOTE and not self._current_search_keyword
+        self._list.set_drag_enabled(enabled)
 
     def _load_note_into_editor(self, note_id: str):
         note = self._mgr.get(note_id)
@@ -623,7 +728,7 @@ class NotesPanel(QWidget):
         selected = self._list.selectedItems()
         n = len(selected)
 
-        if not self._trash_mode and n == 1:
+        if n == 1:
             item_type = selected[0].data(Qt.ItemDataRole.UserRole + 1)
             item_id = selected[0].data(Qt.ItemDataRole.UserRole)
 
@@ -646,8 +751,7 @@ class NotesPanel(QWidget):
     def _update_editor_visibility(self):
         selected = self._list.selectedItems()
         has_note_selection = (
-            not self._trash_mode
-            and len(selected) == 1
+            len(selected) == 1
             and selected[0].data(Qt.ItemDataRole.UserRole + 1) == "note"
         )
         self._set_editor_enabled(has_note_selection)
@@ -681,38 +785,23 @@ class NotesPanel(QWidget):
 
     # ------------------------------------------------------------------ toolbar state
     def _update_toolbar(self):
-        selected_n = len(self._list.selectedItems())
-        if self._trash_mode:
-            self._new_note_btn.hide()
-            self._new_sticky_btn.hide()
-            self._trash_btn.hide()
-            self._preview_btn.hide()
-            self._back_btn.show()
-            self._restore_btn.show()
-            self._restore_btn.setEnabled(selected_n > 0)
-            self._purge_btn.show()
-            self._purge_btn.setEnabled(selected_n > 0)
-            self._purge_all_btn.show()
-            self._purge_all_btn.setEnabled(self._mgr.trash_count() > 0)
-        else:
-            self._back_btn.hide()
-            self._restore_btn.hide()
-            self._purge_btn.hide()
-            self._purge_all_btn.hide()
-            self._new_note_btn.show()
-            self._new_sticky_btn.show()
-            tc = self._mgr.trash_count()
-            self._trash_btn.setText(f"回收站({tc})" if tc > 0 else "回收站")
-            self._trash_btn.show()
-            # Preview button visibility is managed by _load_note_into_editor
+        # Preview button visibility is managed by _load_note_into_editor
+        pass
 
     # ------------------------------------------------------------------ normal actions
     def _on_new(self, note_type: str = "note"):
         self._flush_current()
         if note_type == "sticky":
             note = self._mgr.create(title="新便签", content="", note_type="sticky")
+            target_tab = _TAB_STICKY
         else:
             note = self._mgr.create(title="新笔记", content="", note_type="note")
+            target_tab = _TAB_NOTE
+
+        # Keep the list on the tab matching the new item so it stays visible
+        if self._current_tab != target_tab:
+            self._current_tab = target_tab
+            self._pivot.setCurrentItem(target_tab)
 
         self._current_note_id = note.id
         self._load()
@@ -740,46 +829,6 @@ class NotesPanel(QWidget):
             self._current_note_id = None
             self._clear_editor()
         self._load()
-
-    # ------------------------------------------------------------------ trash mode
-    def _enter_trash(self):
-        self._flush_current()
-        self._trash_mode = True
-        self._current_search_keyword = ""
-        self._load()
-
-    def _exit_trash(self):
-        self._trash_mode = False
-        self._current_search_keyword = ""
-        self._load()
-
-    def _on_restore(self):
-        selected = self._list.selectedItems()
-        if not selected:
-            return
-        for item in selected:
-            self._mgr.restore(item.data(Qt.ItemDataRole.UserRole))
-        self._load()
-
-    def _on_purge(self):
-        selected = self._list.selectedItems()
-        if not selected:
-            return
-        n = len(selected)
-        msg = (f"确定要永久删除选中的 {n} 条笔记吗？此操作不可撤销！"
-               if n > 1 else "确定要永久删除这条笔记吗？此操作不可撤销！")
-        if self._confirm("永久删除", msg):
-            for item in selected:
-                self._mgr.purge(item.data(Qt.ItemDataRole.UserRole))
-            self._load()
-
-    def _on_purge_all(self):
-        tc = self._mgr.trash_count()
-        if tc == 0:
-            return
-        if self._confirm("清空回收站", f"确定要永久删除回收站中全部 {tc} 条笔记吗？此操作不可撤销！"):
-            self._mgr.purge_all()
-            self._load()
 
     def _update_editor_margins(self, width: int):
         """Keep editor content centered with equal side margins when wider than max width."""
@@ -836,20 +885,20 @@ class NotesPanel(QWidget):
             self._status_label.setText("已保存")
             self._status_timer.start()
             self.note_updated.emit(self._current_note_id, title, content)
-            for i in range(self._list.count()):
-                item = self._list.item(i)
-                if (item.data(Qt.ItemDataRole.UserRole + 1) == "note"
-                        and item.data(Qt.ItemDataRole.UserRole) == self._current_note_id):
-                    date_str = datetime.fromisoformat(note.updated_at).strftime("%m-%d %H:%M")
-                    short = note.title[:20] + "…" if len(note.title) > 20 else note.title
-                    self._list.blockSignals(True)
-                    widget = self._list.itemWidget(item)
-                    if isinstance(widget, _NoteItemWidget):
-                        widget.update_text(short, date_str)
-                        item.setSizeHint(widget.sizeHint())
-                    item.setToolTip(note.title)
-                    self._list.blockSignals(False)
-                    break
+            self._update_note_item_text(self._current_note_id, note.title, note.updated_at)
+
+    def _update_note_item_text(self, note_id, title: str, updated_at: str):
+        """Refresh a note row's title/date in place (delegate repaints from data)."""
+        date_str = datetime.fromisoformat(updated_at).strftime("%m-%d %H:%M")
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if (item.data(_ROLE_KIND) == "note"
+                    and item.data(_ROLE_ID) == note_id):
+                item.setData(_ROLE_TITLE, title)
+                item.setData(_ROLE_DATE, date_str)
+                item.setToolTip(title)
+                self._list.update(self._list.indexFromItem(item))
+                break
 
     def _clear_editor(self):
         self._title_edit.blockSignals(True)
@@ -881,19 +930,6 @@ class NotesPanel(QWidget):
         item = self._list.itemAt(pos)
         global_pos = self._list.viewport().mapToGlobal(pos)
 
-        if self._trash_mode:
-            if not item:
-                return
-            note_id = item.data(Qt.ItemDataRole.UserRole)
-            menu = ContextMenu(parent=self)
-            menu.addAction(Action(FluentIcon.HISTORY, "恢复",
-                                  triggered=lambda: (self._mgr.restore(note_id), self._load())))
-            menu.addSeparator()
-            menu.addAction(Action(FluentIcon.DELETE, "永久删除",
-                                  triggered=lambda: self._confirm_purge([item])))
-            menu.exec(global_pos)
-            return
-
         menu = ContextMenu(parent=self)
 
         if item:
@@ -902,8 +938,7 @@ class NotesPanel(QWidget):
 
             if item_type == "folder":
                 folder_id = item_id
-                widget = self._list.itemWidget(item)
-                folder_name = widget._name_lbl.text() if widget else ""
+                folder_name = item.data(_ROLE_TITLE) or ""
                 menu.addAction(Action(FluentIcon.EDIT, "重命名",
                                       triggered=lambda: self._rename_folder_dialog(folder_id, folder_name)))
                 menu.addSeparator()
@@ -957,6 +992,11 @@ class NotesPanel(QWidget):
                                   triggered=lambda: self._on_new("note")))
             menu.addAction(Action(FluentIcon.PIN, "新建便签",
                                   triggered=lambda: self._on_new("sticky")))
+            # New folder only applies to the 笔记 view (stickies have no folders)
+            if self._current_tab == _TAB_NOTE:
+                menu.addSeparator()
+                menu.addAction(Action(FluentIcon.FOLDER_ADD, "新建文件夹",
+                                      triggered=self._on_new_folder))
 
         menu.exec(global_pos)
 
@@ -1029,15 +1069,6 @@ class NotesPanel(QWidget):
         self._mgr.delete(note_id)
         self._load()
 
-    def _confirm_purge(self, items: list):
-        n = len(items)
-        msg = (f"确定要永久删除选中的 {n} 条笔记吗？此操作不可撤销！"
-               if n > 1 else "确定要永久删除这条笔记吗？此操作不可撤销！")
-        if self._confirm("永久删除", msg):
-            for item in items:
-                self._mgr.purge(item.data(Qt.ItemDataRole.UserRole))
-            self._load()
-
     def _show_status(self, msg: str):
         self._status_label.setText(msg)
         self._status_timer.start()
@@ -1048,6 +1079,49 @@ class NotesPanel(QWidget):
         if folder_id is not None:
             self._expanded_folders.add(folder_id)
         self._current_note_id = note_id
+        self._load()
+        self._show_status("已移动")
+
+    # ------------------------------------------------------------------ drag & drop
+    def _on_rows_moved(self, *_):
+        """Persist order/folders after Qt natively moved rows.
+
+        Walk the list top-to-bottom. Folder / "未分类" headers are non-draggable
+        so they keep their positions and act as group boundaries: every note row
+        belongs to the nearest header above it (a folder header → that folder; an
+        "未分类" header or the top of the list → top level). We rebuild each
+        group's ordered note ids and persist via ``reorder_notes`` (which also
+        rewrites folder_id, so notes dragged across a boundary move folders).
+        """
+        groups: dict[int | None, list[int]] = {}
+        current_folder: int | None = None
+        touched_folders: set[int | None] = set()
+
+        for i in range(self._list.count()):
+            it = self._list.item(i)
+            kind = it.data(_ROLE_KIND)
+            if kind == "folder":
+                current_folder = it.data(_ROLE_ID)
+                touched_folders.add(current_folder)
+            elif kind == "uncategorized":
+                current_folder = None
+            elif kind == "note":
+                groups.setdefault(current_folder, []).append(it.data(_ROLE_ID))
+
+        for folder_id, ordered in groups.items():
+            self._mgr.reorder_notes(ordered, folder_id)
+        # A collapsed folder shows no child rows, so it won't appear in `groups`;
+        # leave its stored order untouched (notes never left it during this move).
+
+        for folder_id in touched_folders:
+            if folder_id is not None:
+                self._expanded_folders.add(folder_id)
+
+        # Reload off the event loop: rebuilding the list inside the model's
+        # rowsMoved emission re-enters the model mid-drop. Defer one tick.
+        QTimer.singleShot(0, self._reload_after_move)
+
+    def _reload_after_move(self):
         self._load()
         self._show_status("已移动")
 
@@ -1092,17 +1166,35 @@ class NotesPanel(QWidget):
         if win in self._pin_windows:
             self._pin_windows.remove(win)
 
+    def _set_list_collapsed(self, collapsed: bool, total: int | None = None):
+        """Collapse/expand the list panel reliably.
+
+        ``setChildrenCollapsible(False)`` + the panel's ``minimumWidth`` keep the
+        user from accidentally dragging the splitter to 0, but they also clamp a
+        programmatic ``setSizes([0, …])`` back up to the minimum. So we drop the
+        constraints only for the duration of a programmatic collapse, then restore
+        them once the panel is visible again.
+        """
+        if total is None:
+            total = sum(self._splitter.sizes()) or cfg.get(cfg.windowWidth)
+        if collapsed:
+            self._list_panel.setMinimumWidth(0)
+            self._splitter.setChildrenCollapsible(True)
+            self._splitter.setSizes([0, total])
+        else:
+            self._list_panel.setMinimumWidth(120)
+            self._splitter.setChildrenCollapsible(False)
+            width = self._saved_list_width or cfg.get(cfg.noteListWidth)
+            self._splitter.setSizes([width, total - width])
+
     def _toggle_note_list(self):
         sizes = self._splitter.sizes()
         total = sum(sizes)
-        list_width = sizes[0]
-
-        if list_width > 0:
-            self._saved_list_width = list_width
-            self._splitter.setSizes([0, total])
+        if sizes[0] > 0:
+            self._saved_list_width = sizes[0]
+            self._set_list_collapsed(True, total)
         else:
-            width = self._saved_list_width or cfg.get(cfg.noteListWidth)
-            self._splitter.setSizes([width, total - width])
+            self._set_list_collapsed(False, total)
 
     def toggle_list(self):
         """Public: toggle note list visibility (called from TitleBar)."""
@@ -1113,8 +1205,7 @@ class NotesPanel(QWidget):
         self._on_search(keyword)
 
     def refresh(self):
-        if not self._trash_mode:
-            self._load()
+        self._load()
 
     def refresh_note(self, note_id: int):
         if self._current_note_id == note_id:
@@ -1145,19 +1236,6 @@ class NotesPanel(QWidget):
                         self._md_editor.setPlainText(note.content)
                         self._md_editor.blockSignals(False)
 
-        for i in range(self._list.count()):
-            item = self._list.item(i)
-            if (item.data(Qt.ItemDataRole.UserRole + 1) == "note"
-                    and item.data(Qt.ItemDataRole.UserRole) == note_id):
-                note = self._mgr.get(note_id)
-                if note:
-                    date_str = datetime.fromisoformat(note.updated_at).strftime("%m-%d %H:%M")
-                    short = note.title[:20] + "…" if len(note.title) > 20 else note.title
-                    self._list.blockSignals(True)
-                    widget = self._list.itemWidget(item)
-                    if isinstance(widget, _NoteItemWidget):
-                        widget.update_text(short, date_str)
-                        item.setSizeHint(widget.sizeHint())
-                    item.setToolTip(note.title)
-                    self._list.blockSignals(False)
-                break
+        note = self._mgr.get(note_id)
+        if note:
+            self._update_note_item_text(note_id, note.title, note.updated_at)
