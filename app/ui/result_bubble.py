@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 import threading
 
 from PyQt6.QtCore import QPoint, QRect, QRectF, Qt, pyqtSignal
@@ -28,20 +27,13 @@ from PyQt6.QtWidgets import (
 from app.core.config import cfg
 from app.core.llm_gateway import CancellationToken, LLMGateway
 from app.ui import style
+from app.ui.global_click_watcher import GlobalClickWatcher
+from app.ui.non_activating_popup import NonActivatingPopup
+from app.ui.popup_geometry import GAP_PX as _GAP_PX
+from app.ui.popup_geometry import place_below_anchor
 from app.ui.text_actions import get_text_action
 
 logger = logging.getLogger(__name__)
-
-try:
-    import mouse as _mouse
-
-    _MOUSE_OK = True
-except ImportError:
-    _MOUSE_OK = False
-
-# Win32 常量
-_GWL_EXSTYLE = -20
-_WS_EX_NOACTIVATE = 0x08000000
 
 # 布局参数：气泡宽高自适应内容，但限制上下界。
 _BUBBLE_MIN_WIDTH = 240
@@ -50,7 +42,6 @@ _BUBBLE_MIN_HEIGHT = 80
 _BUBBLE_MAX_HEIGHT = 420
 _H_MARGIN = 16   # 内容区左右内边距之和（8 + 8）
 _V_CHROME = 44   # 上下内边距 + footer 工具栏高度的预留
-_GAP_PX = 4
 
 
 class _BubbleWorker(threading.Thread):
@@ -92,7 +83,7 @@ class _BubbleWorker(threading.Thread):
                 self._on_error(str(e))
 
 
-class ResultBubble(QFrame):
+class ResultBubble(NonActivatingPopup):
     """划词结果气泡：就地流式显示 LLM 快查结果。"""
 
     # 信号
@@ -105,7 +96,11 @@ class ResultBubble(QFrame):
         super().__init__(parent)
         self._cached_geo: QRect | None = None
         self._cached_geo_physical: QRect | None = None
-        self._mouse_hook = None
+        self._click_watcher = GlobalClickWatcher(
+            geometry_provider=lambda: self._cached_geo_physical,
+            on_hide_requested=self._hide_requested.emit,
+            owner_name="ResultBubble",
+        )
         self._bg_color = QColor("#1E1E1E")
         self._border_color = QColor("#333333")
         self._cancel_token: CancellationToken | None = None
@@ -129,15 +124,9 @@ class ResultBubble(QFrame):
     # ── 窗口设置 ────────────────────────────────────────────────────────
 
     def _build_window(self):
+        # 窗口标志与不激活属性由 NonActivatingPopup 基类设置；这里补气泡专有的
+        # 自绘背景属性与尺寸约束。
         self.setObjectName("resultBubble")
-        self.setWindowFlags(
-            Qt.WindowType.Tool
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.NoDropShadowWindowHint
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setMinimumWidth(_BUBBLE_MIN_WIDTH)
         self.setMaximumWidth(_BUBBLE_MAX_WIDTH)
@@ -268,41 +257,21 @@ class ResultBubble(QFrame):
         """按当前宽高与锚点重新摆放气泡，并做屏幕边缘修正。
 
         水平居中对齐锚点 x；默认置于锚点 y 下方，底部空间不足则翻到上方；
-        左右越界则贴边。同步刷新供 mouse hook 比对的物理像素几何。
+        左右越界则贴边。同步刷新供 mouse hook 比对的物理像素几何（缩放屏上
+        点击气泡内部也能正确判定为「内部」，不误关）。
         """
         w, h = self.width(), self.height()
-        px = self._anchor_x - w // 2
-        py = self._anchor_y + _GAP_PX
-
-        screen = QApplication.screenAt(QPoint(px + w // 2, py)) \
+        screen = QApplication.screenAt(QPoint(self._anchor_x, self._anchor_y + _GAP_PX)) \
             or QApplication.primaryScreen()
-        if screen is not None:
-            geo = screen.availableGeometry()
-            if px + w > geo.right():
-                px = geo.right() - w
-            if px < geo.left():
-                px = geo.left()
-            if py + h > geo.bottom():
-                py = self._anchor_y - h - _GAP_PX  # 翻到选区上方
-            if py < geo.top():
-                py = geo.top()
+        screen_geo = screen.availableGeometry() if screen is not None else None
+        scale = screen.devicePixelRatio() if screen is not None else 1.0
 
-        self._cached_geo = QRect(px, py, w, h)
-        self.move(px, py)
-
-        # 全局 mouse hook 拿到的是物理像素，这里换算出物理坐标的几何，
-        # 供 _on_global_event 比对 —— 否则在缩放屏（125%/150%）上点击气泡
-        # 内部也会被判成「外部」而误关。
-        scale = 1.0
-        try:
-            if screen is not None:
-                scale = screen.devicePixelRatio()
-        except Exception:
-            pass
-        self._cached_geo_physical = QRect(
-            round(px * scale), round(py * scale),
-            round(w * scale), round(h * scale),
+        placed = place_below_anchor(
+            w, h, self._anchor_x, self._anchor_y, screen_geo, scale
         )
+        self._cached_geo = placed.logical
+        self._cached_geo_physical = placed.physical
+        self.move(placed.logical.x(), placed.logical.y())
 
     # ── 流式文本处理 ────────────────────────────────────────────────────
 
@@ -370,68 +339,13 @@ class ResultBubble(QFrame):
     def hideEvent(self, event):
         super().hideEvent(event)
         self._cancel_current()
-        self._remove_click_watcher()
+        self._click_watcher.remove()
 
-    # ── Win32 防激活 ────────────────────────────────────────────────────
+    # ── 显示：不激活样式由基类处理，这里挂全局点击监听 ──────────────────
 
     def showEvent(self, event):
-        super().showEvent(event)
-        self._apply_no_activate()
-        self._install_click_watcher()
-
-    def _apply_no_activate(self):
-        if sys.platform != "win32":
-            return
-        try:
-            import ctypes
-
-            hwnd = int(self.winId())
-            user32 = ctypes.windll.user32
-            ex_style = user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
-            user32.SetWindowLongW(
-                hwnd, _GWL_EXSTYLE, ex_style | _WS_EX_NOACTIVATE
-            )
-        except Exception:
-            logger.warning(
-                "ResultBubble: WS_EX_NOACTIVATE 设置失败", exc_info=True
-            )
-
-    # ── 全局点击监听 ────────────────────────────────────────────────────
+        super().showEvent(event)  # NonActivatingPopup 负责 WS_EX_NOACTIVATE
+        self._click_watcher.install()
 
     def _on_hide_requested(self):
         self.hide()
-
-    def _install_click_watcher(self):
-        if not _MOUSE_OK:
-            return
-        if self._mouse_hook is not None:
-            return
-        try:
-            self._mouse_hook = _mouse.hook(self._on_global_event)
-        except Exception:
-            logger.warning("ResultBubble: mouse hook 安装失败", exc_info=True)
-
-    def _remove_click_watcher(self):
-        if self._mouse_hook is None:
-            return
-        try:
-            _mouse.unhook(self._mouse_hook)
-        except Exception:
-            logger.warning("ResultBubble: mouse hook 卸载失败", exc_info=True)
-            return
-        self._mouse_hook = None
-
-    def _on_global_event(self, event):
-        event_type = getattr(event, "event_type", None)
-        if event_type != "down":
-            return
-        button = getattr(event, "button", None)
-        if button == _mouse.RIGHT:
-            self._hide_requested.emit()
-            return
-        if button == _mouse.LEFT:
-            geo = self._cached_geo_physical
-            if geo is not None:
-                x, y = _mouse.get_position()
-                if not geo.contains(x, y):
-                    self._hide_requested.emit()

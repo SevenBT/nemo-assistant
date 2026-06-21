@@ -26,8 +26,6 @@
 from __future__ import annotations
 
 import logging
-import sys
-from collections.abc import Callable
 
 from PyQt6.QtCore import (
     QEvent,
@@ -48,16 +46,13 @@ from qfluentwidgets import TransparentToolButton
 
 from app.ui import style
 from app.ui.float_tooltip import FloatTooltip
+from app.ui.global_click_watcher import GlobalClickWatcher
+from app.ui.non_activating_popup import NonActivatingPopup
+from app.ui.popup_geometry import GAP_PX as _GAP_PX
+from app.ui.popup_geometry import place_below_anchor
 from app.ui.text_actions import get_active_text_actions
 
 logger = logging.getLogger(__name__)
-
-try:
-    import mouse as _mouse
-
-    _MOUSE_OK = True
-except ImportError:
-    _MOUSE_OK = False
 
 
 def _build_popup_style(theme: dict) -> str:
@@ -89,9 +84,6 @@ def _build_popup_style(theme: dict) -> str:
     }}
 """
 
-# 浮标与选区之间的间距（px）。
-_GAP_PX = 4
-
 # 卡片圆角半径（px），需与 QSS 的 border-radius 保持一致。
 _CARD_RADIUS_PX = 5
 
@@ -101,12 +93,8 @@ _ICON_PX = 14
 # 鼠标移开后自动消失的延迟（ms）。
 _AUTO_HIDE_MS = 2000
 
-# Win32 扩展样式常量（用于 WS_EX_NOACTIVATE，让窗口点击不抢焦点）。
-_GWL_EXSTYLE = -20
-_WS_EX_NOACTIVATE = 0x08000000
 
-
-class TextActionPopup(QFrame):
+class TextActionPopup(NonActivatingPopup):
     """无边框、不抢焦点的划词动作条。"""
 
     action_chosen = pyqtSignal(str)       # 点击动作：气泡快查 / 存便签
@@ -116,8 +104,12 @@ class TextActionPopup(QFrame):
         super().__init__(parent)
         self._cached_geo: QRect | None = None
         self._cached_geo_physical: QRect | None = None
-        self._mouse_hook: Callable | None = None
         self._tooltip = FloatTooltip()
+        self._click_watcher = GlobalClickWatcher(
+            geometry_provider=lambda: self._cached_geo_physical,
+            on_hide_requested=self._hide_requested.emit,
+            owner_name="TextActionPopup",
+        )
         self._build_window()
         self._build_layout()
         self._auto_hide = QTimer(self)
@@ -128,15 +120,9 @@ class TextActionPopup(QFrame):
     # ── 窗口设置 ────────────────────────────────────────────────────────
 
     def _build_window(self):
+        # 窗口标志与不激活属性由 NonActivatingPopup 基类统一设置，这里只需
+        # 给对象命名（供 QSS 选择器定位）。
         self.setObjectName("textActionBar")
-        self.setWindowFlags(
-            Qt.WindowType.Tool
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.NoDropShadowWindowHint
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
     def _build_layout(self):
         """建外层布局；按钮行在每次 show_at 时重建（见 _rebuild_buttons）。
@@ -207,85 +193,20 @@ class TextActionPopup(QFrame):
         theme = style.get_current_theme()
         self.setStyleSheet(_build_popup_style(theme))
 
-    # ── Win32 防激活 ────────────────────────────────────────────────────
+    # ── 显示/隐藏：不激活样式由基类处理，这里挂点击监听与 tooltip 清理 ──
 
     def showEvent(self, event):
-        super().showEvent(event)
-        self._apply_no_activate()
-        self._install_click_watcher()
+        super().showEvent(event)  # NonActivatingPopup 负责 WS_EX_NOACTIVATE
+        self._click_watcher.install()
 
     def hideEvent(self, event):
         super().hideEvent(event)
         self._tooltip.cancel()
-        self._remove_click_watcher()
-
-    def _apply_no_activate(self):
-        if sys.platform != "win32":
-            return
-        try:
-            import ctypes
-
-            hwnd = int(self.winId())
-            user32 = ctypes.windll.user32
-            ex_style = user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
-            user32.SetWindowLongW(
-                hwnd, _GWL_EXSTYLE, ex_style | _WS_EX_NOACTIVATE
-            )
-        except Exception:
-            logger.warning(
-                "WS_EX_NOACTIVATE 设置失败，弹窗点击可能抢夺焦点",
-                exc_info=True,
-            )
-
-    # ── 全局点击监听（mouse hook 线程 → pyqtSignal → 主线程） ──────────
+        self._click_watcher.remove()
 
     def _on_hide_requested(self):
         """主线程 slot：收到 hook 线程的关闭请求后执行实际 hide。"""
         self.hide()
-
-    def _install_click_watcher(self):
-        """安装全局 mouse hook，监听弹窗外的点击以便立即关闭。"""
-        if not _MOUSE_OK:
-            return
-        if self._mouse_hook is not None:
-            return
-        try:
-            self._mouse_hook = _mouse.hook(self._on_global_event)
-        except Exception:
-            logger.warning("mouse hook 安装失败，点击弹窗外部将无法关闭",
-                           exc_info=True)
-
-    def _remove_click_watcher(self):
-        if self._mouse_hook is None:
-            return
-        try:
-            _mouse.unhook(self._mouse_hook)
-        except Exception:
-            logger.warning("mouse hook 卸载失败", exc_info=True)
-            return  # 保留引用，避免下次 show 时重复安装导致泄漏
-        self._mouse_hook = None
-
-    def _on_global_event(self, event):
-        """mouse hook 回调（在 hook 线程执行）。
-
-        右键任意位置 → 立即关闭。
-        左键点弹窗以外区域 → 关闭；点在弹窗内（按钮 / 背景）→ 不干涉，
-        由 Qt 事件循环在主线处理：按钮 clicked → _on_clicked → hide，
-        背景 mousePressEvent → hide。
-        """
-        event_type = getattr(event, "event_type", None)
-        if event_type != "down":
-            return
-        button = getattr(event, "button", None)
-        if button == _mouse.RIGHT:
-            self._hide_requested.emit()
-            return
-        if button == _mouse.LEFT:
-            geo = self._cached_geo_physical  # 物理像素几何，抓本地引用避免竞争
-            if geo is not None:
-                x, y = _mouse.get_position()
-                if not geo.contains(x, y):
-                    self._hide_requested.emit()
 
     # ── 动作处理 ──────────────────────────────────────────────────────────
 
@@ -318,45 +239,25 @@ class TextActionPopup(QFrame):
         self._apply_theme_style()
         self.adjustSize()
         w, h = self.width(), self.height()
-        # 浮标居中对齐 x，顶边落在 y + _GAP_PX 处。
-        px = x - w // 2
-        py = y + _GAP_PX
 
         # ★ 用目标坐标查屏幕，不能用 mapToGlobal(self.rect().center())——
         # 此时弹窗尚未 move，其当前全局位置是 show 前残留的旧位置，
         # 用旧位置 screenAt 可能拿到错误的屏幕 → wrong availableGeometry
         # → 边缘修正把弹窗推到奇怪位置（表现就是「位置随机」）。
-        screen = QApplication.screenAt(QPoint(px + w // 2, py)) \
+        screen = QApplication.screenAt(QPoint(x, y + _GAP_PX)) \
             or QApplication.primaryScreen()
-        if screen is not None:
-            geo = screen.availableGeometry()
-            if px + w > geo.right():
-                px = geo.right() - w
-            if px < geo.left():
-                px = geo.left()
-            if py + h > geo.bottom():
-                py = y - h - _GAP_PX  # 翻到选区上方
-            if py < geo.top():
-                py = geo.top()
+        screen_geo = screen.availableGeometry() if screen is not None else None
+        scale = screen.devicePixelRatio() if screen is not None else 1.0
 
-        self._cached_geo = QRect(px, py, w, h)
+        # 边缘修正 + 物理像素几何换算下沉到 place_below_anchor。物理几何供全局
+        # mouse hook 在缩放屏（125%/150%）上比对命中，否则点击按钮被判成「弹窗
+        # 外」、hook 在按下瞬间就 hide，与按钮 pressed/released 抢跑（表现为
+        # 「单击不触发 / 长按仍出气泡」）。
+        placed = place_below_anchor(w, h, x, y, screen_geo, scale)
+        self._cached_geo = placed.logical
+        self._cached_geo_physical = placed.physical
 
-        # 全局 mouse hook 拿到的是物理像素，需换算出物理坐标的几何供比对——
-        # 否则在缩放屏（125%/150%）上点击按钮也会被判成「弹窗外」，hook 在按下
-        # 瞬间就 hide 弹窗，与按钮 pressed/released 抢跑：表现为「单击不触发 /
-        # 长按仍出气泡」。
-        scale = 1.0
-        try:
-            if screen is not None:
-                scale = screen.devicePixelRatio()
-        except Exception:
-            pass
-        self._cached_geo_physical = QRect(
-            round(px * scale), round(py * scale),
-            round(w * scale), round(h * scale),
-        )
-
-        self.move(px, py)
+        self.move(placed.logical.x(), placed.logical.y())
         self.show()
         self.raise_()
         self._auto_hide.start(_AUTO_HIDE_MS)

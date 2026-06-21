@@ -11,22 +11,18 @@ QLabel：hover 进按钮后延迟显示在按钮下方，移出即隐藏。
 from __future__ import annotations
 
 import logging
-import sys
 
 from PyQt6.QtCore import QPoint, Qt, QTimer
 from PyQt6.QtWidgets import QLabel
 
 from app.ui import style
+from app.ui.non_activating_popup import apply_no_activate
+from app.ui.popup_geometry import GAP_PX as _GAP_PX
 
 logger = logging.getLogger(__name__)
 
 # hover 多久后才显示 tooltip（ms）。
 _SHOW_DELAY_MS = 400
-# tooltip 与按钮之间的竖直间距（px）。
-_GAP_PX = 4
-
-_GWL_EXSTYLE = -20
-_WS_EX_NOACTIVATE = 0x08000000
 
 
 def _build_style(theme: dict) -> str:
@@ -91,16 +87,4 @@ class FloatTooltip(QLabel):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if sys.platform != "win32":
-            return
-        try:
-            import ctypes
-
-            hwnd = int(self.winId())
-            user32 = ctypes.windll.user32
-            ex_style = user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
-            user32.SetWindowLongW(
-                hwnd, _GWL_EXSTYLE, ex_style | _WS_EX_NOACTIVATE
-            )
-        except Exception:
-            logger.warning("FloatTooltip: WS_EX_NOACTIVATE 设置失败", exc_info=True)
+        apply_no_activate(self)
