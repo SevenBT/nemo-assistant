@@ -667,14 +667,17 @@ class NoteManager:
             where_clause = " AND ".join(conditions)
 
             # 如果有关键词，按相关性排序（标题匹配优先）
+            # 注意：ORDER BY 的参数必须追加在所有 WHERE 参数之后（SQL 中 ORDER BY 在 WHERE 之后）
+            order_params: list = []
             if keyword:
                 keywords = keyword.strip().split()
-                # 计算标题匹配分数
+                # 计算标题匹配分数（关键词参数化，避免 SQL 注入）
                 title_match_cases = []
                 for kw in keywords:
                     title_match_cases.append(
-                        f"(CASE WHEN LOWER(n.title) LIKE LOWER('%{kw}%') THEN 1 ELSE 0 END)"
+                        "(CASE WHEN LOWER(n.title) LIKE LOWER(?) THEN 1 ELSE 0 END)"
                     )
+                    order_params.append(f"%{kw}%")
                 title_match_score = " + ".join(title_match_cases)
                 order_clause = f"({title_match_score}) DESC, n.updated_at DESC"
             else:
@@ -686,7 +689,7 @@ class NoteManager:
                 ORDER BY {order_clause}
             """
 
-            cursor = conn.execute(query, params)
+            cursor = conn.execute(query, params + order_params)
             notes = [Note.from_row(row) for row in cursor.fetchall()]
             for note in notes:
                 note.tags = self._get_note_tags(conn, note.id)

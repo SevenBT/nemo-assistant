@@ -222,7 +222,7 @@ class StickyNoteWindow(QWidget):
     # Signal emitted when user requests deletion from title bar menu
     delete_requested = pyqtSignal(int)
 
-    def __init__(self, note_id: str, title: str, content: str,
+    def __init__(self, note_id: int, title: str, content: str,
                  note_mgr=None, parent=None):
         super().__init__(parent)
         self._note_id = note_id

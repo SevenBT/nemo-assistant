@@ -112,9 +112,16 @@ class MarkdownEditor(QPlainTextEdit):
     def _highlight_current_line(self) -> None:
         extras: list[QTextEdit.ExtraSelection] = []
         sel = QTextEdit.ExtraSelection()
-        bg_color = self.palette().color(QPalette.ColorRole.Base)
-        is_dark = bg_color.lightness() < 128
-        sel.format.setBackground(QColor("#3A3A3A") if is_dark else QColor("#F5F5FF"))
+        # 深浅判断从 style._current_dark_mode 读取，palette lightness 在 FluentWindow 下不可靠
+        try:
+            from app.ui.style import _current_dark_mode
+            is_dark = _current_dark_mode
+        except Exception:
+            is_dark = self.palette().color(QPalette.ColorRole.Base).lightness() < 128
+        # 用半透明叠加而非写死颜色：暗色叠淡白、浅色叠淡黑，
+        # 这样当前行只在任意主题底色上微微提亮/压暗，绝不会出现突兀的黑块
+        highlight = QColor(255, 255, 255, 20) if is_dark else QColor(0, 0, 0, 14)
+        sel.format.setBackground(highlight)
         sel.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
         sel.cursor = self.textCursor()
         sel.cursor.clearSelection()
@@ -123,7 +130,12 @@ class MarkdownEditor(QPlainTextEdit):
 
     # ------------------------------------------------------------------ text color (FluentWindow fix)
     def _apply_text_color(self):
-        """Force text color to follow theme (FluentWindow overrides palette)."""
+        """Force text color to follow theme (FluentWindow overrides palette).
+
+        QPlainTextEdit 没有 setTextColor（那是 QTextEdit 的方法），用
+        setCurrentCharFormat 设置新输入的前景色，再 mergeCurrentCharFormat
+        让颜色应用到当前光标位置，确保不被 FluentWindow 内部样式覆盖。
+        """
         try:
             from app.ui.style import get_text_color
             color = get_text_color()
@@ -132,6 +144,7 @@ class MarkdownEditor(QPlainTextEdit):
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(color))
         self.setCurrentCharFormat(fmt)
+        self.mergeCurrentCharFormat(fmt)
         self._highlighter.set_default_text_color(color)
 
     def focusInEvent(self, event):

@@ -195,7 +195,7 @@ class NotesPanel(QWidget):
     def __init__(self, note_mgr: NoteManager, parent=None):
         super().__init__(parent)
         self._mgr = note_mgr
-        self._current_note_id: str | None = None
+        self._current_note_id: int | None = None
         self._trash_mode = False
         self._pin_windows: list = []
         self._current_search_keyword: str = ""
@@ -276,7 +276,7 @@ class NotesPanel(QWidget):
         # ── List | Editor splitter ───────────────────────────────────
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
         self._splitter.setHandleWidth(6)
-        self._splitter.setChildrenCollapsible(True)
+        self._splitter.setChildrenCollapsible(False)
 
         # Left: note list
         self._list_panel = QWidget()
