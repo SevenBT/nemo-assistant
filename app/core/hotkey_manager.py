@@ -4,7 +4,11 @@
 使用 keyboard 库注册系统级热键，回调通过 PyQt6 信号自动
 从 keyboard hook 线程 marshal 回 Qt 主线程。
 """
+import logging
+
 from PyQt6.QtCore import QObject, pyqtSignal
+
+logger = logging.getLogger(__name__)
 
 try:
     import keyboard as _kb
@@ -91,5 +95,7 @@ class HotkeyManager(QObject):
     def _safe_add(self, combo: str, callback):
         try:
             _kb.add_hotkey(combo, callback, suppress=False)
-        except Exception as e:
-            print(f"[HotkeyManager] Failed to register '{combo}': {e}")
+        except Exception:
+            logger.warning(
+                "HotkeyManager: 注册热键 '%s' 失败", combo, exc_info=True
+            )

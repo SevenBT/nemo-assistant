@@ -133,7 +133,6 @@ class MainWindow(FluentWindow):
         self._selection_controller = SelectionController(
             self,
             note_mgr=self._notes,
-            text_session_callback=self._chat_session_controller.start_text_session,
             compose_callback=self._chat_session_controller.compose_in_reading,
             notify=self._notify_signal.emit,
             on_note_saved=self._note_created_signal.emit,

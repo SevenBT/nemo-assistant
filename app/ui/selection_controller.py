@@ -39,7 +39,6 @@ class SelectionController(QObject):
         window,
         *,
         note_mgr,
-        text_session_callback,
         compose_callback=None,
         notify=None,
         on_note_saved=None,
@@ -48,8 +47,6 @@ class SelectionController(QObject):
         Args:
             window: 主窗口，AI 动作需要 show/raise 它。
             note_mgr: NoteManager，用于「存便签」。
-            text_session_callback: 形如 start_text_session(text, action)。
-                compose 回调缺失时的兜底（新建普通会话 + 主窗）。
             compose_callback: 形如 compose_in_reading(text, *, force_new)。续入/新建
                 把选中文填进（激活或新建的）快速会话输入框，等用户手动发。
             notify: 可选 (title, body) -> None，用于 toast 提示。
@@ -58,7 +55,6 @@ class SelectionController(QObject):
         super().__init__(window)
         self._window = window
         self._notes = note_mgr
-        self._text_session = text_session_callback
         self._compose = compose_callback
         self._notify = notify
         self._on_note_saved = on_note_saved
@@ -170,14 +166,6 @@ class SelectionController(QObject):
             return
         self._restore_window()
         self._compose(text, force_new=action.forces_new_reading)
-
-    def _dispatch_to_ai(self, text: str, action):
-        """原始行为：新建会话，主窗口显示。"""
-        if self._text_session is None:
-            logger.warning("划词：未配置 text_session_callback")
-            return
-        self._restore_window()
-        self._text_session(text, action)
 
     def _restore_window(self):
         """唤起主窗：最小化时 showNormal 还原，隐藏时 show，再抢焦点。

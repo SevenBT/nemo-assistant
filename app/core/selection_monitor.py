@@ -11,12 +11,15 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import time
 from ctypes import wintypes
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from app.core import selection_uia
+
+logger = logging.getLogger(__name__)
 
 try:
     import mouse as _mouse
@@ -230,8 +233,10 @@ class SelectionMonitor(QObject):
         try:
             self._hook = _mouse.hook(self._on_event)
             self._enabled = True
-        except Exception as e:  # pragma: no cover - 依赖系统钩子
-            print(f"[SelectionMonitor] Failed to install hook: {e}")
+        except Exception:  # pragma: no cover - 依赖系统钩子
+            logger.warning(
+                "SelectionMonitor: 安装鼠标钩子失败", exc_info=True
+            )
 
     def stop(self):
         """停用划词监听，移除鼠标钩子。"""
