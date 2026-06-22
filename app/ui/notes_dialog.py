@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QSplitter,
     QStyle,
@@ -305,27 +306,12 @@ class NotesPanel(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
-        # ── Toolbar (top, left-aligned) ──────────────────────────────
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(6)
-        toolbar.setContentsMargins(0, 0, 0, 0)
-
-        self._preview_btn = TogglePushButton(FluentIcon.VIEW, "预览")
-        self._preview_btn.clicked.connect(self._on_preview_clicked)
-        self._preview_btn.hide()
-        toolbar.addWidget(self._preview_btn)
-
-        toolbar.addStretch()
-
+        # Status label + timer (shown in the editor header row, see below)
         self._status_label = CaptionLabel()
-        toolbar.addWidget(self._status_label)
-
         self._status_timer = QTimer(self)
         self._status_timer.setSingleShot(True)
         self._status_timer.setInterval(2000)
         self._status_timer.timeout.connect(self._status_label.clear)
-
-        layout.addLayout(toolbar)
 
         # ── List | Editor splitter ───────────────────────────────────
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -389,6 +375,20 @@ class NotesPanel(QWidget):
         right_layout.setContentsMargins(16, 12, 16, 12)
         right_layout.setSpacing(6)
 
+        # Editor header: preview toggle + status, level with the list tabs
+        editor_header = QHBoxLayout()
+        editor_header.setContentsMargins(0, 0, 0, 0)
+        editor_header.setSpacing(6)
+
+        self._preview_btn = TogglePushButton(FluentIcon.VIEW, "预览")
+        self._preview_btn.clicked.connect(self._on_preview_clicked)
+        self._preview_btn.hide()
+        editor_header.addWidget(self._preview_btn)
+
+        editor_header.addStretch()
+        editor_header.addWidget(self._status_label)
+        right_layout.addLayout(editor_header)
+
         self._title_edit = LineEdit()
         self._title_edit.setPlaceholderText("标题…")
         right_layout.addWidget(self._title_edit)
@@ -419,6 +419,12 @@ class NotesPanel(QWidget):
         self._sticky_edit.setObjectName("noteStickyEdit")
         self._sticky_edit.setPlaceholderText("在此输入便签内容…")
         self._sticky_edit.setFont(_editor_font)
+        # qfluentwidgets' built-in TextEditMenu fails to restore the selection
+        # (its _onItemClicked builds a cursor but never setTextCursor), so
+        # Cut/Copy/Paste silently no-op once the popup steals focus. Use our own
+        # plain-QMenu menu (same exec-return pattern as the sticky note window).
+        self._sticky_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._sticky_edit.customContextMenuRequested.connect(self._show_sticky_context_menu)
         self._sticky_edit.hide()
         right_layout.addWidget(self._sticky_edit, 1)
 
@@ -939,6 +945,9 @@ class NotesPanel(QWidget):
             if item_type == "folder":
                 folder_id = item_id
                 folder_name = item.data(_ROLE_TITLE) or ""
+                menu.addAction(Action(FluentIcon.FOLDER_ADD, "新建文件夹",
+                                      triggered=self._on_new_folder))
+                menu.addSeparator()
                 menu.addAction(Action(FluentIcon.EDIT, "重命名",
                                       triggered=lambda: self._rename_folder_dialog(folder_id, folder_name)))
                 menu.addSeparator()
@@ -1072,6 +1081,60 @@ class NotesPanel(QWidget):
     def _show_status(self, msg: str):
         self._status_label.setText(msg)
         self._status_timer.start()
+
+    def _show_sticky_context_menu(self, pos):
+        """Reliable Cut/Copy/Paste/SelectAll menu for the sticky editor.
+
+        Mirrors the sticky-note window's menu: build a plain QMenu, exec it, and
+        act on the returned QAction. This avoids qfluentwidgets' TextEditMenu,
+        whose selection-restore is a no-op so Cut/Copy/Paste silently fail.
+        """
+        edit = self._sticky_edit
+        menu = QMenu(self)
+        # Match the markdown editor's themed menu so it has clear contrast
+        # (a bare QMenu inherits low-contrast defaults under FluentWindow).
+        try:
+            from app.ui.style import get_text_color, _current_dark_mode
+            text_color = get_text_color()
+            bg_color = "#2D2D2D" if _current_dark_mode else "#FFFFFF"
+            hover_bg = "#3D3D3D" if _current_dark_mode else "#F3F4F6"
+        except Exception:
+            text_color, bg_color, hover_bg = "#000000", "#FFFFFF", "#F3F4F6"
+        menu.setStyleSheet(
+            f"QMenu {{ color: {text_color}; background: {bg_color}; border: 1px solid rgba(128,128,128,0.3); }}"
+            f"QMenu::item:selected {{ background: {hover_bg}; }}"
+        )
+
+        undo_act = menu.addAction("撤销")
+        undo_act.setEnabled(edit.document().isUndoAvailable())
+        redo_act = menu.addAction("重做")
+        redo_act.setEnabled(edit.document().isRedoAvailable())
+        menu.addSeparator()
+
+        has_selection = edit.textCursor().hasSelection()
+        cut_act = menu.addAction("剪切")
+        cut_act.setEnabled(has_selection)
+        copy_act = menu.addAction("复制")
+        copy_act.setEnabled(has_selection)
+        paste_act = menu.addAction("粘贴")
+        paste_act.setEnabled(edit.canPaste())
+        menu.addSeparator()
+        select_all_act = menu.addAction("全选")
+        select_all_act.setEnabled(not edit.document().isEmpty())
+
+        action = menu.exec(edit.mapToGlobal(pos))
+        if action == undo_act:
+            edit.undo()
+        elif action == redo_act:
+            edit.redo()
+        elif action == cut_act:
+            edit.cut()
+        elif action == copy_act:
+            edit.copy()
+        elif action == paste_act:
+            edit.paste()
+        elif action == select_all_act:
+            edit.selectAll()
 
     def _move_to_folder(self, note_id, folder_id):
         self._flush_current()
