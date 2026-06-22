@@ -20,9 +20,11 @@ from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
+    QHBoxLayout,
     QTextEdit,
     QVBoxLayout,
 )
+from qfluentwidgets import TransparentToolButton, FluentIcon
 
 from app.core.config import cfg
 from app.core.llm_gateway import CancellationToken, LLMGateway
@@ -91,6 +93,8 @@ class ResultBubble(NonActivatingPopup):
     _stream_done = pyqtSignal()
     _stream_error = pyqtSignal(str)
     _hide_requested = pyqtSignal()  # 全局点击监听
+    replace_requested = pyqtSignal(str)  # rewrite：用户点「替换原文」，载荷为最终结果
+    copy_requested = pyqtSignal(str)     # rewrite：用户点「复制」，载荷为最终结果
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -107,6 +111,10 @@ class ResultBubble(NonActivatingPopup):
         self._worker: _BubbleWorker | None = None
         self._streaming = False
         self._full_text = ""
+        # 当前模式："oneshot"（只读快查）或 "rewrite"（可编辑 + footer 回填）。
+        self._mode = "oneshot"
+        # rewrite 模式下记下的原始选中文字（回填时校验选区未变）。
+        self._original_text = ""
         # 锚点（选区下方的逻辑坐标）与当前自适应宽度（单调增长）
         self._anchor_x = 0
         self._anchor_y = 0
@@ -150,6 +158,24 @@ class ResultBubble(NonActivatingPopup):
         self._content.setObjectName("bubbleContent")
         layout.addWidget(self._content)
 
+        # Footer：仅 rewrite 模式显示。替换原文 / 复制。流式期间禁用，完成后启用。
+        self._footer = QFrame(self)
+        self._footer.setObjectName("bubbleFooter")
+        footer_row = QHBoxLayout(self._footer)
+        footer_row.setContentsMargins(0, 0, 0, 0)
+        footer_row.setSpacing(2)
+        footer_row.addStretch()
+        self._copy_btn = TransparentToolButton(FluentIcon.COPY, self)
+        self._copy_btn.setToolTip("复制改写结果")
+        self._copy_btn.clicked.connect(self._on_copy_clicked)
+        footer_row.addWidget(self._copy_btn)
+        self._replace_btn = TransparentToolButton(FluentIcon.PASTE, self)
+        self._replace_btn.setToolTip("替换原文（写回源应用）")
+        self._replace_btn.clicked.connect(self._on_replace_clicked)
+        footer_row.addWidget(self._replace_btn)
+        self._footer.hide()
+        layout.addWidget(self._footer)
+
     # ── 主题适配 ────────────────────────────────────────────────────────
 
     def _apply_theme_style(self):
@@ -172,6 +198,17 @@ class ResultBubble(NonActivatingPopup):
                 color: {text_color};
                 font-size: 13px;
                 border: none;
+            }}
+            #bubbleFooter {{
+                background: transparent;
+                border: none;
+            }}
+            #bubbleFooter TransparentToolButton {{
+                color: {text_color};
+            }}
+            #bubbleFooter TransparentToolButton:hover {{
+                background: {theme["accent_subtle"]};
+                color: {theme["accent"]};
             }}
         """
         self.setStyleSheet(qss)
@@ -208,6 +245,37 @@ class ResultBubble(NonActivatingPopup):
             text: 选中的文字。
             action_key: 动作标识（如 "explain"）。
         """
+        self._mode = "oneshot"
+        self._original_text = ""
+        self._footer.hide()
+        self._start_stream(x, y, text, action_key)
+
+    def show_rewrite(self, x: int, y: int, text: str, action_key: str):
+        """改写回填：弹气泡流式显示 AI 改写结果，底部带回填 footer。
+
+        与 show_oneshot 共用流式机制，差异：显示 footer[复制 / 替换原文]、
+        记下原始选中文字供回填时校验选区未变。
+
+        内容区**保持只读**：气泡是 WS_EX_NOACTIVATE 永不抢焦点（这正是 Ctrl+V
+        能落回源应用的前提），故无法接收键盘输入，不能就地编辑。需要微调改写
+        结果时走「续入会话」。
+
+        Args:
+            x: 选区水平中心（逻辑像素）。
+            y: 选区底边（逻辑像素）。
+            text: 选中的原始文字（回填校验用）。
+            action_key: 改写动作标识（polish / translate_inplace / fix_grammar）。
+        """
+        self._mode = "rewrite"
+        self._original_text = text
+        self._footer.show()
+        # 流式期间禁用回填按钮，完成后在 _on_stream_done 启用。
+        self._replace_btn.setEnabled(False)
+        self._copy_btn.setEnabled(False)
+        self._start_stream(x, y, text, action_key)
+
+    def _start_stream(self, x: int, y: int, text: str, action_key: str):
+        """共用的流式启动：复位状态、定位显示、渲染提示词、起 worker。"""
         self._cancel_current()
         # 起始：清空内容、复位宽度、定位、显示。
         self._full_text = ""
@@ -220,7 +288,7 @@ class ResultBubble(NonActivatingPopup):
         self.show()
         self.raise_()
 
-        # 气泡用 action.render(text)，与「解释」共用同一份（含自定义）提示词。
+        # 气泡用 action.render(text)，与对应动作共用同一份（含自定义）提示词。
         action = get_text_action(action_key)
         if action is None or not action.goes_to_ai:
             self._content.setPlainText("不支持的动作")
@@ -238,6 +306,12 @@ class ResultBubble(NonActivatingPopup):
             on_error=lambda msg: self._stream_error.emit(msg),
         )
         self._worker.start()
+
+    def _on_copy_clicked(self):
+        self.copy_requested.emit(self._content.toPlainText().strip())
+
+    def _on_replace_clicked(self):
+        self.replace_requested.emit(self._content.toPlainText().strip())
 
     # ── 定位 ────────────────────────────────────────────────────────────
 
@@ -321,6 +395,16 @@ class ResultBubble(NonActivatingPopup):
     def _on_stream_done(self):
         self._streaming = False
         self._content.setPlaceholderText("")
+        if self._mode == "rewrite":
+            # 改写完成：剥离常见前缀/代码块包裹后回填进编辑区，启用回填按钮。
+            from app.core.selection_inject import strip_ai_preamble
+            cleaned = strip_ai_preamble(self._full_text)
+            if cleaned and cleaned != self._full_text:
+                self._full_text = cleaned
+                self._content.setPlainText(cleaned)
+            has_text = bool(self._content.toPlainText().strip())
+            self._replace_btn.setEnabled(has_text)
+            self._copy_btn.setEnabled(has_text)
 
     def _on_stream_error(self, msg: str):
         self._streaming = False

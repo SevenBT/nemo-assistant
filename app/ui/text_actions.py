@@ -35,6 +35,8 @@ class TextAction:
             "compose"   续入：把选中文填进激活快速会话的输入框，等用户加
                         指令手动发（意图不限——解释/润色/答问题…）；
             "compose_new" 新建：新建并激活快速会话，再同 compose；
+            "rewrite"   改写回填：气泡显示 AI 改写结果（可编辑），用户确认后
+                        把结果写回源应用、覆盖原选区（润色/翻译/订正）；
             "local"     本地：不走 LLM，调用方按 key 处理（存便签）。
     """
     key: str
@@ -55,18 +57,24 @@ class TextAction:
         return self.mode in ("compose", "compose_new")
 
     @property
+    def is_rewrite(self) -> bool:
+        """改写回填：气泡显示 AI 结果，用户确认后写回源应用覆盖原选区。"""
+        return self.mode == "rewrite"
+
+    @property
     def forces_new_reading(self) -> bool:
         """「新建会话」每次都新建并激活一个快速会话。"""
         return self.mode == "compose_new"
 
     def _effective_prompt(self) -> str:
-        """取生效提示词：仅「解释」用（自定义优先，否则内置默认）。
+        """取生效提示词：解释 / 改写动作支持自定义提示词（自定义优先，否则内置）。
 
         续入/新建走 compose——不预设提示词，由用户在会话里自己输入指令，
         故它们没有 prompt，render 也不会被调用。
         """
-        if self.key == "explain":
-            custom = (cfg.get(cfg.selectionExplainPrompt) or "").strip()
+        custom_item = _CUSTOM_PROMPT_ITEM.get(self.key)
+        if custom_item is not None:
+            custom = (cfg.get(getattr(cfg, custom_item)) or "").strip()
             if custom:
                 return custom
         return self.default_prompt
@@ -88,8 +96,24 @@ class TextAction:
 #   explain               一次性解释（气泡显示，不落库，用预设/自定义提示词）
 #   continue_explain      续入会话（把选中文填进激活的快速会话，手动发，意图不限）
 #   new_continue_explain  新建会话（新建并激活快速会话，再同上）
+#   polish / translate_inplace / fix_grammar
+#                         改写回填（气泡显示 AI 结果，确认后写回源应用覆盖原选区）
 #   note                  本地（无 prompt，写入笔记库）
 _EXPLAIN_PROMPT = "请用简洁的语言解释下面这段文字的含义：\n\n{text}"
+# 改写类提示词统一强约束「只输出结果」——否则 AI 带「好的，这是改写后的：」之类
+# 前缀，直接回填会污染原文（这是 rewrite 区别于 explain 的关键）。
+_POLISH_PROMPT = (
+    "润色下面这段文字，使其更通顺自然、表达更准确，保持原意与语言。"
+    "只输出润色后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}"
+)
+_TRANSLATE_PROMPT = (
+    "翻译下面这段文字：是中文就译成英文，是其他语言就译成中文。"
+    "只输出译文，不要任何解释、前后缀或代码块包裹：\n\n{text}"
+)
+_FIX_GRAMMAR_PROMPT = (
+    "修正下面这段文字里的错别字、标点和语法错误，保持原意、风格和语言不变。"
+    "只输出修正后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}"
+)
 
 TEXT_ACTIONS: tuple[TextAction, ...] = (
     TextAction(
@@ -117,6 +141,30 @@ TEXT_ACTIONS: tuple[TextAction, ...] = (
         mode="compose_new",
     ),
     TextAction(
+        key="polish",
+        icon=FluentIcon.EDIT,
+        label="润色",
+        default_prompt=_POLISH_PROMPT,
+        session_title="润色改写",
+        mode="rewrite",
+    ),
+    TextAction(
+        key="translate_inplace",
+        icon=FluentIcon.LANGUAGE,
+        label="翻译",
+        default_prompt=_TRANSLATE_PROMPT,
+        session_title="翻译",
+        mode="rewrite",
+    ),
+    TextAction(
+        key="fix_grammar",
+        icon=FluentIcon.ACCEPT,
+        label="订正",
+        default_prompt=_FIX_GRAMMAR_PROMPT,
+        session_title="订正改写",
+        mode="rewrite",
+    ),
+    TextAction(
         key="note",
         icon=FluentIcon.QUICK_NOTE,
         label="存便签",
@@ -130,11 +178,23 @@ _ACTION_BY_KEY = {a.key: a for a in TEXT_ACTIONS}
 
 # 每个动作对应的显隐配置项（控制浮标上是否出现该按钮）。
 # 「连续解释」与「新开连续」共用一个开关（同一功能的两个入口）。
+# 三个改写动作共用一个总开关（同属「改写回填」一组）。
 _ENABLED_ITEM = {
     "explain": "selectionExplainEnabled",
     "continue_explain": "selectionContinueExplainEnabled",
     "new_continue_explain": "selectionContinueExplainEnabled",
+    "polish": "selectionRewriteEnabled",
+    "translate_inplace": "selectionRewriteEnabled",
+    "fix_grammar": "selectionRewriteEnabled",
     "note": "selectionNoteEnabled",
+}
+
+# 支持自定义提示词的动作 → 对应配置项（空串表示用内置默认）。
+_CUSTOM_PROMPT_ITEM = {
+    "explain": "selectionExplainPrompt",
+    "polish": "selectionPolishPrompt",
+    "translate_inplace": "selectionTranslatePrompt",
+    "fix_grammar": "selectionFixGrammarPrompt",
 }
 
 

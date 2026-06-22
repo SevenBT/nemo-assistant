@@ -21,6 +21,8 @@ from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import QApplication
 
 from app.core.selection_capture import capture_selection
+from app.core.selection_inject import replace_selection
+from app.core.config import cfg
 from app.ui.result_bubble import ResultBubble
 from app.ui.text_action_popup import TextActionPopup
 from app.ui.text_actions import get_text_action
@@ -63,10 +65,14 @@ class SelectionController(QObject):
         self._popup.action_chosen.connect(self._on_action_bubble)
 
         self._bubble = ResultBubble(window)
+        self._bubble.replace_requested.connect(self._on_replace_requested)
+        self._bubble.copy_requested.connect(self._on_copy_requested)
 
         # UIA 在手势命中时已取到的选中文字（若可用）；点击动作时优先消费它，
         # 取不到才退回 Ctrl+C 兜底。热键路径无此预取，恒为空。
         self._captured = ""
+        # 改写回填：记下当前改写动作的原始选中文字，回填时校验选区未变。
+        self._rewrite_original = ""
         # 弹出位置记忆，供气泡定位
         self._popup_x = 0
         self._popup_y = 0
@@ -145,6 +151,8 @@ class SelectionController(QObject):
 
         if action.is_compose:
             self._compose_in_session(text, action)
+        elif action.is_rewrite:
+            self._show_rewrite(text, key)
         elif action.goes_to_ai:
             self._show_oneshot(text, key)
 
@@ -153,6 +161,50 @@ class SelectionController(QObject):
         self._bubble.show_oneshot(
             self._popup_x, self._popup_y, text, action_key
         )
+
+    def _show_rewrite(self, text: str, action_key: str):
+        """改写回填：气泡流式显示改写结果，footer 提供「替换原文 / 复制」。
+
+        记下原始选中文字，供 _on_replace_requested 回填时校验选区未变。
+        """
+        self._rewrite_original = text
+        self._bubble.show_rewrite(
+            self._popup_x, self._popup_y, text, action_key
+        )
+
+    def _on_replace_requested(self, result: str):
+        """气泡「替换原文」：把改写结果写回源应用，覆盖原选区。
+
+        回填前可选校验选区未变（防止等 AI 期间用户点走、粘到错误位置）。
+        粘贴成功则静默关闭气泡（结果已写回、肉眼可见，无需通知）；失败/选区
+        已变则兜底为复制到剪贴板并 toast 提示手动粘贴——绝不静默失败。
+        """
+        if not result:
+            return
+        verify = bool(cfg.get(cfg.selectionRewriteVerify))
+        ok = replace_selection(
+            result, original=self._rewrite_original, verify=verify
+        )
+        self._bubble.hide()
+        # 成功静默（结果已写回原文，用户肉眼可见，无需打扰）；只在失败走兜底
+        # 复制时通知，告知去哪儿找结果、要手动粘贴。
+        if not ok:
+            self._copy_to_clipboard(result)
+            self._toast("无法替换", "已复制改写结果，可手动粘贴")
+
+    def _on_copy_requested(self, result: str):
+        """气泡「复制」：把改写结果复制到剪贴板，关闭气泡。"""
+        if not result:
+            return
+        self._copy_to_clipboard(result)
+        self._bubble.hide()
+        self._toast("已复制", "改写结果已复制到剪贴板")
+
+    def _copy_to_clipboard(self, text: str):
+        try:
+            QApplication.clipboard().setText(text)
+        except Exception as e:  # pragma: no cover - 防御性
+            logger.error("划词：复制改写结果失败 %s", e)
 
     def _compose_in_session(self, text: str, action):
         """续入/新建：唤主窗、切到（激活或新建的）快速会话、把选中文填进输入框。

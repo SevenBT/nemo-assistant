@@ -265,9 +265,21 @@ class AppConfig(QConfig):
     selectionContinueExplainEnabled = ConfigItem(
         "Selection", "ContinueExplainEnabled", True, BoolValidator()
     )
+    # 「改写回填」显隐开关（一组管 润色 / 翻译 / 订正 三个浮标按钮）。
+    selectionRewriteEnabled = ConfigItem(
+        "Selection", "RewriteEnabled", True, BoolValidator()
+    )
     # 「解释」动作的自定义提示词；空串表示用内置默认。
     # 含 {text} 占位，运行时填入选中文字；若不含 {text} 则自动在末尾附上选中文字。
     selectionExplainPrompt = ConfigItem("Selection", "ExplainPrompt", "")
+    # 三个改写动作的自定义提示词；空串表示用内置默认。占位规则同上。
+    selectionPolishPrompt = ConfigItem("Selection", "PolishPrompt", "")
+    selectionTranslatePrompt = ConfigItem("Selection", "TranslatePrompt", "")
+    selectionFixGrammarPrompt = ConfigItem("Selection", "FixGrammarPrompt", "")
+    # 改写回填前是否校验选区未变（多一次 Ctrl+C 换取「不粘到错误位置」的安全）。
+    selectionRewriteVerify = ConfigItem(
+        "Selection", "RewriteVerify", True, BoolValidator()
+    )
     # 当前激活的「阅读会话」id（连续解释的接续目标）；空串表示无激活会话。
     # 至多一个会话激活；连续解释往它累积上下文，新开/切换会改写它。
     activeReadingSessionId = ConfigItem("Selection", "ActiveReadingSessionId", "")

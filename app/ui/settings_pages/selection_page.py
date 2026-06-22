@@ -31,26 +31,32 @@ from app.ui.text_actions import get_text_action
 _PROMPT_EDIT_HEIGHT = 120
 
 
-class _ExplainPromptCard(CardWidget):
-    """解释动作的自定义提示词卡片：多行编辑 + 恢复默认。
+class _PromptCard(CardWidget):
+    """某个走 AI 的划词动作的自定义提示词卡片：多行编辑 + 恢复默认。
 
-    失焦即写回 cfg.selectionExplainPrompt（空串表示用内置默认）。
-    占位提示里说明 {text} 会被选中文字替换、留空则附在末尾。
+    失焦即写回对应的 cfg 配置项（空串表示用内置默认）。占位提示里说明
+    {text} 会被选中文字替换、留空则附在末尾。一张卡片服务一个动作
+    （解释 / 润色 / 翻译 / 订正），由 action_key + config_attr 参数化。
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, action_key: str, config_attr: str, hint_text: str, parent=None):
         super().__init__(parent)
+        self._action_key = action_key
+        self._config_attr = config_attr
+        self._hint_text = hint_text
         self._build()
         self._load()
+
+    @property
+    def _config_item(self):
+        return getattr(cfg, self._config_attr)
 
     def _build(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(8)
 
-        hint = BodyLabel(
-            "解释动作发给 AI 的提示词，留空使用内置默认。", self
-        )
+        hint = BodyLabel(self._hint_text, self)
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
@@ -78,15 +84,15 @@ class _ExplainPromptCard(CardWidget):
         return handler
 
     def _load(self):
-        self._edit.setPlainText(cfg.get(cfg.selectionExplainPrompt) or "")
+        self._edit.setPlainText(cfg.get(self._config_item) or "")
 
     def _save(self):
-        cfg.set(cfg.selectionExplainPrompt, self._edit.toPlainText().strip())
+        cfg.set(self._config_item, self._edit.toPlainText().strip())
 
     def _restore_default(self):
         """清空自定义提示词（回到内置默认），并把默认文案填入编辑器作参考。"""
-        cfg.set(cfg.selectionExplainPrompt, "")
-        action = get_text_action("explain")
+        cfg.set(self._config_item, "")
+        action = get_text_action(self._action_key)
         self._edit.setPlainText(action.default_prompt if action else "")
 
     def save(self):
@@ -145,19 +151,51 @@ class SelectionPage(QScrollArea):
                 parent=self,
             )
         )
+        group.addSettingCard(
+            SwitchSettingCard(
+                FluentIcon.EDIT,
+                "显示「改写回填」",
+                "浮标上显示润色 / 翻译 / 订正（AI 改写后写回原应用，覆盖选中文字）",
+                configItem=cfg.selectionRewriteEnabled,
+                parent=self,
+            )
+        )
+        group.addSettingCard(
+            SwitchSettingCard(
+                FluentIcon.ACCEPT,
+                "回填前校验选区",
+                "替换原文前先确认选区未变，避免等 AI 期间点走后粘到错误位置（多一次取词）",
+                configItem=cfg.selectionRewriteVerify,
+                parent=self,
+            )
+        )
 
         layout.addWidget(group)
 
-        # 解释提示词区：标题 + 自定义卡片，直接挂在页面布局上。
+        # 各动作提示词区：标题 + 自定义卡片，直接挂在页面布局上。
         # 注意不要塞进 SettingCardGroup 的 ExpandLayout——它会把高度压扁，
         # 导致编辑框只剩一条线（之前的显示问题就是这么来的）。
-        prompt_title = StrongBodyLabel("解释提示词", container)
-        layout.addWidget(prompt_title)
-        self._prompt_card = _ExplainPromptCard(container)
-        layout.addWidget(self._prompt_card)
+        self._prompt_cards = []
+        for title, action_key, config_attr, hint in (
+            ("解释提示词", "explain", "selectionExplainPrompt",
+             "解释动作发给 AI 的提示词，留空使用内置默认。"),
+            ("润色提示词", "polish", "selectionPolishPrompt",
+             "润色动作发给 AI 的提示词，留空使用内置默认。建议保留「只输出结果」约束，"
+             "否则改写结果会带解释，回填会污染原文。"),
+            ("翻译提示词", "translate_inplace", "selectionTranslatePrompt",
+             "翻译动作发给 AI 的提示词，留空使用内置默认（中英互译）。"),
+            ("订正提示词", "fix_grammar", "selectionFixGrammarPrompt",
+             "订正动作发给 AI 的提示词，留空使用内置默认。"),
+        ):
+            label = StrongBodyLabel(title, container)
+            layout.addWidget(label)
+            card = _PromptCard(action_key, config_attr, hint, container)
+            layout.addWidget(card)
+            self._prompt_cards.append(card)
 
         layout.addStretch()
         self.setWidget(container)
 
     def save(self):
-        self._prompt_card.save()
+        for card in self._prompt_cards:
+            card.save()

@@ -16,14 +16,15 @@ from __future__ import annotations
 
 import time
 
-from PyQt6.QtCore import QMimeData
 from PyQt6.QtWidgets import QApplication
 
-try:
-    import keyboard as _kb
-    _KB_OK = True
-except ImportError:
-    _KB_OK = False
+from app.core.clipboard_util import (
+    backup_clipboard as _backup_clipboard,
+    keyboard_available,
+    release_modifiers,
+    restore_clipboard as _restore_clipboard,
+    send_hotkey,
+)
 
 # 取词上限：超长选区截断，避免爆 token。8000 字约够覆盖整页文档。
 MAX_SELECTION_CHARS = 8000
@@ -31,9 +32,6 @@ MAX_SELECTION_CHARS = 8000
 # 轮询参数：复制是异步的，等剪贴板出现新内容。
 _POLL_TIMEOUT_MS = 400
 _POLL_INTERVAL_MS = 30
-
-# 触发热键可能按住的修饰键，取词前全部释放。
-_MODIFIERS = ("ctrl", "alt", "shift", "windows")
 
 
 def clean_selection(text: str) -> str:
@@ -59,35 +57,6 @@ def is_valid_selection(captured: str) -> bool:
     return bool(captured)
 
 
-def _backup_clipboard(clipboard) -> QMimeData:
-    """深拷贝当前剪贴板的所有格式，供取词后原样还原。
-
-    不能直接持有 clipboard.mimeData() 返回的对象（生命周期由 Qt 管理，会随
-    剪贴板变化失效）。逐 format 拷到新建的 QMimeData：text/html、图片、文件
-    列表、富文本等都能完整保留，避免兜底取词后把用户原本复制的图片/文件
-    退化成纯文本甚至丢失。
-    """
-    backup = QMimeData()
-    source = clipboard.mimeData()
-    if source is None:
-        return backup
-    try:
-        for fmt in source.formats():
-            backup.setData(fmt, source.data(fmt))
-    except Exception:
-        # 极端情况下某格式读取失败，至少保住已拷到的部分。
-        pass
-    return backup
-
-
-def _restore_clipboard(clipboard, backup: QMimeData) -> None:
-    """还原剪贴板。备份为空（原本就没内容）时清空，避免残留取词内容。"""
-    if backup.formats():
-        clipboard.setMimeData(backup)
-    else:
-        clipboard.clear()
-
-
 def capture_selection() -> str:
     """抓取当前选中的文字。必须在主线程、且**源应用仍持有焦点时**调用。
 
@@ -99,18 +68,14 @@ def capture_selection() -> str:
     返回空串。原始剪贴板内容（含图片/文件/富文本等所有格式）在取词后立即
     同步还原。
     """
-    if not _KB_OK:
+    if not keyboard_available():
         return ""
 
     clipboard = QApplication.clipboard()
     backup = _backup_clipboard(clipboard)
 
     # 坑1：释放热键残留的修饰键，否则 ctrl+c 被污染成 ctrl+alt+c。
-    for mod in _MODIFIERS:
-        try:
-            _kb.release(mod)
-        except Exception:
-            pass
+    release_modifiers()
 
     # 清空剪贴板，使「内容是否变化」的判定更可靠。
     clipboard.clear()
@@ -121,7 +86,7 @@ def capture_selection() -> str:
     # KeyboardInterrupt 打断整个 app。这里显式吞掉它：还原剪贴板、静默返回，
     # 绝不让取词的副作用波及主进程存活。
     try:
-        _kb.send("ctrl+c")
+        send_hotkey("ctrl+c")
         # 坑2：复制是异步的，轮询等待剪贴板出现内容。
         captured = _poll_clipboard(clipboard)
     except KeyboardInterrupt:

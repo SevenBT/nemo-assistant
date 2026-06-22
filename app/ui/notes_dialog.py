@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, QEvent, QRect, QSize, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPen
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPen, QTextCursor
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -1295,9 +1295,30 @@ class NotesPanel(QWidget):
                         self._sticky_edit.setHtml(content)
                         self._sticky_edit.blockSignals(False)
                     else:
-                        self._md_editor.blockSignals(True)
-                        self._md_editor.setPlainText(note.content)
-                        self._md_editor.blockSignals(False)
+                        # 仅当内容确有变化时才重置编辑器，且保留光标/滚动位置。
+                        # setPlainText 会把光标弹回开头（pos 0）——若无脑调用，
+                        # 划词翻译回填等链路触发的 refresh 会让正在编辑的光标乱跳。
+                        # 外部应用（如 Codex）不是本进程 Qt 控件，不经此路径，故只在
+                        # 我们自己的笔记编辑器里复现。
+                        if self._md_editor.toPlainText() != note.content:
+                            cursor = self._md_editor.textCursor()
+                            saved_pos = cursor.position()
+                            saved_anchor = cursor.anchor()
+                            scrollbar = self._md_editor.verticalScrollBar()
+                            saved_scroll = scrollbar.value()
+                            self._md_editor.blockSignals(True)
+                            self._md_editor.setPlainText(note.content)
+                            # 还原光标（夹到新文本长度内）与滚动位置。
+                            new_cursor = self._md_editor.textCursor()
+                            doc_len = len(self._md_editor.toPlainText())
+                            new_cursor.setPosition(min(saved_anchor, doc_len))
+                            new_cursor.setPosition(
+                                min(saved_pos, doc_len),
+                                QTextCursor.MoveMode.KeepAnchor,
+                            )
+                            self._md_editor.setTextCursor(new_cursor)
+                            scrollbar.setValue(saved_scroll)
+                            self._md_editor.blockSignals(False)
 
         note = self._mgr.get(note_id)
         if note:

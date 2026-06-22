@@ -35,14 +35,33 @@ from app.core.selection_monitor import is_drag_selection, should_emit
 
 # ── text_actions ────────────────────────────────────────────────────────
 
-def test_text_actions_contains_four_presets():
+def test_text_actions_contains_expected_presets():
     keys = {a.key for a in TEXT_ACTIONS}
     assert keys == {
         "explain",
         "continue_explain",
         "new_continue_explain",
+        "polish",
+        "translate_inplace",
+        "fix_grammar",
         "note",
     }, f"动作集不符: {keys}"
+
+
+def test_rewrite_actions_are_rewrite_mode():
+    for key in ("polish", "translate_inplace", "fix_grammar"):
+        action = get_text_action(key)
+        assert action is not None
+        assert action.mode == "rewrite"
+        assert action.is_rewrite is True
+        assert action.is_compose is False
+        assert action.goes_to_ai is True, "改写动作有提示词，应走 AI"
+        assert "{text}" in action.default_prompt
+
+
+def test_non_rewrite_actions_not_rewrite():
+    for key in ("explain", "continue_explain", "new_continue_explain", "note"):
+        assert get_text_action(key).is_rewrite is False
 
 
 def test_get_text_action_lookup():
