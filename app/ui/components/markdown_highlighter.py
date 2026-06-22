@@ -151,10 +151,12 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         add((re.compile(r'^(\s*)[-*+] '), self._make_format(color=lst_color, bold=True)))
         add((re.compile(r'^(\s*)\d+[.)]\s'), self._make_format(color=lst_color, bold=True)))
 
-        # Code block (indented)
+        # Fenced code block format (used by highlightBlock for ``` blocks).
+        # NOTE: no indented-code-block rule here — a leading Tab / 4 spaces is
+        # treated as plain indentation (matching the preview, which disables
+        # indented code blocks), so it must NOT get the code-block background.
         cb_fg, cb_bg = p.get("code_block", ("#888", "#F5F5F5"))
         self._code_fence_fmt = self._make_format(color=cb_fg, bg=cb_bg)
-        add((re.compile(r'^(?:    |\t).+'), self._code_fence_fmt))
 
         # Horizontal rule, HTML tags, escape chars, trailing spaces, YAML separator
         add((re.compile(r'^\s*(\*{3,}|-{3,}|_{3,})\s*$'), self._make_format(color="#bbb")))

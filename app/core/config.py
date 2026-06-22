@@ -273,7 +273,7 @@ class AppConfig(QConfig):
     activeReadingSessionId = ConfigItem("Selection", "ActiveReadingSessionId", "")
 
     # -- Layout (persisted, not shown in settings UI) --
-    noteListWidth = ConfigItem("Layout", "NoteListWidth", 100)
+    noteListWidth = ConfigItem("Layout", "NoteListWidth", 360)
     noteListVisible = ConfigItem(
         "Layout", "NoteListVisible", True, BoolValidator()
     )

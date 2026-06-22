@@ -491,6 +491,8 @@ class MainWindow(FluentWindow):
             registry=self._registry,
             session_mgr=self._sessions,
             on_sessions_changed=self._chat_session_controller.refresh_panel,
+            note_mgr=self._notes,
+            on_notes_changed=self._notes_panel.refresh,
             parent=self,
         )
         if dlg.exec():
