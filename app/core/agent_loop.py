@@ -15,12 +15,21 @@ import json
 import logging
 import queue
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.core.llm_gateway import CancellationToken, LLMGateway
 from app.core.checkpoint import clear_checkpoint, save_checkpoint
+from app.core.agent_hooks import (
+    AfterIterationContext,
+    AgentHook,
+    BeforeToolsContext,
+    CompositeHook,
+    ToolCallView,
+    reject as _reject,
+)
 from app.tools.registry import ToolErrorType, ToolRegistry
 from app.core.turn_context import (
     TRANSITIONS,
@@ -62,6 +71,8 @@ class AgentLoop(QThread):
         api_messages: list[dict],
         session_id: str = "",
         max_turns: int = 10,
+        trace_store=None,
+        hooks: list[AgentHook] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -70,6 +81,13 @@ class AgentLoop(QThread):
         self._messages = api_messages
         self._session_id = session_id
         self._max_turns = max_turns
+        # 统一 trace：本次 run 一个 trace_id，贯穿 LLM 调用与工具调用。
+        self._trace_store = trace_store
+        self._trace_id = uuid.uuid4().hex
+        # 同一 turn 内 LLM 往返序号，供回放排序。
+        self._llm_seq = 0
+        # 生命周期 hook（评测埋点 / 安全审批等横切关注点）。
+        self._hook = CompositeHook(hooks) if hooks else None
 
         self._cancelled = False
         self._cancel_token = CancellationToken()
@@ -103,6 +121,8 @@ class AgentLoop(QThread):
             tools=self._registry.get_openai_functions(),
             max_turns=self._max_turns,
         )
+        self._trace_start_turn()
+        run_t0 = time.perf_counter()
         try:
             while ctx.state is not TurnState.DONE:
                 if self._cancelled:
@@ -110,7 +130,7 @@ class AgentLoop(QThread):
                     ctx.state = TurnState.FINALIZE
                     if ctx.state is TurnState.DONE:
                         break
-
+                # 取当前状态对应的handler
                 handler = getattr(self, f"_state_{ctx.state.name.lower()}")
                 self.state_changed.emit(ctx.state.name)
 
@@ -134,8 +154,12 @@ class AgentLoop(QThread):
                     ctx.state = next_state
         except Exception as e:
             logger.exception("[AgentLoop] Unhandled exception")
+            self._trace_finish_turn(ctx, "error", run_t0, error=str(e))
             self.done.emit({"ok": False, "error": str(e), "trace": self._serialize_trace(ctx)})
             return
+
+        status = "cancelled" if self._cancelled else ("error" if ctx.error_message else "ok")
+        self._trace_finish_turn(ctx, status, run_t0, error=ctx.error_message)
 
     # ── State Handlers ───────────────────────────────────────────────────
 
@@ -148,10 +172,14 @@ class AgentLoop(QThread):
     def _state_stream(self, ctx: TurnContext) -> str:
         ctx.reset_turn()
 
+        seq = self._llm_seq
+        self._llm_seq += 1
         for chunk in self._llm.chat_stream(
             ctx.messages,
             ctx.tools,
             cancel_token=self._cancel_token,
+            trace_id=self._trace_id,
+            seq=seq,
         ):
             if self._cancelled:
                 return "cancelled"
@@ -163,12 +191,15 @@ class AgentLoop(QThread):
                 ctx.tool_calls.append(chunk)
             elif chunk["type"] == "error":
                 ctx.error_message = chunk["message"]
+                self._fire_after_iteration(ctx, [])
                 return "error"
             elif chunk["type"] == "done":
                 ctx.reasoning_content = chunk.get("reasoning_content")
                 break
 
         if not ctx.tool_calls:
+            # 纯文本收尾轮（无工具）：也触发 after_iteration，让评测能捕获最终答复。
+            self._fire_after_iteration(ctx, [])
             return "no_tools"
         return "has_tools"
 
@@ -193,11 +224,43 @@ class AgentLoop(QThread):
             assistant_msg["reasoning_content"] = ctx.reasoning_content
         ctx.messages.append(assistant_msg)
 
-        batches = self._partition_batches(ctx.tool_calls)
+        # 安全审批挂载点：hook 可对即将执行的工具调用裁决（放行/软拒绝）。
+        rejections = self._apply_before_tools_hook(ctx)
+        # 收集本轮所有 (tool_call, result) 供 after_iteration 评测埋点使用。
+        iteration_results: list[tuple[dict, dict]] = []
+
+        # 被软拒绝的调用：不执行，直接回灌拒绝说明作为工具结果。
+        pending_calls = []
+        for tc in ctx.tool_calls:
+            decision = rejections.get(tc["id"])
+            if decision is not None:
+                reject_result = {
+                    "status": "error",
+                    "data": {
+                        "message": decision.message or "该工具调用被安全策略拒绝。",
+                        "error_type": ToolErrorType.PERMISSION.value,
+                        "retryable": False,
+                        "rejected_by_hook": True,
+                    },
+                }
+                ctx.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": ToolRegistry.format_result(reject_result),
+                })
+                iteration_results.append((tc, reject_result))
+                self._trace_tool_call(
+                    tc["id"], tc["name"], tc["arguments"], reject_result, 0.0
+                )
+            else:
+                pending_calls.append(tc)
+
+        batches = self._partition_batches(pending_calls)
         completed_results: list[dict] = []
 
         for mode, batch in batches:
             if self._cancelled:
+                self._fire_after_iteration(ctx, iteration_results)
                 return "cancelled"
 
             if mode == "concurrent" and len(batch) > 1:
@@ -206,13 +269,16 @@ class AgentLoop(QThread):
                 batch_results = []
                 for tc in batch:
                     if self._cancelled:
+                        self._fire_after_iteration(ctx, iteration_results)
                         return "cancelled"
                     result = self._execute_one(tc)
                     if result is None:
+                        self._fire_after_iteration(ctx, iteration_results)
                         return "cancelled"
                     batch_results.append((tc, result))
 
             for tc, result in batch_results:
+                iteration_results.append((tc, result))
                 tool_name = tc["name"]
                 if result.get("status") == "error":
                     self._tool_failure_counts[tool_name] = (
@@ -238,6 +304,7 @@ class AgentLoop(QThread):
                             f"工具 {tool_name} 发生致命错误 ({error_type.value}): "
                             f"{result['data'].get('message', '')}"
                         )
+                        self._fire_after_iteration(ctx, iteration_results)
                         return "error"
 
                     if self._tool_failure_counts[tool_name] >= _MAX_TOOL_FAILURES:
@@ -248,6 +315,7 @@ class AgentLoop(QThread):
                         ctx.error_message = (
                             f"工具 {tool_name} 连续失败 {_MAX_TOOL_FAILURES} 次，终止执行"
                         )
+                        self._fire_after_iteration(ctx, iteration_results)
                         return "error"
                 else:
                     self._tool_failure_counts.pop(tool_name, None)
@@ -262,7 +330,7 @@ class AgentLoop(QThread):
                 completed_results.append(tool_msg)
 
             if self._session_id:
-                remaining = self._get_remaining_calls(ctx.tool_calls, batch, batches)
+                remaining = self._get_remaining_calls(pending_calls, batch, batches)
                 if remaining:
                     save_checkpoint(
                         self._session_id,
@@ -275,6 +343,7 @@ class AgentLoop(QThread):
         if self._session_id:
             clear_checkpoint(self._session_id)
 
+        self._fire_after_iteration(ctx, iteration_results)
         return "ok"
 
     def _state_feedback(self, ctx: TurnContext) -> str:
@@ -337,8 +406,11 @@ class AgentLoop(QThread):
 
         # 执行
         self.tool_event.emit(call_id, "start", {"name": tool_name, "params": ai_args})
+        t0 = time.perf_counter()
         result = self._registry.execute(tool_name, ai_args)
+        duration_ms = (time.perf_counter() - t0) * 1000
         self.tool_event.emit(call_id, "done", {"name": tool_name, "result": result})
+        self._trace_tool_call(call_id, tool_name, ai_args, result, duration_ms)
         return result
 
     def _execute_concurrent_batch(self, batch: list[dict]) -> list[tuple[dict, dict]]:
@@ -353,7 +425,9 @@ class AgentLoop(QThread):
 
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
             future_to_idx = {}
+            start_times: dict[int, float] = {}
             for i, tc in enumerate(batch):
+                start_times[i] = time.perf_counter()
                 future = pool.submit(self._registry.execute, tc["name"], tc["arguments"])
                 future_to_idx[future] = i
 
@@ -364,8 +438,12 @@ class AgentLoop(QThread):
                     result = future.result()
                 except Exception as e:
                     result = {"status": "error", "data": {"message": str(e)}}
+                duration_ms = (time.perf_counter() - start_times[idx]) * 1000
                 results[idx] = (tc, result)
                 self.tool_event.emit(tc["id"], "done", {"name": tc["name"], "result": result})
+                self._trace_tool_call(
+                    tc["id"], tc["name"], tc["arguments"], result, duration_ms
+                )
 
         return results
 
@@ -387,6 +465,100 @@ class AgentLoop(QThread):
         return remaining
 
     # ── 工具方法 ─────────────────────────────────────────────────────────
+
+    def _apply_before_tools_hook(self, ctx: TurnContext) -> dict:
+        """调用 before_execute_tools，返回 {call_id: ToolDecision} 的拒绝映射。
+
+        hook 为 None 或全部放行时返回空 dict。安全 hook（reraise=True）抛出
+        异常时，记录致命错误并拒绝本轮全部工具调用，避免「审批失败却照常执行」。
+        """
+        if self._hook is None:
+            return {}
+        views = [
+            ToolCallView(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
+            for tc in ctx.tool_calls
+        ]
+        hook_ctx = BeforeToolsContext(
+            trace_id=self._trace_id,
+            session_id=self._session_id,
+            turn_count=ctx.turn_count,
+            tool_calls=views,
+        )
+        try:
+            decisions = self._hook.before_execute_tools(hook_ctx)
+        except Exception as exc:
+            logger.exception("[AgentLoop] before_execute_tools hook raised; rejecting all")
+            msg = f"安全审批异常，工具调用被拒绝: {exc}"
+            return {tc["id"]: _reject(tc["id"], msg) for tc in ctx.tool_calls}
+        if not decisions:
+            return {}
+        return {d.call_id: d for d in decisions if d.is_reject}
+
+    def _fire_after_iteration(
+        self, ctx: TurnContext, results: list[tuple[dict, dict]]
+    ) -> None:
+        """触发 after_iteration 评测埋点。非 reraise hook 的异常已在内部隔离。"""
+        if self._hook is None:
+            return
+        hook_ctx = AfterIterationContext(
+            trace_id=self._trace_id,
+            session_id=self._session_id,
+            turn_count=ctx.turn_count,
+            full_text=ctx.full_text,
+            tool_calls=[
+                ToolCallView(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
+                for tc, _ in results
+            ],
+            tool_results=[result for _, result in results],
+            error=ctx.error_message,
+        )
+        try:
+            self._hook.after_iteration(hook_ctx)
+        except Exception:
+            logger.exception("[AgentLoop] after_iteration hook raised")
+
+    def _trace_start_turn(self) -> None:
+        if self._trace_store is None:
+            return
+        try:
+            self._trace_store.start_turn(self._trace_id, self._session_id)
+        except Exception:
+            logger.debug("[AgentLoop] trace start_turn failed", exc_info=True)
+
+    def _trace_finish_turn(
+        self, ctx: TurnContext, status: str, run_t0: float, error: str | None = None
+    ) -> None:
+        if self._trace_store is None:
+            return
+        duration_ms = (time.perf_counter() - run_t0) * 1000
+        try:
+            self._trace_store.record_state_trace(self._trace_id, self._serialize_trace(ctx))
+            self._trace_store.finish_turn(
+                self._trace_id,
+                status=status,
+                turn_count=ctx.turn_count,
+                duration_ms=duration_ms,
+                error=error,
+            )
+        except Exception:
+            logger.debug("[AgentLoop] trace finish_turn failed", exc_info=True)
+
+    def _trace_tool_call(
+        self, call_id: str, name: str, arguments: dict, result: dict | None, duration_ms: float
+    ) -> None:
+        if self._trace_store is None:
+            return
+        try:
+            self._trace_store.record_tool_call(
+                self._trace_id,
+                call_id=call_id,
+                name=name,
+                arguments=arguments,
+                result=result,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            logger.debug("[AgentLoop] trace record_tool_call failed", exc_info=True)
 
     @staticmethod
     def _serialize_trace(ctx: TurnContext) -> list[dict]:

@@ -274,6 +274,56 @@ def _error_event(exc: Exception, prefix: str = "") -> dict:
     }
 
 
+def _field(data: Any, name: str, default: Any = None) -> Any:
+    """Read a field from either SDK objects or plain response dictionaries."""
+    if isinstance(data, dict):
+        return data.get(name, default)
+    return getattr(data, name, default)
+
+
+def _coerce_int(value: Any) -> int | None:
+    """宽容地把 usage 字段转 int；非数值返回 None，不让脏数据中断记录。"""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_usage(usage: Any) -> dict[str, int] | None:
+    """把 SDK usage 对象或 dict 归一为 token 统计字典（OpenAI 形状）。
+
+    兼容流式最后一帧的 usage：prompt/completion/total_tokens，以及
+    prompt_tokens_details.cached_tokens（缓存命中，provider 可选）。
+    任何字段缺失或非数值都安全跳过。
+    """
+    if usage is None:
+        return None
+    prompt = _coerce_int(_field(usage, "prompt_tokens"))
+    completion = _coerce_int(_field(usage, "completion_tokens"))
+    total = _coerce_int(_field(usage, "total_tokens"))
+    if total is None and (prompt is not None or completion is not None):
+        total = (prompt or 0) + (completion or 0)
+
+    cached = None
+    details = _field(usage, "prompt_tokens_details")
+    if details is not None:
+        cached = _coerce_int(_field(details, "cached_tokens"))
+    if cached is None:
+        # 部分网关直接平铺 cached_tokens。
+        cached = _coerce_int(_field(usage, "cached_tokens"))
+
+    if prompt is None and completion is None and total is None and cached is None:
+        return None
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+        "cached_tokens": cached,
+    }
+
+
 def _parse_tool_calls(tc_buf: dict[int, dict[str, str]]) -> Iterator[dict]:
     """把流式 tool_call 分片组装成 AgentLoop 已经认识的事件格式。"""
     for _, tc_data in sorted(tc_buf.items()):
@@ -291,13 +341,6 @@ def _parse_tool_calls(tc_buf: dict[int, dict[str, str]]) -> Iterator[dict]:
             "name": tc_data["name"],
             "arguments": args,
         }
-
-
-def _field(data: Any, name: str, default: Any = None) -> Any:
-    """Read a field from either SDK objects or plain response dictionaries."""
-    if isinstance(data, dict):
-        return data.get(name, default)
-    return getattr(data, name, default)
 
 
 def _append_tool_call_delta(
@@ -441,6 +484,7 @@ class OpenAIAdapter:
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if request.tools:
             kwargs["tools"] = request.tools
@@ -457,11 +501,16 @@ class OpenAIAdapter:
                 cancel_token.add_resource(stream)
             tc_buf: dict[int, dict[str, str]] = {}
             reasoning_buf = ""
+            usage = None
 
             try:
                 for chunk in stream:
                     if _is_cancelled(cancel_token):
                         return
+                    # usage 帧的 choices 为空列表，须先捕获再跳过，不能 break。
+                    chunk_usage = getattr(chunk, "usage", None)
+                    if chunk_usage is not None:
+                        usage = chunk_usage
                     if not chunk.choices:
                         continue
                     choice = chunk.choices[0]
@@ -477,9 +526,8 @@ class OpenAIAdapter:
                     if delta.tool_calls:
                         for fallback_index, tc in enumerate(delta.tool_calls):
                             _append_tool_call_delta(tc_buf, tc, fallback_index)
-
-                    if choice.finish_reason in ("stop", "tool_calls"):
-                        break
+                    # 不在 finish_reason 处 break：usage 帧在其之后到达，
+                    # 提前 break 会丢掉 token 统计。流会自然结束。
             finally:
                 if cancel_token:
                     cancel_token.remove_resource(stream)
@@ -489,7 +537,11 @@ class OpenAIAdapter:
             if _is_cancelled(cancel_token):
                 return
             yield from _parse_tool_calls(tc_buf)
-            yield {"type": "done", "reasoning_content": reasoning_buf or None}
+            yield {
+                "type": "done",
+                "reasoning_content": reasoning_buf or None,
+                "usage": _normalize_usage(usage),
+            }
         except Exception as exc:
             if _is_cancelled(cancel_token):
                 return
@@ -520,6 +572,7 @@ class ShangdaoAdapter:
             model_meta["body_model_field"]: model_meta["body_model_value"],
             "messages": _messages_with_text_tool_history(request.messages),
             "stream": True,
+            "stream_options": {"include_usage": True},
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
         }
@@ -540,6 +593,7 @@ class ShangdaoAdapter:
                     resp.raise_for_status()
                     tc_buf: dict[int, dict[str, str]] = {}
                     reasoning_buf = ""
+                    usage = None
                     try:
                         for line in resp.iter_lines():
                             if _is_cancelled(cancel_token):
@@ -554,6 +608,10 @@ class ShangdaoAdapter:
                             except json.JSONDecodeError:
                                 continue
 
+                            # usage 可能与最后一帧一起到达（choices 为空）。
+                            chunk_usage = chunk.get("usage")
+                            if chunk_usage:
+                                usage = chunk_usage
                             choices = chunk.get("choices", [])
                             if not choices:
                                 continue
@@ -580,8 +638,8 @@ class ShangdaoAdapter:
                             )
                             if function_call:
                                 _append_function_call_delta(tc_buf, function_call)
-                            if choice.get("finish_reason") in ("stop", "tool_calls"):
-                                break
+                            # 不在 finish_reason 处 break：usage 帧随后到达，
+                            # 由 [DONE] 哨兵或流结束自然终止。
                     finally:
                         if cancel_token:
                             cancel_token.remove_resource(resp)
@@ -591,7 +649,11 @@ class ShangdaoAdapter:
                     if _is_cancelled(cancel_token):
                         return
                     yield from _parse_tool_calls(tc_buf)
-                    yield {"type": "done", "reasoning_content": reasoning_buf or None}
+                    yield {
+                        "type": "done",
+                        "reasoning_content": reasoning_buf or None,
+                        "usage": _normalize_usage(usage),
+                    }
         except Exception as exc:
             if _is_cancelled(cancel_token):
                 return
@@ -625,6 +687,7 @@ class LiteLLMAdapter:
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
             "stream": True,
+            "stream_options": {"include_usage": True},
             "api_key": request.api_key,
         }
         if request.tools:
@@ -637,12 +700,16 @@ class LiteLLMAdapter:
                 cancel_token.add_resource(stream)
             tc_buf: dict[int, dict[str, str]] = {}
             reasoning_buf = ""
+            usage = None
 
             try:
                 for chunk in stream:
                     if _is_cancelled(cancel_token):
                         return
-                    if not hasattr(chunk, "choices") or not chunk.choices:
+                    chunk_usage = getattr(chunk, "usage", None)
+                    if chunk_usage is not None:
+                        usage = chunk_usage
+                    if not getattr(chunk, "choices", None):
                         continue
                     choice = chunk.choices[0]
                     delta = choice.delta
@@ -657,9 +724,7 @@ class LiteLLMAdapter:
                     if hasattr(delta, "tool_calls") and delta.tool_calls:
                         for fallback_index, tc in enumerate(delta.tool_calls):
                             _append_tool_call_delta(tc_buf, tc, fallback_index)
-
-                    if hasattr(choice, "finish_reason") and choice.finish_reason in ("stop", "tool_calls"):
-                        break
+                    # 不在 finish_reason 处 break：usage 帧随后到达（choices 为空）。
             finally:
                 if cancel_token:
                     cancel_token.remove_resource(stream)
@@ -669,7 +734,11 @@ class LiteLLMAdapter:
             if _is_cancelled(cancel_token):
                 return
             yield from _parse_tool_calls(tc_buf)
-            yield {"type": "done", "reasoning_content": reasoning_buf or None}
+            yield {
+                "type": "done",
+                "reasoning_content": reasoning_buf or None,
+                "usage": _normalize_usage(usage),
+            }
         except Exception as exc:
             if _is_cancelled(cancel_token):
                 return
@@ -847,6 +916,7 @@ class LLMGateway:
         retry_policy: RetryPolicy | None = None,
         limiter: LocalRateLimiter | None = None,
         logger: GatewayLogger | None = None,
+        trace_sink: Any = None,
     ):
         self._proxy = config_proxy
         self._adapters = adapters or {
@@ -857,15 +927,25 @@ class LLMGateway:
         self._retry_policy = retry_policy or RetryPolicy()
         self._limiter = limiter or LocalRateLimiter()
         self._logger = logger if logger is not None else GatewayLogger()
+        # 可选 TraceStore：AgentLoop 链路传入后，LLM 汇总额外按 trace_id 落库。
+        # 其它调用方（consolidator/dream/...）不传则只走 JSONL，行为不变。
+        self._trace_sink = trace_sink
 
     def chat_stream(
         self,
         messages: list[dict],
         tools: Optional[list[dict]] = None,
         cancel_token: CancellationToken | None = None,
+        trace_id: str | None = None,
+        seq: int = 0,
     ) -> Iterator[dict]:
-        """对外暴露的流式接口，返回 AgentLoop 已兼容的事件字典。"""
-        request = self._build_request(messages, tools)
+        """对外暴露的流式接口，返回 AgentLoop 已兼容的事件字典。
+
+        trace_id 由 AgentLoop 在 turn 开始时生成并贯穿；缺省时网关自生成一个，
+        保证非 AgentLoop 调用方（consolidator/dream/tool_generator/result_bubble）
+        无需改动也能正常工作。seq 标记同一 turn 内第几次 LLM 往返。
+        """
+        request = self._build_request(messages, tools, trace_id)
         adapter = self._adapters.get(request.api_type)
         if adapter is None:
             yield {"type": "error", "message": f"未知 API 类型: {request.api_type}"}
@@ -873,13 +953,14 @@ class LLMGateway:
 
         rate_key = f"{request.api_type}:{request.model}"
         with self._limiter.acquire(rate_key):
-            yield from self._stream_with_retry(adapter, request, cancel_token)
+            yield from self._stream_with_retry(adapter, request, cancel_token, seq)
 
     def _stream_with_retry(
         self,
         adapter: ProviderAdapter,
         request: LLMRequest,
         cancel_token: CancellationToken | None = None,
+        seq: int = 0,
     ) -> Iterator[dict]:
         """执行一次或多次 provider 调用。
 
@@ -894,7 +975,7 @@ class LLMGateway:
 
         for attempt in range(1, self._retry_policy.max_attempts + 1):
             if _is_cancelled(cancel_token):
-                self._write_log(request, t0, ttft_ms, retry_count, "cancelled", None)
+                self._write_log(request, t0, ttft_ms, retry_count, "cancelled", None, seq)
                 return
             streamed = False
             attempt_request = LLMRequest(
@@ -907,7 +988,7 @@ class LLMGateway:
                     if _is_cancelled(cancel_token):
                         _close_resource(stream_iter)
                         self._write_log(
-                            request, t0, ttft_ms, retry_count, "cancelled", None
+                            request, t0, ttft_ms, retry_count, "cancelled", None, seq
                         )
                         return
                     event_type = event.get("type")
@@ -930,13 +1011,20 @@ class LLMGateway:
                             self._retry_policy.wait(attempt, event)
                             retry_next_attempt = True
                             break
+                        # 同 done：先写日志再 yield，否则消费者 break 后丢日志。
+                        self._write_log(request, t0, ttft_ms, retry_count, "error", event, seq)
                         yield event
-                        self._write_log(request, t0, ttft_ms, retry_count, "error", event)
                         return
                     if event_type == "done":
                         final_status = "ok"
+                        # 必须在 yield 之前写日志：消费者（AgentLoop）收到 done
+                        # 即 break，生成器会永久挂起在 yield 处，yield 之后的代码
+                        # 再也执行不到 —— 放后面会导致 llm_calls/token 永不落库。
+                        self._write_log(
+                            request, t0, ttft_ms, retry_count, final_status,
+                            None, seq, event.get("usage"),
+                        )
                         yield event
-                        self._write_log(request, t0, ttft_ms, retry_count, final_status, None)
                         return
                     yield event
             finally:
@@ -945,15 +1033,15 @@ class LLMGateway:
             if retry_next_attempt:
                 continue
             status = "cancelled" if _is_cancelled(cancel_token) else final_status
-            self._write_log(request, t0, ttft_ms, retry_count, status, final_error)
+            self._write_log(request, t0, ttft_ms, retry_count, status, final_error, seq)
             return
 
         if _is_cancelled(cancel_token):
-            self._write_log(request, t0, ttft_ms, retry_count, "cancelled", None)
+            self._write_log(request, t0, ttft_ms, retry_count, "cancelled", None, seq)
             return
         if final_error is not None:
             yield final_error
-        self._write_log(request, t0, ttft_ms, retry_count, "error", final_error)
+        self._write_log(request, t0, ttft_ms, retry_count, "error", final_error, seq)
 
     def _write_log(
         self,
@@ -963,9 +1051,11 @@ class LLMGateway:
         retry_count: int,
         status: str,
         error: dict | None,
+        seq: int = 0,
+        usage: dict | None = None,
     ) -> None:
-        """写一条脱敏 attempt 汇总日志。"""
-        self._logger.write({
+        """写一条脱敏 attempt 汇总日志，并按 trace_id 同步到 TraceStore。"""
+        record = {
             "trace_id": request.trace_id,
             "api_type": request.api_type,
             "provider": request.provider or request.api_type,
@@ -981,12 +1071,29 @@ class LLMGateway:
             "error_kind": error.get("error_kind") if error else None,
             "error_status_code": error.get("status_code") if error else None,
             "error_message": error.get("message") if error else None,
-        })
+        }
+        # token 用量（仅成功流末尾有），独立放进 record 供 sink 落库。
+        if usage:
+            record["usage"] = usage
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                if usage.get(key) is not None:
+                    record[key] = usage[key]
+        self._logger.write(record)
+        if self._trace_sink is not None:
+            try:
+                self._trace_sink.record_llm_call(request.trace_id, seq, record)
+            except Exception:
+                logger.debug("[LLMGateway] trace sink record_llm_call failed", exc_info=True)
 
-    def _build_request(self, messages: list[dict], tools: Optional[list[dict]]) -> LLMRequest:
+    def _build_request(
+        self,
+        messages: list[dict],
+        tools: Optional[list[dict]],
+        trace_id: str | None = None,
+    ) -> LLMRequest:
         """把全局配置或 config_proxy 解析为 provider-neutral 请求。"""
         api_type = self._value("api_type", cfg.apiType)
-        trace_id = uuid.uuid4().hex
+        trace_id = trace_id or uuid.uuid4().hex
 
         if api_type == "shangdao":
             model = self._value("shangdao_model", cfg.shangdaoModel)
