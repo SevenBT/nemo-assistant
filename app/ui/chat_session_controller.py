@@ -3,6 +3,7 @@
 from PyQt6.QtCore import QObject
 
 from app.core.agent_loop import AgentLoop
+from app.core.audit_hooks import EvalHook, SecurityAuditHook
 from app.core.config import cfg
 from app.models.message import Message, MessageRole, ToolCall
 from app.models.session import DEFAULT_SESSION_TITLE, SOURCE_MANUAL, SOURCE_READING
@@ -31,6 +32,7 @@ class ChatSessionController(QObject):
         session_panel,
         tool_status,
         consolidator=None,
+        trace_store=None,
     ):
         super().__init__(parent)
         self._parent = parent
@@ -43,6 +45,7 @@ class ChatSessionController(QObject):
         self._session_panel = session_panel
         self._tool_status = tool_status
         self._consolidator = consolidator
+        self._trace_store = trace_store
 
         self._current_session_id: str | None = None
         self._workers: dict[str, AgentLoop] = {}
@@ -372,10 +375,25 @@ class ChatSessionController(QObject):
             registry=self._registry,
             api_messages=api_msgs,
             session_id=sid,
+            trace_store=self._trace_store,
+            hooks=self._build_hooks(),
         )
         self._workers[sid] = worker
         self._connect_worker(sid, worker)
         worker.start()
+
+    def _build_hooks(self) -> list:
+        """构建本次 turn 的生命周期 hook（安全审计 + 评测埋点）。
+
+        trace_store 为 None（遥测禁用）时不挂任何 hook，省去无意义开销。
+        安全 hook 默认只审计不拦截；后续若要按工具开关拦截，传 blocked_tools。
+        """
+        if self._trace_store is None:
+            return []
+        return [
+            SecurityAuditHook(self._trace_store),
+            EvalHook(self._trace_store),
+        ]
 
     # ── 划词「续入/新建会话」：填入快速会话输入框，等用户手动发 ──────────────
     def compose_in_reading(self, text: str, *, force_new: bool) -> str:

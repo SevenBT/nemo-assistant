@@ -31,6 +31,7 @@ from app.core.llm_gateway import LLMGateway
 from app.core.note_manager import NoteManager
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
+from app.core.trace_store import TraceStore
 from app.models.session import SOURCE_MANUAL
 from app.tools.context import ToolContext, ToolEvents
 from app.tools.loader import load_builtin_tools, load_user_script_tools
@@ -95,7 +96,9 @@ class MainWindow(FluentWindow):
         self._scheduler = scheduler
         self._notes = note_mgr
         self._registry = ToolRegistry()
-        self._llm_gateway = LLMGateway()
+        # 统一 trace 存储：贯穿 LLM 调用与工具调用，落独立 traces.db。
+        self._trace_store = TraceStore()
+        self._llm_gateway = LLMGateway(trace_sink=self._trace_store)
         self._snap_mgr: EdgeSnapManager | None = None
 
         self._build_window()
@@ -124,6 +127,7 @@ class MainWindow(FluentWindow):
             session_panel=self._session_panel,
             tool_status=self._tool_status,
             consolidator=self._consolidator,
+            trace_store=self._trace_store,
         )
         # 识图：每次截图动作新建一个会话，附上图片并按动作处理（自动发送或等输入）
         self._screenshot_controller.set_chat_callbacks(
@@ -493,6 +497,7 @@ class MainWindow(FluentWindow):
             on_sessions_changed=self._chat_session_controller.refresh_panel,
             note_mgr=self._notes,
             on_notes_changed=self._notes_panel.refresh,
+            trace_store=self._trace_store,
             parent=self,
         )
         if dlg.exec():
