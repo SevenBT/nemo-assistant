@@ -1,5 +1,9 @@
 """
 记忆工具 — 让 AI 能主动保存、检索、删除记忆。
+
+单个 MemoryTool 用 action 参数区分三种操作（save / recall / forget），
+替代早期拆分的 save_memory / recall_memory / forget_memory 三个工具，
+减少发给模型的工具数量。
 """
 from __future__ import annotations
 
@@ -13,46 +17,68 @@ if TYPE_CHECKING:
     from app.tools.context import ToolContext
 
 
-class SaveMemoryTool(BuiltinTool):
-    """保存一条记忆。"""
+class MemoryTool(BuiltinTool):
+    """长期记忆读写工具，按 action 分发 save / recall / forget。"""
 
     def __init__(self, memory_mgr: "MemoryManager"):
         self._mem = memory_mgr
 
     @classmethod
-    def create(cls, ctx: "ToolContext") -> "SaveMemoryTool":
+    def create(cls, ctx: "ToolContext") -> "MemoryTool":
         return cls(memory_mgr=ctx.extra["memory_mgr"])
 
     @property
     def name(self) -> str:
-        return "save_memory"
+        return "memory"
 
     @property
     def description(self) -> str:
         return (
-            "保存一条长期记忆。用于记住用户偏好、项目决策、重要事实等信息，"
-            "这些信息会在后续对话中自动提供给你作为上下文。"
+            "管理长期记忆（用户偏好、项目决策、重要事实等），保存的内容会在后续对话中"
+            "自动作为上下文提供给你。\n"
+            "- action=save：保存一条记忆，需 content + category，可选 scope/importance\n"
+            "- action=recall：查看已保存的记忆，可选 category/scope 过滤\n"
+            "- action=forget：删除一条记忆，需 memory_id"
         )
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
-            "content", "category",
-            content=Str("记忆内容，简洁明确的一句话描述"),
+            "action",
+            action=Str("操作类型", enum=["save", "recall", "forget"]),
+            content=Str("action=save 时必填，记忆内容，简洁明确的一句话"),
             category=Str(
-                "记忆分类",
+                "记忆分类（save 必填，recall 可用于过滤）",
                 enum=["personality", "user", "project", "fact"],
             ),
             scope=Str(
-                "记忆范围：global=所有会话可见，session=仅当前会话可见",
+                "记忆范围：global=所有会话可见，session=仅当前会话可见（默认 global）",
                 enum=["global", "session"],
             ),
-            importance=Int("重要性 1-10，默认 5", minimum=1, maximum=10),
+            importance=Int("重要性 1-10，默认 5（save 用）", minimum=1, maximum=10),
+            memory_id=Int("action=forget 时必填，要删除的记忆 ID"),
         )
 
     def execute(self, params: dict[str, Any]) -> dict[str, Any]:
-        content = params["content"]
-        category = params["category"]
+        action = params.get("action", "")
+        if action == "save":
+            return self._save(params)
+        if action == "recall":
+            return self._recall(params)
+        if action == "forget":
+            return self._forget(params)
+        return {
+            "status": "error",
+            "data": {"message": f"未知 action: {action}，应为 save/recall/forget"},
+        }
+
+    def _save(self, params: dict[str, Any]) -> dict[str, Any]:
+        content = params.get("content")
+        if not content:
+            return {"status": "error", "data": {"message": "action=save 需要 content"}}
+        category = params.get("category")
+        if not category:
+            return {"status": "error", "data": {"message": "action=save 需要 category"}}
         scope = params.get("scope", "global")
         importance = params.get("importance", 5)
         session_id = params.get("_session_id")  # 由 AgentLoop 注入
@@ -70,40 +96,7 @@ class SaveMemoryTool(BuiltinTool):
             "data": {"id": memory.id, "message": f"已保存记忆: {content[:50]}"},
         }
 
-
-class RecallMemoryTool(BuiltinTool):
-    """检索记忆。"""
-
-    def __init__(self, memory_mgr: "MemoryManager"):
-        self._mem = memory_mgr
-
-    @classmethod
-    def create(cls, ctx: "ToolContext") -> "RecallMemoryTool":
-        return cls(memory_mgr=ctx.extra["memory_mgr"])
-
-    @property
-    def name(self) -> str:
-        return "recall_memory"
-
-    @property
-    def description(self) -> str:
-        return "检索已保存的记忆，查看当前记住了哪些信息"
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return tool_params(
-            category=Str(
-                "按分类过滤，不传则返回所有",
-                enum=["personality", "user", "project", "fact"],
-            ),
-            scope=Str("按范围过滤", enum=["global", "session"]),
-        )
-
-    @property
-    def read_only(self) -> bool:
-        return True
-
-    def execute(self, params: dict[str, Any]) -> dict[str, Any]:
+    def _recall(self, params: dict[str, Any]) -> dict[str, Any]:
         category = params.get("category")
         scope = params.get("scope")
         session_id = params.get("_session_id")
@@ -112,8 +105,6 @@ class RecallMemoryTool(BuiltinTool):
             memories = self._mem.get_for_session(session_id)
             if category:
                 memories = [m for m in memories if m.category == category]
-        elif scope == "global" or not scope:
-            memories = self._mem.get_global(category=category)
         else:
             memories = self._mem.get_global(category=category)
 
@@ -124,34 +115,10 @@ class RecallMemoryTool(BuiltinTool):
         ]
         return {"status": "success", "data": {"memories": items, "count": len(items)}}
 
-
-class ForgetMemoryTool(BuiltinTool):
-    """删除一条记忆。"""
-
-    def __init__(self, memory_mgr: "MemoryManager"):
-        self._mem = memory_mgr
-
-    @classmethod
-    def create(cls, ctx: "ToolContext") -> "ForgetMemoryTool":
-        return cls(memory_mgr=ctx.extra["memory_mgr"])
-
-    @property
-    def name(self) -> str:
-        return "forget_memory"
-
-    @property
-    def description(self) -> str:
-        return "删除一条已保存的记忆（通过 ID）"
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return tool_params(
-            "memory_id",
-            memory_id=Int("要删除的记忆 ID"),
-        )
-
-    def execute(self, params: dict[str, Any]) -> dict[str, Any]:
-        memory_id = params["memory_id"]
+    def _forget(self, params: dict[str, Any]) -> dict[str, Any]:
+        memory_id = params.get("memory_id")
+        if memory_id is None:
+            return {"status": "error", "data": {"message": "action=forget 需要 memory_id"}}
         deleted = self._mem.delete(memory_id)
         if deleted:
             return {"status": "success", "data": {"message": f"已删除记忆 #{memory_id}"}}
