@@ -39,6 +39,7 @@ class ConversationPromptBuilderTest(unittest.TestCase):
             memory_mgr=FakeMemoryManager(),
             config=FakeConfig("Global prompt"),
             datetime_info_provider=lambda: "time info",
+            time_hint_provider=lambda: "[time hint]",
         )
 
         tool_call = ToolCall(
@@ -59,9 +60,13 @@ class ConversationPromptBuilderTest(unittest.TestCase):
         self.assertNotIn("Global prompt", result[0]["content"])
         self.assertIn("memory for s1", result[0]["content"])
         self.assertTrue(result[0]["content"].endswith("time info"))
-        self.assertEqual(result[-1]["role"], "tool")
-        self.assertEqual(result[-1]["tool_call_id"], "call-1")
-        self.assertEqual(json.loads(result[-1]["content"])["value"], 42)
+        # 精确时间作为独立 system 消息追加在末尾（缓存优化）
+        self.assertEqual(result[-1]["role"], "system")
+        self.assertEqual(result[-1]["content"], "[time hint]")
+        # 工具结果消息在时间 hint 之前
+        self.assertEqual(result[-2]["role"], "tool")
+        self.assertEqual(result[-2]["tool_call_id"], "call-1")
+        self.assertEqual(json.loads(result[-2]["content"])["value"], 42)
 
     def test_incomplete_assistant_tool_call_is_omitted(self):
         session = SimpleNamespace(system_prompt="")
@@ -69,6 +74,7 @@ class ConversationPromptBuilderTest(unittest.TestCase):
             session_mgr=FakeSessionManager(session),
             config=FakeConfig("Global prompt"),
             datetime_info_provider=lambda: "time info",
+            time_hint_provider=lambda: "[time hint]",
         )
         messages = [
             Message(role=MessageRole.USER, content="hello"),
@@ -87,8 +93,11 @@ class ConversationPromptBuilderTest(unittest.TestCase):
 
         result = builder.build(messages, session_id="s1")
 
-        self.assertEqual([message["role"] for message in result], ["system", "user"])
+        self.assertEqual(
+            [message["role"] for message in result], ["system", "user", "system"]
+        )
         self.assertIn("Global prompt", result[0]["content"])
+        self.assertEqual(result[-1]["content"], "[time hint]")
 
 
 if __name__ == "__main__":

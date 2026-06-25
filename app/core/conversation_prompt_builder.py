@@ -9,6 +9,7 @@ from app.core.constants import (
     BUILTIN_TOOLS_INSTRUCTION,
     DEFAULT_USER_PROMPT,
     get_current_datetime_info,
+    get_current_time_hint,
 )
 from app.models.message import Message, MessageRole
 
@@ -22,11 +23,13 @@ class ConversationPromptBuilder:
         memory_mgr=None,
         config=cfg,
         datetime_info_provider: Callable[[], str] = get_current_datetime_info,
+        time_hint_provider: Callable[[], str] = get_current_time_hint,
     ):
         self._sessions = session_mgr
         self._memory_mgr = memory_mgr
         self._config = config
         self._datetime_info_provider = datetime_info_provider
+        self._time_hint_provider = time_hint_provider
 
     def build(self, messages: list[Message], session_id: str | None) -> list[dict]:
         system_prompt = self._build_system_prompt(session_id)
@@ -43,6 +46,11 @@ class ConversationPromptBuilder:
                     result.extend(self._tool_result_messages(message))
                 else:
                     result.pop()
+
+        # 精确到分钟的时间放在请求最末尾，避免污染前面可缓存的稳定前缀。
+        time_hint = self._time_hint_provider()
+        if time_hint:
+            result.append({"role": "system", "content": time_hint})
 
         return result
 
