@@ -498,6 +498,8 @@ class MainWindow(FluentWindow):
             note_mgr=self._notes,
             on_notes_changed=self._notes_panel.refresh,
             trace_store=self._trace_store,
+            llm_gateway=self._llm_gateway,
+            prompt_builder=self._prompt_builder,
             parent=self,
         )
         if dlg.exec():

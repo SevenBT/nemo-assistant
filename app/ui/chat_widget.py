@@ -1,6 +1,6 @@
 import markdown as _md
 
-from PyQt6.QtCore import Qt, QEvent, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QEvent, QPoint, QSize, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
     QSizePolicy,
@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import IndeterminateProgressBar, SmoothScrollArea
 
 from app.models.message import Message, MessageRole
+from app.ui.anchor_rail import AnchorRail, _AnchorPanel
 from app.ui.tool_card import ToolSummaryWidget
 from app.ui.file_card_widget import FileCardWidget
 from app.ui.image_preview_widget import ImagePreviewWidget
@@ -110,6 +111,7 @@ class MessageBubble(QFrame):
     def __init__(self, message: Message, parent=None):
         super().__init__(parent)
         self._is_user = message.role == MessageRole.USER
+        self._text = message.content or ""
         self._tool_summary: ToolSummaryWidget | None = None
         self.setObjectName("userMessage" if self._is_user else "aiMessage")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -122,6 +124,10 @@ class MessageBubble(QFrame):
     @property
     def is_user(self) -> bool:
         return self._is_user
+
+    @property
+    def text(self) -> str:
+        return self._text
 
     def _build(self, message: Message):
         layout = QVBoxLayout(self)
@@ -202,6 +208,8 @@ class ChatWidget(QWidget):
     file_attached = pyqtSignal(list)  # 发射 Attachment 列表
 
     _MAX_CONTENT_WIDTH = 760  # content column max width; centered when viewport is wider
+    _PANEL_RAIL_GAP = 6       # 锚点面板与轨道之间的间隙
+    _PANEL_CONTENT_GAP = 16   # 锚点面板与对话内容右边缘的最小间隙
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -229,6 +237,27 @@ class ChatWidget(QWidget):
         self._scroll.viewport().installEventFilter(self)
         root.addWidget(self._scroll)
 
+        # 问题锚点轨道：覆盖在 viewport 右侧（滚动条内侧）
+        self._anchor_rail = AnchorRail(self._scroll.viewport())
+        self._anchor_rail.anchor_clicked.connect(self._scroll_to_bubble)
+        self._anchor_rail.hide()
+        self._scroll.verticalScrollBar().valueChanged.connect(
+            self._on_scroll_changed
+        )
+
+        # 悬停时弹出的问题列表面板（整体框 + 主题背景）
+        self._anchor_panel = _AnchorPanel(self._scroll.viewport())
+        self._anchor_panel.row_clicked.connect(self._on_panel_row_clicked)
+        self._anchor_rail.entered.connect(self._show_anchor_panel)
+        self._anchor_rail.left.connect(self._maybe_hide_anchor_panel)
+        self._anchor_rail.hover_anchor.connect(self._anchor_panel.set_active)
+        self._anchor_panel.entered.connect(self._cancel_hide_panel)
+        self._anchor_panel.left.connect(self._maybe_hide_anchor_panel)
+        self._hide_panel_timer = QTimer(self)
+        self._hide_panel_timer.setSingleShot(True)
+        self._hide_panel_timer.setInterval(150)
+        self._hide_panel_timer.timeout.connect(self._anchor_panel.hide)
+
         # 打字指示器在底部（滚动区域外）
         self._typing = TypingIndicator()
         root.addWidget(self._typing)
@@ -239,7 +268,69 @@ class ChatWidget(QWidget):
     def eventFilter(self, obj, event):
         if obj is self._scroll.viewport() and event.type() == QEvent.Type.Resize:
             self._update_inner_margins(event.size().width())
+            self._reposition_rail()
         return super().eventFilter(obj, event)
+
+    def _reposition_rail(self):
+        """让锚点轨道贴在 viewport 右侧、滚动条内侧。"""
+        vp = self._scroll.viewport()
+        w = self._anchor_rail.width()
+        # 右侧留出滚动条宽度（约 12px）的内边距
+        x = vp.width() - w - 12
+        self._anchor_rail.setGeometry(x, 0, w, vp.height())
+        self._anchor_rail.raise_()
+        self._anchor_rail.relayout()
+        if self._anchor_panel.isVisible():
+            self._position_anchor_panel()
+
+    # -- 锚点面板联动 -----------------------------------------------------
+
+    def _on_scroll_changed(self):
+        self._anchor_rail.refresh()
+        self._anchor_panel.set_active(self._anchor_rail.active_index())
+
+    def _show_anchor_panel(self):
+        self._hide_panel_timer.stop()
+        anchors = self._anchor_rail.anchors()
+        if not anchors:
+            return
+        texts = [(t.strip() or "（空消息）") for _, t in anchors]
+        texts = [" ".join(t.split()) for t in texts]
+        # 面板宽度受限于「对话内容右边缘」与轨道之间的空隙，留固定间隙不遮盖对话
+        vp = self._scroll.viewport()
+        side = max(16, (vp.width() - self._MAX_CONTENT_WIDTH) // 2)
+        content_right = vp.width() - side
+        gap = (self._anchor_rail.x() - self._PANEL_RAIL_GAP) - (
+            content_right + self._PANEL_CONTENT_GAP
+        )
+        max_w = max(self._anchor_panel._MIN_W, gap)
+        self._anchor_panel.set_items(
+            texts, self._anchor_rail.active_index(), max_w
+        )
+        self._position_anchor_panel()
+        self._anchor_panel.show()
+        self._anchor_panel.raise_()
+
+    def _position_anchor_panel(self):
+        """面板右边缘贴近轨道左侧，垂直居中于 viewport。"""
+        vp = self._scroll.viewport()
+        panel = self._anchor_panel
+        x = self._anchor_rail.x() - panel.width() - self._PANEL_RAIL_GAP
+        y = (vp.height() - panel.height()) // 2
+        panel.move(max(4, x), max(4, y))
+
+    def _cancel_hide_panel(self):
+        self._hide_panel_timer.stop()
+
+    def _maybe_hide_anchor_panel(self):
+        # 延迟隐藏，给鼠标从轨道移到面板的过渡留出时间
+        self._hide_panel_timer.start()
+
+    def _on_panel_row_clicked(self, idx: int):
+        anchors = self._anchor_rail.anchors()
+        if 0 <= idx < len(anchors):
+            self._scroll_to_bubble(anchors[idx][0])
+            self._anchor_panel.hide()
 
     def _update_inner_margins(self, viewport_width: int):
         """当视口宽度超过最大内容宽度时，用等距侧边距保持内容居中。"""
@@ -254,6 +345,7 @@ class ChatWidget(QWidget):
         else:
             self._layout.addWidget(bubble)
         QTimer.singleShot(30, self._scroll_bottom)
+        QTimer.singleShot(30, self._rebuild_anchors)
         return bubble
 
     def last_bubble(self) -> MessageBubble | None:
@@ -264,11 +356,13 @@ class ChatWidget(QWidget):
             self._bubbles.remove(bubble)
         bubble.setParent(None)
         bubble.deleteLater()
+        self._rebuild_anchors()
 
     def clear(self):
         for b in self._bubbles:
             b.deleteLater()
         self._bubbles.clear()
+        self._rebuild_anchors()
 
     def load_session(self, messages: list[Message]):
         """
@@ -295,6 +389,7 @@ class ChatWidget(QWidget):
                     i += 1
                 self._add_assistant_group(group)
         QTimer.singleShot(80, self._scroll_bottom)
+        QTimer.singleShot(80, self._rebuild_anchors)
 
     def _add_assistant_group(self, group: list[Message]):
         """将连续的 assistant 消息合并为单个气泡，收集所有工具调用。"""
@@ -325,9 +420,46 @@ class ChatWidget(QWidget):
     def scroll_bottom(self):
         QTimer.singleShot(30, self._scroll_bottom)
 
+    def _rebuild_anchors(self):
+        """收集所有用户问题气泡，刷新锚点轨道。"""
+        anchors = [(b, b.text) for b in self._bubbles if b.is_user]
+        self._anchor_rail.set_anchors(anchors)
+        self._reposition_rail()
+
+    def _scroll_to_bubble(self, bubble: MessageBubble):
+        """平滑滚动，使指定气泡顶部对齐视口上沿。"""
+        if bubble not in self._bubbles:
+            return
+        target = bubble.mapTo(self._inner, QPoint(0, 0)).y()
+        sb = self._scroll.verticalScrollBar()
+        # 留出少许上边距，避免紧贴顶部
+        value = max(sb.minimum(), min(target - 12, sb.maximum()))
+        delegate = getattr(self._scroll, "delegate", None)
+        bar = getattr(delegate, "vScrollBar", None)
+        if bar is not None:
+            bar.scrollTo(value)  # 带动画平滑滚动
+        else:
+            sb.setValue(value)
+            self._sync_smooth_scroll(value)
+
     def _scroll_bottom(self):
         sb = self._scroll.verticalScrollBar()
         sb.setValue(sb.maximum())
+        self._sync_smooth_scroll(sb.maximum())
+        self._anchor_rail.refresh()
+
+    def _sync_smooth_scroll(self, value: int):
+        """同步 qfluentwidgets SmoothScrollBar 的内部累加器。
+
+        SmoothScrollArea 的滚轮走 SmoothScrollBar.scrollValue()，它维护独立的
+        __value 累加器作为滚轮真值来源。程序化设置原生 scrollbar 不会更新该累加器，
+        导致下次滚轮从陈旧的 __value 起算，出现「滚一格、跳整屏」的大幅跳变。
+        每次程序化滚动后用 resetValue() 把累加器对齐到实际位置。
+        """
+        delegate = getattr(self._scroll, "delegate", None)
+        bar = getattr(delegate, "vScrollBar", None)
+        if bar is not None:
+            bar.resetValue(value)
 
     def start_typing(self):
         """显示输入指示器并滚动到底部。"""

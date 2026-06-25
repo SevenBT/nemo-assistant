@@ -31,6 +31,7 @@ class SettingsWindow(QDialog):
         ("归档会话", "archived"),
         ("回收站", "trash"),
         ("运行记录", "trace"),
+        ("评测集", "eval"),
     ]
 
     def __init__(
@@ -42,6 +43,8 @@ class SettingsWindow(QDialog):
         note_mgr=None,
         on_notes_changed=None,
         trace_store=None,
+        llm_gateway=None,
+        prompt_builder=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -52,6 +55,8 @@ class SettingsWindow(QDialog):
         self._note_mgr = note_mgr
         self._on_notes_changed = on_notes_changed
         self._trace_store = trace_store
+        self._llm_gateway = llm_gateway
+        self._prompt_builder = prompt_builder
         self.setWindowTitle("设置")
         self.setMinimumSize(640, 480)
         self.resize(cfg.get(cfg.settingsWidth), cfg.get(cfg.settingsHeight))
@@ -104,6 +109,7 @@ class SettingsWindow(QDialog):
         from app.ui.settings_pages.archived_page import ArchivedPage
         from app.ui.settings_pages.trash_page import TrashPage
         from app.ui.settings_pages.trace_page import TracePage
+        from app.ui.settings_pages.eval_page import EvalPage
 
         self._stack.addWidget(AppearancePage(self))
         self._stack.addWidget(EditorPage(self))
@@ -119,7 +125,16 @@ class SettingsWindow(QDialog):
         self._stack.addWidget(
             TrashPage(self._note_mgr, self._on_notes_changed, self)
         )
-        self._stack.addWidget(TracePage(self._trace_store, self))
+        self._stack.addWidget(TracePage(self._trace_store, self._session_mgr, self))
+        self._stack.addWidget(
+            EvalPage(
+                self._trace_store,
+                self._llm_gateway,
+                self._registry,
+                self._prompt_builder,
+                self,
+            )
+        )
 
     def _on_nav_changed(self, index: int):
         self._stack.setCurrentIndex(index)

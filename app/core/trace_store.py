@@ -187,6 +187,44 @@ class TraceStore:
                     created_at  TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS eval_cases (
+                    case_id     TEXT PRIMARY KEY,
+                    title       TEXT,
+                    source_trace_id TEXT,
+                    user_input  TEXT NOT NULL,
+                    api_messages TEXT,
+                    expected_tools  TEXT,
+                    completion_note TEXT,
+                    enabled     INTEGER NOT NULL DEFAULT 1,
+                    created_at  TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS eval_runs (
+                    run_id      TEXT PRIMARY KEY,
+                    label       TEXT,
+                    model       TEXT,
+                    prompt_version TEXT,
+                    git_commit  TEXT,
+                    case_count  INTEGER NOT NULL DEFAULT 0,
+                    avg_scores  TEXT,
+                    baseline_run_id TEXT,
+                    started_at  TEXT NOT NULL,
+                    completed_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS eval_results (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id      TEXT NOT NULL,
+                    case_id     TEXT NOT NULL,
+                    trace_id    TEXT,
+                    actual_output TEXT,
+                    rule_scores TEXT,
+                    judge_scores TEXT,
+                    judge_reasoning TEXT,
+                    judge_model TEXT,
+                    created_at  TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id);
                 CREATE INDEX IF NOT EXISTS idx_turns_started ON turns(started_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_llm_trace ON llm_calls(trace_id);
@@ -194,6 +232,7 @@ class TraceStore:
                 CREATE INDEX IF NOT EXISTS idx_state_trace ON state_trace(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_sec_trace ON security_events(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_eval_trace ON eval_samples(trace_id);
+                CREATE INDEX IF NOT EXISTS idx_evalres_run ON eval_results(run_id);
                 """
             )
             conn.commit()
@@ -424,6 +463,159 @@ class TraceStore:
             ),
         )
 
+    def update_eval_scores(self, sample_id: int, scores: dict[str, Any]) -> None:
+        """把离线打分结果写回 eval_samples.scores（合上线上采集的闭环）。"""
+        if not self.enabled:
+            return
+        self._write(
+            "UPDATE eval_samples SET scores = ? WHERE id = ?",
+            (_to_json(scores), sample_id),
+        )
+
+    # ── 评测用例 / 运行（离线评测子系统） ───────────────────────────────────
+
+    def add_eval_case(
+        self,
+        *,
+        case_id: str,
+        title: str | None,
+        source_trace_id: str | None,
+        user_input: str,
+        api_messages: Any,
+        expected_tools: list[str] | None,
+        completion_note: str | None,
+    ) -> None:
+        """登记一条回归用例（失败案例回填版 Golden Set）。"""
+        if not self.enabled:
+            return
+        self._write(
+            "INSERT OR REPLACE INTO eval_cases (case_id, title, source_trace_id, "
+            "user_input, api_messages, expected_tools, completion_note, enabled, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
+            (
+                case_id,
+                title,
+                source_trace_id,
+                _truncate(user_input),
+                _to_json(api_messages),
+                _to_json(expected_tools),
+                _truncate(completion_note),
+                _now_iso(),
+            ),
+        )
+
+    def list_eval_cases(self, enabled_only: bool = True) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        try:
+            with self._connect() as conn:
+                sql = "SELECT * FROM eval_cases"
+                if enabled_only:
+                    sql += " WHERE enabled = 1"
+                sql += " ORDER BY created_at DESC"
+                rows = conn.execute(sql).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            logger.exception("[TraceStore] list_eval_cases failed")
+            return []
+
+    def set_eval_case_enabled(self, case_id: str, enabled: bool) -> None:
+        if not self.enabled:
+            return
+        self._write(
+            "UPDATE eval_cases SET enabled = ? WHERE case_id = ?",
+            (1 if enabled else 0, case_id),
+        )
+
+    def delete_eval_case(self, case_id: str) -> None:
+        if not self.enabled:
+            return
+        self._write("DELETE FROM eval_cases WHERE case_id = ?", (case_id,))
+
+    def start_eval_run(
+        self,
+        *,
+        run_id: str,
+        label: str | None,
+        model: str | None,
+        prompt_version: str | None,
+        git_commit: str | None,
+        case_count: int,
+        baseline_run_id: str | None,
+    ) -> None:
+        if not self.enabled:
+            return
+        self._write(
+            "INSERT OR REPLACE INTO eval_runs (run_id, label, model, prompt_version, "
+            "git_commit, case_count, baseline_run_id, started_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run_id, label, model, prompt_version, git_commit,
+                case_count, baseline_run_id, _now_iso(),
+            ),
+        )
+
+    def finish_eval_run(self, run_id: str, *, avg_scores: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        self._write(
+            "UPDATE eval_runs SET avg_scores = ?, completed_at = ? WHERE run_id = ?",
+            (_to_json(avg_scores), _now_iso(), run_id),
+        )
+
+    def add_eval_result(
+        self,
+        *,
+        run_id: str,
+        case_id: str,
+        trace_id: str | None,
+        actual_output: str | None,
+        rule_scores: dict[str, Any] | None,
+        judge_scores: dict[str, Any] | None = None,
+        judge_reasoning: str | None = None,
+        judge_model: str | None = None,
+    ) -> None:
+        if not self.enabled:
+            return
+        self._write(
+            "INSERT INTO eval_results (run_id, case_id, trace_id, actual_output, "
+            "rule_scores, judge_scores, judge_reasoning, judge_model, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run_id, case_id, trace_id, _truncate(actual_output),
+                _to_json(rule_scores), _to_json(judge_scores),
+                _truncate(judge_reasoning), judge_model, _now_iso(),
+            ),
+        )
+
+    def list_eval_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM eval_runs ORDER BY started_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            logger.exception("[TraceStore] list_eval_runs failed")
+            return []
+
+    def get_eval_results(self, run_id: str) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM eval_results WHERE run_id = ? ORDER BY id",
+                    (run_id,),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            logger.exception("[TraceStore] get_eval_results failed")
+            return []
+
     # ── 回放 / 查询接口 ──────────────────────────────────────────────────
 
     def get_turn(self, trace_id: str) -> dict[str, Any] | None:
@@ -544,6 +736,22 @@ class TraceStore:
             return [dict(r) for r in rows]
         except Exception:
             logger.exception("[TraceStore] list_eval_samples failed")
+            return []
+
+    def list_unscored_eval_samples(self, limit: int = 500) -> list[dict[str, Any]]:
+        """列出 scores 仍为空的评测样本，供离线打分回填（合上闭环的入口）。"""
+        if not self.enabled:
+            return []
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM eval_samples WHERE scores IS NULL "
+                    "ORDER BY id DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            logger.exception("[TraceStore] list_unscored_eval_samples failed")
             return []
 
     # ── 内部写入辅助 ────────────────────────────────────────────────────

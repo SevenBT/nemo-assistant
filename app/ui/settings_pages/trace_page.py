@@ -57,9 +57,10 @@ def _status_meta(status: str) -> tuple[str, str]:
 class TracePage(QWidget):
     """运行记录列表 + 单次运行的全链路回放。"""
 
-    def __init__(self, trace_store=None, parent=None):
+    def __init__(self, trace_store=None, session_mgr=None, parent=None):
         super().__init__(parent)
         self._store = trace_store
+        self._session_mgr = session_mgr
         self._turns: list[dict] = []
         self._build()
         self.reload()
@@ -72,6 +73,19 @@ class TracePage(QWidget):
         header = QHBoxLayout()
         header.addWidget(StrongBodyLabel("运行记录", self))
         header.addStretch()
+        self._save_case_btn = PushButton(FluentIcon.HEART, "存为回归用例", self)
+        self._save_case_btn.setToolTip(
+            "把当前选中的这条运行存为回归用例，下次跑回归时重跑。"
+        )
+        self._save_case_btn.clicked.connect(self._on_save_case)
+        self._save_case_btn.setEnabled(False)
+        header.addWidget(self._save_case_btn)
+        self._score_btn = PushButton(FluentIcon.CERTIFICATE, "打分", self)
+        self._score_btn.setToolTip(
+            "对所有未打分的评测样本做离线规则评测，把分数写回。"
+        )
+        self._score_btn.clicked.connect(self._on_score)
+        header.addWidget(self._score_btn)
         self._refresh_btn = PushButton(FluentIcon.SYNC, "刷新", self)
         self._refresh_btn.clicked.connect(self.reload)
         header.addWidget(self._refresh_btn)
@@ -85,6 +99,7 @@ class TracePage(QWidget):
 
         self._empty = BodyLabel("暂无运行记录。", self)
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty.setWordWrap(True)
         layout.addWidget(self._empty, 1)
 
         body = QHBoxLayout()
@@ -117,6 +132,27 @@ class TracePage(QWidget):
         if self._turns:
             self._list.setCurrentRow(0)
 
+    def _on_score(self):
+        """离线给未打分的评测样本打规则分，写回 scores 列后刷新当前详情。"""
+        if self._store is None or not getattr(self._store, "enabled", False):
+            return
+        from app.eval import scorer
+
+        self._score_btn.setEnabled(False)
+        self._score_btn.setText("打分中…")
+        try:
+            n = scorer.score_unscored_samples(self._store)
+        finally:
+            self._score_btn.setText("打分")
+            self._score_btn.setEnabled(True)
+        # 重渲染当前选中详情，让新分数立即显示。
+        row = self._list.currentRow()
+        if 0 <= row < len(self._turns):
+            self._on_select(row)
+        from app.ui.toast import show_toast
+
+        show_toast("评测打分", f"已为 {n} 条样本打分" if n else "没有待打分的样本")
+
     def _set_empty(self, is_empty: bool, message: str = "暂无运行记录。"):
         self._empty.setText(message)
         self._empty.setVisible(is_empty)
@@ -132,12 +168,44 @@ class TracePage(QWidget):
     def _on_select(self, index: int):
         if index < 0 or index >= len(self._turns):
             self._detail.clear()
+            self._save_case_btn.setEnabled(False)
             return
+        self._save_case_btn.setEnabled(self._session_mgr is not None)
         trace_id = self._turns[index].get("trace_id")
         if not trace_id:
             return
         data = self._store.get_turn(trace_id)
         self._detail.set_data(data)
+
+    def _on_save_case(self):
+        """把当前选中的 turn 存为回归用例。
+
+        用户输入从该 turn 所属会话的最近一轮 user 消息取——trace 本身不存 user
+        消息（trace_page 注释「不暴露可变内部结构」），所以靠 session_mgr 补。
+        """
+        if self._store is None or self._session_mgr is None:
+            return
+        row = self._list.currentRow()
+        if not (0 <= row < len(self._turns)):
+            return
+        turn = self._turns[row]
+        trace_id = turn.get("trace_id")
+        session_id = turn.get("session_id") or ""
+        user_input = _first_user_input(self._session_mgr, session_id)
+        if not user_input:
+            from app.ui.toast import show_toast
+            show_toast("存为回归用例", "无法从会话中提取用户输入")
+            return
+        from app.eval import cases
+        from app.ui.toast import show_toast
+
+        case_id = cases.build_case_from_trace(
+            self._store, trace_id, user_input=user_input
+        )
+        if case_id:
+            show_toast("存为回归用例", "已加入回归集")
+        else:
+            show_toast("存为回归用例", "保存失败")
 
 
 # ── 列表行 ──────────────────────────────────────────────────────────────
@@ -225,6 +293,7 @@ class _TurnDetailView(QWidget):
 
         self._placeholder = BodyLabel("选择左侧记录查看详情。", self)
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._placeholder.setWordWrap(True)
         layout.addWidget(self._placeholder, 1)
         self.clear()
 
@@ -348,6 +417,7 @@ class _CardListPage(SingleDirectionScrollArea):
     def add_empty(self, text: str):
         label = CaptionLabel(text, self)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
         self.add_card(label)
 
 
@@ -481,3 +551,25 @@ def _state_card(states: list, parent: QWidget) -> QWidget:
     body.setWordWrap(True)
     col.addWidget(body)
     return card
+
+
+def _first_user_input(session_mgr, session_id: str) -> str | None:
+    """从指定会话中取第一条 user 消息作为回归用例的 user_input。
+
+    Session.messages 里装的是 Message 实体（属性访问 .role / .content），不是 dict
+    ——Session 落盘时才会 to_dict()。这里直接读实体，避免无谓的序列化往返。
+    """
+    if not session_id or session_mgr is None:
+        return None
+    try:
+        session = session_mgr.get(session_id)
+    except Exception:
+        return None
+    if session is None:
+        return None
+    for msg in (session.messages or []):
+        if getattr(msg, "role", None) == "user":
+            content = getattr(msg, "content", "")
+            if isinstance(content, str) and content.strip():
+                return content
+    return None
