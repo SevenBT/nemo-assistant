@@ -666,7 +666,7 @@ class NotesPanel(QWidget):
         enabled = self._current_tab == _TAB_NOTE and not self._current_search_keyword
         self._list.set_drag_enabled(enabled)
 
-    def _load_note_into_editor(self, note_id: str):
+    def _load_note_into_editor(self, note_id: int):
         note = self._mgr.get(note_id)
         if not note:
             return
@@ -1009,7 +1009,7 @@ class NotesPanel(QWidget):
 
         menu.exec(global_pos)
 
-    def _copy_note_content(self, note_id: str):
+    def _copy_note_content(self, note_id: int):
         note = self._mgr.get(note_id)
         if not note:
             return
@@ -1020,7 +1020,7 @@ class NotesPanel(QWidget):
         QGuiApplication.clipboard().setText(text)
         self._show_status("已复制到剪贴板")
 
-    def _duplicate_note(self, note_id: str):
+    def _duplicate_note(self, note_id: int):
         note = self._mgr.get(note_id)
         if not note:
             return
@@ -1030,7 +1030,7 @@ class NotesPanel(QWidget):
         self._load()
         self._show_status("已创建副本")
 
-    def _export_note_txt(self, note_id: str):
+    def _export_note_txt(self, note_id: int):
         note = self._mgr.get(note_id)
         if not note:
             return
@@ -1051,7 +1051,7 @@ class NotesPanel(QWidget):
         except OSError:
             QMessageBox.warning(self, "导出失败", "无法写入文件，请检查路径权限。")
 
-    def _export_note_md(self, note_id: str):
+    def _export_note_md(self, note_id: int):
         note = self._mgr.get(note_id)
         if not note:
             return
@@ -1068,7 +1068,7 @@ class NotesPanel(QWidget):
         except OSError:
             QMessageBox.warning(self, "导出失败", "无法写入文件，请检查路径权限。")
 
-    def _on_delete_by_id(self, note_id: str):
+    def _on_delete_by_id(self, note_id: int):
         if not self._confirm("移入回收站", "确定要将这条笔记移入回收站吗？"):
             return
         self._auto_save_timer.stop()
@@ -1188,7 +1188,7 @@ class NotesPanel(QWidget):
         self._load()
         self._show_status("已移动")
 
-    def _pin_note_to_screen(self, note_id: str):
+    def _pin_note_to_screen(self, note_id: int):
         from app.ui.sticky_note_window import StickyNoteWindow
         note = self._mgr.get(note_id)
         if not note:
@@ -1214,7 +1214,7 @@ class NotesPanel(QWidget):
         win.closed.connect(lambda w=win: self._on_pin_window_closed(w))
         win.content_changed.connect(self.note_updated)
 
-    def _unpin_note(self, note_id: str):
+    def _unpin_note(self, note_id: int):
         try:
             self._mgr.unpin_note(note_id)
         except Exception as e:
