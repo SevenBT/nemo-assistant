@@ -138,6 +138,19 @@ class ResizeFilter(QObject):
         if not self._enabled:
             return False
 
+        # 只处理发生在主窗口里的鼠标事件。过滤器装在 QApplication 上会收到
+        # 所有顶层窗口（如设置对话框）的事件——若不区分，鼠标在对话框边缘
+        # 仍会被映射到主窗口的 resize 边框，显示双向箭头并吞掉点击。
+        if etype in (
+            QEvent.Type.MouseMove,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonRelease,
+        ):
+            gpos = event.globalPosition().toPoint()
+            top = QApplication.topLevelAt(gpos)
+            if top is not None and top is not self._win and not self._active:
+                return False
+
         # Suppress resize while snapped or animating
         snap = self._win._snap_mgr
         if snap is not None and (snap.is_snapped or snap.is_animating):
@@ -184,6 +197,11 @@ class ResizeFilter(QObject):
                     self._start_geo = self._win.geometry()
                     self._start_pos = gpos
                     self._clear_cursor()
+                    # 用户手动拖边调整大小即视为退出最大化状态，
+                    # 否则 is_maximized 残留为 True 会导致标题栏拖动被禁用。
+                    if self._win.is_maximized:
+                        self._win._is_maximized = False
+                        self._win._title_bar.update_max_btn(False)
                     return True
 
         elif etype == QEvent.Type.MouseButtonRelease:

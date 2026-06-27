@@ -253,6 +253,18 @@ class PinWindow(QWidget):
     def eventFilter(self, obj, event):
         etype = event.type()
 
+        # 过滤器装在 QApplication 上会收到所有顶层窗口的鼠标事件。本窗口被
+        # 别的窗口遮挡时，鼠标落在被遮挡的矩形区域内不应触发本窗口的 resize。
+        if etype in (
+            QEvent.Type.MouseMove,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonRelease,
+        ):
+            gpos = event.globalPosition().toPoint()
+            top = QApplication.topLevelAt(gpos)
+            if top is not None and top is not self and not self._resize_active:
+                return False
+
         if etype == QEvent.Type.MouseMove:
             gpos = event.globalPosition().toPoint()
             if self._resize_active:

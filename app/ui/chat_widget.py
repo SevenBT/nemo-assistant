@@ -1,3 +1,5 @@
+import re
+
 import markdown as _md
 
 from PyQt6.QtCore import Qt, QEvent, QPoint, QSize, QTimer, pyqtSignal
@@ -44,6 +46,11 @@ class _MessageText(QTextBrowser):
 
     _MAX_USER_WIDTH = 420  # max content width for user bubbles
 
+    # 模型爱用 --- / *** / ___ 作分段分隔，markdown 渲染成 <hr>。这条 1px 细线
+    # 在浮窗气泡里突兀，且分数 DPI 下滚动时抗锯齿相位抖动会闪。段落间本就有间距，
+    # 直接删掉 <hr>（匹配渲染后的标签，源码三种写法一并覆盖）。
+    _HR_RE = re.compile(r"<hr\s*/?>")
+
     def __init__(self, is_user: bool, parent=None):
         super().__init__(parent)
         self._is_user = is_user
@@ -69,6 +76,7 @@ class _MessageText(QTextBrowser):
                 text,
                 extensions=["fenced_code", "tables", "nl2br"],
             )
+            html = self._HR_RE.sub("", html)
             self.setHtml(html)
         else:
             self.setPlainText("")

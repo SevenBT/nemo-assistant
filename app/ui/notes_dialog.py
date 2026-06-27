@@ -303,7 +303,7 @@ class NotesPanel(QWidget):
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
         # Status label + timer (shown in the editor header row, see below)
@@ -323,7 +323,7 @@ class NotesPanel(QWidget):
         self._list_panel.setObjectName("noteListPanel")
         self._list_panel.setMinimumWidth(120)
         list_panel_layout = QVBoxLayout(self._list_panel)
-        list_panel_layout.setContentsMargins(6, 6, 6, 6)
+        list_panel_layout.setContentsMargins(8, 10, 8, 8)
         list_panel_layout.setSpacing(6)
 
         # Type tabs + new (+) button on one row (mirror the session panel header)

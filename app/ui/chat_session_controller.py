@@ -484,7 +484,10 @@ class ChatSessionController(QObject):
                 session.messages[-1].tool_calls.append(tool_call)
             if sid != self._current_session_id:
                 return
-            self._chat.stop_typing()
+            # 工具执行期间保持亮条转动——执行本身就是「任务进行中」，
+            # 不要 stop_typing，否则长耗时工具（如 websearch）期间界面没有
+            # 任何动画反馈，看起来像卡死/失败。
+            self._chat.start_typing()
             if self._current_ai_bubble is None and self._current_ai_msg:
                 self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
             if self._current_ai_bubble:

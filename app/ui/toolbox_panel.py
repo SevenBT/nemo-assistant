@@ -156,7 +156,6 @@ class _DetailPane(QWidget):
         self._desc_lbl.setWordWrap(True)
         root.addWidget(self._desc_lbl)
         root.addSpacing(14)
-        root.addWidget(self._divider())
 
         scroll = ScrollArea()
         scroll.setWidgetResizable(True)
@@ -289,6 +288,7 @@ class ToolboxPanel(QWidget):
         self._registry = registry
         self._current_tool = None
         self._saved_list_width: int | None = None
+        self._loaded = False
         self._build()
 
         from app.core.config import cfg
@@ -515,7 +515,11 @@ class ToolboxPanel(QWidget):
             self.refresh()
 
     def showEvent(self, event):
-        self._load_list()
+        # 仅首次显示时加载；工具增删改由各对话框显式调用 refresh()。
+        # 每次 showEvent 都整表重建会让切 tab 时列表与详情区跳动。
+        if not self._loaded:
+            self._load_list()
+            self._loaded = True
         super().showEvent(event)
 
     def toggle_list(self):
