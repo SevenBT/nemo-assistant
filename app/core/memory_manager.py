@@ -30,8 +30,7 @@ class MemoryManager:
                     importance INTEGER NOT NULL DEFAULT 5,
                     is_processed INTEGER NOT NULL DEFAULT 0,
                     created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL,
-                    expired_at REAL
+                    updated_at REAL NOT NULL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_memories_scope
@@ -180,6 +179,21 @@ class MemoryManager:
             )
             conn.commit()
 
+    def purge_processed_archives(self, max_age_days: int = 7) -> int:
+        """删除已被 Dream 处理且超过保留期的 archive 摘要。
+
+        archive 经 Dream 提炼成结构化记忆后，原始摘要已无保留价值，
+        定期清理避免 memories 表单调膨胀。返回删除行数。"""
+        cutoff = time.time() - max_age_days * 86400
+        with self._db.get_connection() as conn:
+            cur = conn.execute(
+                "DELETE FROM memories "
+                "WHERE category = 'archive' AND is_processed = 1 AND updated_at < ?",
+                (cutoff,),
+            )
+            conn.commit()
+            return cur.rowcount
+
     def build_memory_context(self, session_id: str, max_chars: int = 4000) -> str:
         """构建注入 system prompt 的记忆文本块。"""
         memories = self.get_context_memories(session_id)
@@ -198,16 +212,6 @@ class MemoryManager:
         return "## 长期记忆\n\n" + "\n".join(lines)
 
     # ─── 维护 ──────────────────────────────────────────────
-
-    def expire_stale(self, max_age_days: int = 30):
-        """清理已过期的记忆。"""
-        cutoff = time.time() - max_age_days * 86400
-        with self._db.get_connection() as conn:
-            conn.execute(
-                "DELETE FROM memories WHERE expired_at IS NOT NULL AND expired_at < ?",
-                (cutoff,),
-            )
-            conn.commit()
 
     def count(self, scope: Optional[str] = None) -> int:
         sql = "SELECT COUNT(*) FROM memories"

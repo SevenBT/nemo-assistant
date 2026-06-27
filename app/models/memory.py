@@ -29,7 +29,6 @@ class Memory:
     is_processed: bool = False    # Dream 是否已处理（仅 archive 类型用）
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
-    expired_at: Optional[float] = None
 
     def to_dict(self) -> dict:
         return {
@@ -43,7 +42,6 @@ class Memory:
             "is_processed": self.is_processed,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "expired_at": self.expired_at,
         }
 
     @classmethod
@@ -59,5 +57,4 @@ class Memory:
             is_processed=bool(row["is_processed"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
-            expired_at=row["expired_at"],
         )

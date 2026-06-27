@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 from app.models.memory import MemoryCategory, MemoryScope
@@ -21,6 +22,9 @@ if TYPE_CHECKING:
     from app.core.memory_manager import MemoryManager
 
 logger = logging.getLogger(__name__)
+
+# ADD 查重阈值：同 category 内 content 相似度超过此值视为重复，跳过新增
+_DEDUP_THRESHOLD = 0.85
 
 _DREAM_PROMPT = """你是记忆管理员。你的任务是从对话摘要中提取值得长期记住的信息，并管理已有记忆。
 
@@ -102,7 +106,7 @@ class Dream:
         try:
             response = self._call_llm(prompt)
             directives = self._parse_response(response)
-            self._execute_directives(directives)
+            self._execute_directives(directives, existing)
         except Exception as e:
             logger.error(f"[Dream] 处理失败: {e}")
             return False
@@ -110,7 +114,9 @@ class Dream:
         # 标记已处理
         archive_ids = [a.id for a in archives]
         self._mem.mark_archives_processed(archive_ids)
-        logger.info(f"[Dream] 完成，处理了 {len(archives)} 条摘要")
+        # 清理已提炼且超过保留期的 archive，避免 memories 表膨胀
+        purged = self._mem.purge_processed_archives()
+        logger.info(f"[Dream] 完成，处理了 {len(archives)} 条摘要，清理 {purged} 条旧 archive")
         return True
 
     def _format_existing(self, memories) -> str:
@@ -156,9 +162,13 @@ class Dream:
             logger.warning(f"[Dream] JSON 解析失败: {text[:200]}")
         return []
 
-    def _execute_directives(self, directives: list[dict]):
+    def _execute_directives(self, directives: list[dict], existing=None):
         """执行 LLM 输出的指令。"""
         valid_categories = {"personality", "user", "project", "fact"}
+        # 已有同类记忆，用于 ADD 查重（含本轮新增的，避免一批指令内自我重复）
+        existing_by_cat: dict[str, list[str]] = {}
+        for m in existing or []:
+            existing_by_cat.setdefault(m.category, []).append(m.content)
 
         for d in directives:
             action = d.get("action", "").upper()
@@ -167,13 +177,18 @@ class Dream:
                     category = d.get("category", "fact")
                     if category not in valid_categories:
                         category = "fact"
+                    content = d["content"]
+                    if self._is_duplicate(content, existing_by_cat.get(category, [])):
+                        logger.info(f"[Dream] 跳过重复记忆: {content[:50]}")
+                        continue
                     self._mem.add(
-                        content=d["content"],
+                        content=content,
                         category=category,
                         scope=MemoryScope.GLOBAL,
                         importance=min(max(d.get("importance", 5), 1), 10),
                         source="dream",
                     )
+                    existing_by_cat.setdefault(category, []).append(content)
                 elif action == "UPDATE":
                     memory_id = d.get("id")
                     if memory_id:
@@ -188,3 +203,12 @@ class Dream:
                         self._mem.delete(memory_id)
             except Exception as e:
                 logger.warning(f"[Dream] 执行指令失败: {d} -> {e}")
+
+    def _is_duplicate(self, content: str, existing_contents: list[str]) -> bool:
+        """同 category 内判断 content 是否与已有记忆高度相似。"""
+        norm = content.strip().lower()
+        for other in existing_contents:
+            ratio = SequenceMatcher(None, norm, other.strip().lower()).ratio()
+            if ratio >= _DEDUP_THRESHOLD:
+                return True
+        return False
