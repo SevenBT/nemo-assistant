@@ -302,7 +302,9 @@ class MainWindow(FluentWindow):
 
         self._chat_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._chat_splitter.setHandleWidth(6)
-        self._chat_splitter.setChildrenCollapsible(True)
+        # setChildrenCollapsible(False) + session_panel 的 minimumWidth 防止用户拖动
+        # 分割条把会话面板误折叠到 0 宽；程序化折叠在 _toggle_session_panel 内临时放开。
+        self._chat_splitter.setChildrenCollapsible(False)
 
         self._session_panel = SessionPanel()
         self._session_panel.session_selected.connect(self._on_session_select)
@@ -654,8 +656,14 @@ class MainWindow(FluentWindow):
 
         if session_width > 0:
             self._saved_session_width = session_width
+            # setChildrenCollapsible(False) + minimumWidth 会把 setSizes([0,…]) 夹回
+            # 最小宽，程序化折叠时临时放开约束，展开后恢复。
+            self._session_panel.setMinimumWidth(0)
+            self._chat_splitter.setChildrenCollapsible(True)
             self._chat_splitter.setSizes([0, total])
         else:
+            self._session_panel.setMinimumWidth(120)
+            self._chat_splitter.setChildrenCollapsible(False)
             width = getattr(self, '_saved_session_width', None) or cfg.get(cfg.sessionPanelWidth)
             self._chat_splitter.setSizes([width, total - width])
 

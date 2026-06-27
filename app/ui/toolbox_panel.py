@@ -313,10 +313,13 @@ class ToolboxPanel(QWidget):
 
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
         self._splitter.setHandleWidth(6)
-        self._splitter.setChildrenCollapsible(True)
+        # setChildrenCollapsible(False) + 左侧 minimumWidth 防止用户拖动分割条把
+        # 列表误折叠到 0 宽；程序化折叠时在 toggle_list 内临时放开约束。
+        self._splitter.setChildrenCollapsible(False)
 
         # 左侧列表
         left = QWidget()
+        self._left = left
         left.setObjectName("toolListPanel")
         left.setMinimumWidth(180)
         left_layout = QVBoxLayout(left)
@@ -529,8 +532,14 @@ class ToolboxPanel(QWidget):
         list_width = sizes[0]
         if list_width > 0:
             self._saved_list_width = list_width
+            # setChildrenCollapsible(False) + minimumWidth 会把 setSizes([0,…])
+            # 夹回最小宽，程序化折叠时临时放开约束，展开后恢复。
+            self._left.setMinimumWidth(0)
+            self._splitter.setChildrenCollapsible(True)
             self._splitter.setSizes([0, total])
         else:
+            self._left.setMinimumWidth(180)
+            self._splitter.setChildrenCollapsible(False)
             width = self._saved_list_width or 220
             self._splitter.setSizes([width, total - width])
 
