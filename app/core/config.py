@@ -2,7 +2,7 @@
 声明式配置模块，基于 qfluentwidgets QConfig。
 
 用法:
-    from app.core.config import cfg, get_api_key, set_api_key
+    from app.core.config import cfg, get_litellm_provider_api_key
 
     value = cfg.get(cfg.contentFontSize)
     cfg.set(cfg.contentFontSize, 16)
@@ -48,40 +48,7 @@ TOOL_SITE_PACKAGES = TOOL_RUNTIME_DIR / "site-packages"
 
 # ── Model metadata ────────────────────────────────────────────────────
 
-SHANGDAO_MODELS: dict[str, dict] = {
-    "Qwen3_235B": {
-        "path_prefix": "CMHK-LMMP-PRD_Qwen3_235B_Ins/CMHK-LMMP-PRD",
-        "body_model_field": "mode1",
-        "body_model_value": "Qwen3_235B",
-    },
-    "Qwen2.5-72B": {
-        "path_prefix": "CMHK-LMMP-PRD_Qwen2_5_72B/CMHK-LMMP-PRD",
-        "body_model_field": "mode1",
-        "body_model_value": "Qwen2.5-72B",
-    },
-    "DeepSeek-V3": {
-        "path_prefix": "CMHK-LMMP-PRD_DeepSeek_R1/CMHK-LMMP-PRD",
-        "body_model_field": "model",
-        "body_model_value": "DeepSeek-V3-1-maas",
-    },
-}
-
-
-def get_shangdao_model_meta(model: str) -> dict | None:
-    """Return request metadata for built-in or user-defined Shangdao models."""
-    model = (model or "").strip()
-    if not model:
-        return None
-    if model in SHANGDAO_MODELS:
-        return SHANGDAO_MODELS[model]
-    return {
-        "path_prefix": f"CMHK-LMMP-PRD_{model}/CMHK-LMMP-PRD",
-        "body_model_field": "model",
-        "body_model_value": model,
-    }
-
-
-# Substrings that mark an OpenAI-compatible model name as vision-capable.
+# Substrings that mark a model name as vision-capable.
 # Used only for the "auto" heuristic; users can override via visionSupport.
 _VISION_MODEL_MARKERS = (
     "gpt-4o", "gpt-4.1", "gpt-4-turbo", "gpt-4-vision",
@@ -102,18 +69,17 @@ def model_supports_vision(model: str) -> bool:
 
 
 def current_vision_enabled() -> bool:
-    """Whether the active OpenAI-type model can receive image pixels.
+    """Whether the active model can receive image pixels.
 
     Resolves the user override (visionSupport = on/off) or falls back to a
-    name-based heuristic ("auto"). Only meaningful for api_type == 'openai';
-    shangdao/litellm callers should make their own determination.
+    name-based heuristic ("auto") on the current LiteLLM default model.
     """
     setting = (cfg.get(cfg.visionSupport) or "auto").strip().lower()
     if setting == "on":
         return True
     if setting == "off":
         return False
-    return model_supports_vision(cfg.get(cfg.model))
+    return model_supports_vision(cfg.get(cfg.litellmDefaultModel))
 
 
 MODEL_TEMPLATES: dict[str, list[dict]] = {
@@ -155,8 +121,6 @@ THEME_OPTIONS = [
 # ── Keyring constants ─────────────────────────────────────────────────
 
 _SERVICE_NAME = "ai-agent-desktop"
-_ACCOUNT_API_KEY = "api_key"
-_ACCOUNT_SHANGDAO_KEY = "shangdao_api_key"
 _ACCOUNT_SEARCH_KEY = "web_search_api_key"
 
 
@@ -199,36 +163,22 @@ class AppConfig(QConfig):
 
     # -- API --
     apiType = OptionsConfigItem(
-        "API", "ApiType", "openai",
-        OptionsValidator(["openai", "shangdao", "litellm"]),
+        "API", "ApiType", "litellm",
+        OptionsValidator(["litellm"]),
     )
-    apiBaseUrl = ConfigItem("API", "BaseUrl", "https://api.openai.com/v1")
-    model = ConfigItem("API", "Model", "gpt-4o")
     maxTokens = RangeConfigItem(
         "API", "MaxTokens", 4096, RangeValidator(256, 65536)
     )
     temperature = ConfigItem("API", "Temperature", 0.7)
     systemPrompt = ConfigItem("API", "SystemPrompt", "")
-    # 当前 OpenAI 兼容模型是否支持多模态识图（发送图片像素）。
+    # 当前模型是否支持多模态识图（发送图片像素）。
     # "auto" = 按模型名启发式推断；"on"/"off" = 用户手动覆盖。
     visionSupport = OptionsConfigItem(
         "API", "VisionSupport", "auto",
         OptionsValidator(["auto", "on", "off"]),
     )
 
-    # -- Shangdao --
-    shangdaoEnabled = ConfigItem("Shangdao", "Enabled", False, BoolValidator())
-    shangdaoBaseUrl = ConfigItem(
-        "Shangdao", "BaseUrl", "https://api.example.com"
-    )
-    shangdaoModel = ConfigItem("Shangdao", "Model", "Qwen3_235B")
-    shangdaoMaxTokens = RangeConfigItem(
-        "Shangdao", "MaxTokens", 2048, RangeValidator(256, 65536)
-    )
-    shangdaoTemperature = ConfigItem("Shangdao", "Temperature", 0.7)
-
     # -- LiteLLM --
-    litellmEnabled = ConfigItem("LiteLLM", "Enabled", False, BoolValidator())
     litellmDefaultModel = ConfigItem("LiteLLM", "DefaultModel", "gpt-4o")
     litellmModels = ConfigItem("LiteLLM", "Models", [])
 
@@ -305,22 +255,6 @@ class AppConfig(QConfig):
 
 
 # ── Keyring helpers ───────────────────────────────────────────────────
-
-
-def get_api_key() -> str:
-    return keyring.get_password(_SERVICE_NAME, _ACCOUNT_API_KEY) or ""
-
-
-def set_api_key(key: str) -> None:
-    keyring.set_password(_SERVICE_NAME, _ACCOUNT_API_KEY, key)
-
-
-def get_shangdao_api_key() -> str:
-    return keyring.get_password(_SERVICE_NAME, _ACCOUNT_SHANGDAO_KEY) or ""
-
-
-def set_shangdao_api_key(key: str) -> None:
-    keyring.set_password(_SERVICE_NAME, _ACCOUNT_SHANGDAO_KEY, key)
 
 
 def get_search_api_key() -> str:

@@ -19,15 +19,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Optional, Protocol
 
 import httpx
-from openai import OpenAI
 
 from app.core.config import (
     DATA_DIR,
     cfg,
-    get_api_key,
     get_litellm_provider_api_key,
-    get_shangdao_model_meta,
-    get_shangdao_api_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -389,277 +385,6 @@ def _append_function_call_delta(
             entry["args_str"] = json.dumps(arguments, ensure_ascii=False)
 
 
-def _flatten_content(content: Any) -> str:
-    """Reduce a (possibly multimodal list) content to plain text.
-
-    Shangdao's gateway only accepts string content. If multimodal list
-    content ever reaches it, keep the text parts and drop image_url parts
-    (replaced by a placeholder) instead of stringifying the whole list.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, dict):
-                if item.get("type") == "text":
-                    parts.append(str(item.get("text") or ""))
-                elif item.get("type") == "image_url":
-                    parts.append("[图片]")
-            elif item is not None:
-                parts.append(str(item))
-        return "\n".join(p for p in parts if p)
-    if content is None:
-        return ""
-    return str(content)
-
-
-def _messages_with_text_tool_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert OpenAI tool history messages into plain chat text for gateways."""
-    result: list[dict[str, Any]] = []
-    tool_names_by_id: dict[str, str] = {}
-
-    for message in messages:
-        role = message.get("role")
-        if role == "assistant" and message.get("tool_calls"):
-            content_parts: list[str] = []
-            if message.get("content"):
-                content_parts.append(_flatten_content(message["content"]))
-
-            call_lines: list[str] = []
-            for tc in message.get("tool_calls", []):
-                call_id = str(tc.get("id") or "")
-                function = tc.get("function") or {}
-                name = str(function.get("name") or "unknown_tool")
-                arguments = function.get("arguments") or "{}"
-                if call_id:
-                    tool_names_by_id[call_id] = name
-                call_lines.append(f"- {name}({arguments})")
-
-            if call_lines:
-                content_parts.append("已请求调用工具:\n" + "\n".join(call_lines))
-
-            result.append({
-                "role": "assistant",
-                "content": "\n\n".join(content_parts) or "已请求调用工具。",
-            })
-            continue
-
-        if role == "tool":
-            call_id = str(message.get("tool_call_id") or "")
-            tool_name = tool_names_by_id.get(call_id, call_id or "unknown_tool")
-            result.append({
-                "role": "user",
-                "content": (
-                    f"工具 {tool_name} 返回结果:\n"
-                    f"{message.get('content') or ''}"
-                ),
-            })
-            continue
-
-        cleaned = {
-            "role": role,
-            "content": _flatten_content(message.get("content")),
-        }
-        if role:
-            result.append(cleaned)
-
-    return result
-
-
-class OpenAIAdapter:
-    """OpenAI-compatible 适配器。
-
-    适用于官方 OpenAI、DeepSeek、Ollama 等兼容 Chat Completions 的端点。
-    """
-
-    def stream(
-        self,
-        request: LLMRequest,
-        cancel_token: CancellationToken | None = None,
-    ) -> Iterator[dict]:
-        kwargs: dict[str, Any] = {
-            "model": request.model,
-            "messages": request.messages,
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-        }
-        if request.tools:
-            kwargs["tools"] = request.tools
-            kwargs["tool_choice"] = "auto"
-
-        try:
-            client = OpenAI(
-                api_key=request.api_key or "sk-placeholder",
-                base_url=request.base_url,
-                timeout=_TIMEOUT,
-            )
-            stream = client.chat.completions.create(**kwargs)
-            if cancel_token:
-                cancel_token.add_resource(stream)
-            tc_buf: dict[int, dict[str, str]] = {}
-            reasoning_buf = ""
-            usage = None
-
-            try:
-                for chunk in stream:
-                    if _is_cancelled(cancel_token):
-                        return
-                    # usage 帧的 choices 为空列表，须先捕获再跳过，不能 break。
-                    chunk_usage = getattr(chunk, "usage", None)
-                    if chunk_usage is not None:
-                        usage = chunk_usage
-                    if not chunk.choices:
-                        continue
-                    choice = chunk.choices[0]
-                    delta = choice.delta
-
-                    reasoning = getattr(delta, "reasoning_content", None)
-                    if reasoning:
-                        reasoning_buf += reasoning
-
-                    if delta.content:
-                        yield {"type": "text", "delta": delta.content}
-
-                    if delta.tool_calls:
-                        for fallback_index, tc in enumerate(delta.tool_calls):
-                            _append_tool_call_delta(tc_buf, tc, fallback_index)
-                    # 不在 finish_reason 处 break：usage 帧在其之后到达，
-                    # 提前 break 会丢掉 token 统计。流会自然结束。
-            finally:
-                if cancel_token:
-                    cancel_token.remove_resource(stream)
-                if _is_cancelled(cancel_token):
-                    _close_resource(stream)
-
-            if _is_cancelled(cancel_token):
-                return
-            yield from _parse_tool_calls(tc_buf)
-            yield {
-                "type": "done",
-                "reasoning_content": reasoning_buf or None,
-                "usage": _normalize_usage(usage),
-            }
-        except Exception as exc:
-            if _is_cancelled(cancel_token):
-                return
-            yield _error_event(exc)
-
-
-class ShangdaoAdapter:
-    """商道 SSE 网关适配器。"""
-
-    def stream(
-        self,
-        request: LLMRequest,
-        cancel_token: CancellationToken | None = None,
-    ) -> Iterator[dict]:
-        model_meta = request.extra.get("model_meta")
-        if not model_meta:
-            yield {"type": "error", "message": f"未知的商道模型: {request.model}"}
-            return
-        if not request.api_key:
-            yield {"type": "error", "message": "商道 API Key 未配置"}
-            return
-
-        url = (
-            f"{request.base_url.rstrip('/')}/"
-            f"{model_meta['path_prefix']}/v1/chat/completions"
-        )
-        body: dict[str, Any] = {
-            model_meta["body_model_field"]: model_meta["body_model_value"],
-            "messages": _messages_with_text_tool_history(request.messages),
-            "stream": True,
-            "stream_options": {"include_usage": True},
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-        }
-        if request.tools:
-            body["tools"] = request.tools
-            body["tool_choice"] = "auto"
-
-        headers = {
-            "x-api-key": f"Bearer {request.api_key}",
-            "Content-Type": "application/json",
-        }
-
-        try:
-            with httpx.Client(timeout=_TIMEOUT) as client:
-                with client.stream("POST", url, json=body, headers=headers) as resp:
-                    if cancel_token:
-                        cancel_token.add_resource(resp)
-                    resp.raise_for_status()
-                    tc_buf: dict[int, dict[str, str]] = {}
-                    reasoning_buf = ""
-                    usage = None
-                    try:
-                        for line in resp.iter_lines():
-                            if _is_cancelled(cancel_token):
-                                return
-                            if not line or not line.startswith("data:"):
-                                continue
-                            data_str = line[len("data:"):].strip()
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data_str)
-                            except json.JSONDecodeError:
-                                continue
-
-                            # usage 可能与最后一帧一起到达（choices 为空）。
-                            chunk_usage = chunk.get("usage")
-                            if chunk_usage:
-                                usage = chunk_usage
-                            choices = chunk.get("choices", [])
-                            if not choices:
-                                continue
-                            choice = choices[0]
-                            delta = choice.get("message") or choice.get("delta") or {}
-                            reasoning = delta.get("reasoning_content")
-                            if reasoning:
-                                reasoning_buf += reasoning
-                            content = delta.get("content")
-                            if content:
-                                yield {"type": "text", "delta": content}
-                            tool_calls = (
-                                delta.get("tool_calls")
-                                or choice.get("tool_calls")
-                            )
-                            if tool_calls:
-                                for fallback_index, tc in enumerate(tool_calls):
-                                    _append_tool_call_delta(
-                                        tc_buf, tc, fallback_index
-                                    )
-                            function_call = (
-                                delta.get("function_call")
-                                or choice.get("function_call")
-                            )
-                            if function_call:
-                                _append_function_call_delta(tc_buf, function_call)
-                            # 不在 finish_reason 处 break：usage 帧随后到达，
-                            # 由 [DONE] 哨兵或流结束自然终止。
-                    finally:
-                        if cancel_token:
-                            cancel_token.remove_resource(resp)
-                        if _is_cancelled(cancel_token):
-                            _close_resource(resp)
-
-                    if _is_cancelled(cancel_token):
-                        return
-                    yield from _parse_tool_calls(tc_buf)
-                    yield {
-                        "type": "done",
-                        "reasoning_content": reasoning_buf or None,
-                        "usage": _normalize_usage(usage),
-                    }
-        except Exception as exc:
-            if _is_cancelled(cancel_token):
-                return
-            yield _error_event(exc, "商道 API 请求失败")
-
-
 class LiteLLMAdapter:
     """LiteLLM Python 包适配器。"""
 
@@ -690,6 +415,8 @@ class LiteLLMAdapter:
             "stream_options": {"include_usage": True},
             "api_key": request.api_key,
         }
+        if request.base_url:
+            kwargs["api_base"] = request.base_url
         if request.tools:
             kwargs["tools"] = request.tools
             kwargs["tool_choice"] = "auto"
@@ -920,8 +647,6 @@ class LLMGateway:
     ):
         self._proxy = config_proxy
         self._adapters = adapters or {
-            "openai": OpenAIAdapter(),
-            "shangdao": ShangdaoAdapter(),
             "litellm": LiteLLMAdapter(),
         }
         self._retry_policy = retry_policy or RetryPolicy()
@@ -1092,54 +817,24 @@ class LLMGateway:
         trace_id: str | None = None,
     ) -> LLMRequest:
         """把全局配置或 config_proxy 解析为 provider-neutral 请求。"""
-        api_type = self._value("api_type", cfg.apiType)
         trace_id = trace_id or uuid.uuid4().hex
 
-        if api_type == "shangdao":
-            model = self._value("shangdao_model", cfg.shangdaoModel)
-            model_meta = get_shangdao_model_meta(model)
-            return LLMRequest(
-                trace_id=trace_id,
-                attempt_id=uuid.uuid4().hex,
-                api_type=api_type,
-                model=model,
-                messages=messages,
-                tools=tools,
-                max_tokens=cfg.get(cfg.shangdaoMaxTokens),
-                temperature=cfg.get(cfg.shangdaoTemperature),
-                api_key=get_shangdao_api_key(),
-                base_url=cfg.get(cfg.shangdaoBaseUrl),
-                extra={"model_meta": model_meta},
-            )
-
-        if api_type == "litellm":
-            model = self._value("litellm_default_model", cfg.litellmDefaultModel)
-            model_config = self._litellm_model_config(model)
-            provider = model_config.get("provider", "") if model_config else ""
-            return LLMRequest(
-                trace_id=trace_id,
-                attempt_id=uuid.uuid4().hex,
-                api_type=api_type,
-                model=model,
-                provider=provider,
-                messages=messages,
-                tools=tools,
-                max_tokens=cfg.get(cfg.maxTokens),
-                temperature=cfg.get(cfg.temperature),
-                api_key=get_litellm_provider_api_key(provider) if provider else "",
-            )
-
+        model = self._value("litellm_default_model", cfg.litellmDefaultModel)
+        model_config = self._litellm_model_config(model)
+        provider = model_config.get("provider", "") if model_config else ""
+        base_url = model_config.get("api_base", "") if model_config else ""
         return LLMRequest(
             trace_id=trace_id,
             attempt_id=uuid.uuid4().hex,
-            api_type="openai",
-            model=self._value("model", cfg.model),
+            api_type="litellm",
+            model=model,
+            provider=provider,
             messages=messages,
             tools=tools,
             max_tokens=cfg.get(cfg.maxTokens),
             temperature=cfg.get(cfg.temperature),
-            api_key=get_api_key(),
-            base_url=cfg.get(cfg.apiBaseUrl),
+            api_key=get_litellm_provider_api_key(provider) if provider else "",
+            base_url=base_url,
         )
 
     def _value(self, proxy_attr: str, config_item: Any) -> Any:

@@ -49,6 +49,11 @@ class LiteLLMModelEditDialog(QDialog):
             self._provider_combo.addItem(provider.capitalize(), provider)
         form.addRow("Provider:", self._provider_combo)
 
+        # API 地址（可选）：自定义端点 / 中转 / 兼容服务，留空走该 provider 默认
+        self._api_base_input = QLineEdit()
+        self._api_base_input.setPlaceholderText("可选，如 https://api.deepseek.com/v1")
+        form.addRow("API 地址:", self._api_base_input)
+
         # 启用状态
         self._enabled_checkbox = QCheckBox("启用此模型用于多模型调用")
         form.addRow("", self._enabled_checkbox)
@@ -83,6 +88,7 @@ class LiteLLMModelEditDialog(QDialog):
         else:
             # 如果是自定义 provider，直接设置文本
             self._provider_combo.setCurrentText(provider.capitalize())
+        self._api_base_input.setText(model.get("api_base", ""))
         self._enabled_checkbox.setChecked(model.get("enabled", False))
 
     def _save(self):
@@ -90,6 +96,7 @@ class LiteLLMModelEditDialog(QDialog):
         model_id = self._model_id_input.text().strip()
         name = self._name_input.text().strip()
         provider = self._provider_combo.currentText().strip().lower()
+        api_base = self._api_base_input.text().strip()
         enabled = self._enabled_checkbox.isChecked()
 
         # 验证输入
@@ -115,6 +122,7 @@ class LiteLLMModelEditDialog(QDialog):
                         m["id"] = model_id
                         m["name"] = name
                         m["provider"] = provider
+                        m["api_base"] = api_base
                         m["enabled"] = enabled
                         break
                 cfg.set(cfg.litellmModels, models)
@@ -129,6 +137,7 @@ class LiteLLMModelEditDialog(QDialog):
                     "id": model_id,
                     "name": name,
                     "provider": provider,
+                    "api_base": api_base,
                     "enabled": enabled,
                 })
                 cfg.set(cfg.litellmModels, models)

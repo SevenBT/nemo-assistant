@@ -55,25 +55,18 @@ class ConversationPromptBuilder:
         return result
 
     def _vision_enabled(self) -> bool:
-        """Whether the active provider/model can receive image pixels.
+        """Whether the active model can receive image pixels.
 
-        openai → resolve user override or name heuristic; litellm → name
-        heuristic on the default model; shangdao → not supported. Fails
-        safe to False (text-only) if config can't be resolved.
+        Resolves the user override (visionSupport) or falls back to a
+        name heuristic on the LiteLLM default model. Fails safe to False
+        (text-only) if config can't be resolved.
         """
-        from app.core.config import current_vision_enabled, model_supports_vision
+        from app.core.config import current_vision_enabled
 
         try:
-            api_type = self._config.get(self._config.apiType)
-            if api_type == "openai":
-                return current_vision_enabled()
-            if api_type == "litellm":
-                return model_supports_vision(
-                    self._config.get(self._config.litellmDefaultModel)
-                )
+            return current_vision_enabled()
         except (AttributeError, KeyError):
             return False
-        return False
 
     def _build_system_prompt(self, session_id: str | None) -> str:
         user_prompt = self._resolve_user_prompt(session_id)

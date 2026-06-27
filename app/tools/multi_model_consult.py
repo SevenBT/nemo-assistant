@@ -31,26 +31,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 预定义的分析视角，每个视角有独立的角色设定和模型选择
+# 预定义的分析视角，每个视角有独立的角色设定。
+# 所有视角统一使用当前 LiteLLM 默认模型（跟随用户选择的供应商）。
 PERSPECTIVES = {
     "architect": {
         "name": "架构师",
-        "model": "gpt-4o",
         "system_prompt": "你是一位经验丰富的系统架构师。关注可扩展性、模块化、技术选型、系统设计。提供具体的架构建议和技术方案。",
     },
     "security": {
         "name": "安全专家",
-        "model": "gpt-4o",
         "system_prompt": "你是一位安全专家。关注漏洞、权限控制、数据保护、OWASP Top 10。指出潜在的安全风险并提供加固建议。",
     },
     "performance": {
         "name": "性能专家",
-        "model": "gpt-4o-mini",
         "system_prompt": "你是一位性能优化专家。关注响应时间、并发处理、资源占用、缓存策略。提供性能优化建议。",
     },
     "cost": {
         "name": "成本优化",
-        "model": "gpt-4o-mini",
         "system_prompt": "你是一位成本优化专家。关注资源利用率、云服务成本、开发维护成本。提供成本优化建议。",
     },
 }
@@ -59,19 +56,39 @@ PERSPECTIVES = {
 class MultiModelConsultTool(BuiltinTool):
     """多模型并行咨询工具。"""
 
-    def __init__(self, api_key: str = "", base_url: str = "", max_tokens: int = 4096, temperature: float = 0.7):
+    def __init__(
+        self,
+        model: str = "",
+        provider: str = "",
+        api_key: str = "",
+        api_base: str = "",
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ):
+        self._model = model
+        self._provider = provider
         self._api_key = api_key
-        self._base_url = base_url
+        self._api_base = api_base
         self._max_tokens = max_tokens
         self._temperature = temperature
 
     @classmethod
     def create(cls, ctx: "ToolContext") -> "MultiModelConsultTool":
-        """从配置中读取 API 连接信息。"""
-        from app.core.config import cfg, get_api_key
+        """从配置中读取当前 LiteLLM 默认模型的连接信息。"""
+        from app.core.config import cfg, get_litellm_provider_api_key
+
+        model_id = cfg.get(cfg.litellmDefaultModel)
+        model_cfg = next(
+            (m for m in cfg.get(cfg.litellmModels) if m.get("id") == model_id),
+            None,
+        )
+        provider = model_cfg.get("provider", "") if model_cfg else ""
+        api_base = model_cfg.get("api_base", "") if model_cfg else ""
         return cls(
-            api_key=get_api_key(),
-            base_url=cfg.get(cfg.apiBaseUrl),
+            model=model_id,
+            provider=provider,
+            api_key=get_litellm_provider_api_key(provider) if provider else "",
+            api_base=api_base,
             max_tokens=cfg.get(cfg.maxTokens),
             temperature=cfg.get(cfg.temperature),
         )
@@ -121,37 +138,41 @@ class MultiModelConsultTool(BuiltinTool):
             return {"status": "error", "data": {"message": str(e)}}
 
     async def _consult_async(self, query: str, perspectives: list, context: str, timeout: float) -> str:
-        """异步并行调用多个模型。"""
-        from openai import AsyncOpenAI
+        """异步并行调用多个视角（统一使用当前 LiteLLM 默认模型）。"""
+        import litellm
 
         # 过滤无效的视角名称
         valid = [p for p in perspectives if p in PERSPECTIVES]
         if not valid:
             valid = ["architect", "security", "performance"]
 
-        client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url, timeout=timeout)
+        model_label = f"{self._provider}/{self._model}" if self._provider else self._model
 
         async def call_one(pid: str) -> dict:
             """调用单个模型视角。"""
             p = PERSPECTIVES[pid]
             user_content = f"问题：{query}\n\n上下文：{context}" if context else f"问题：{query}"
+            kwargs: dict[str, Any] = {
+                "model": model_label,
+                "messages": [
+                    {"role": "system", "content": p["system_prompt"]},
+                    {"role": "user", "content": user_content},
+                ],
+                "max_tokens": self._max_tokens,
+                "temperature": self._temperature,
+                "api_key": self._api_key,
+            }
+            if self._api_base:
+                kwargs["api_base"] = self._api_base
             try:
                 resp = await asyncio.wait_for(
-                    client.chat.completions.create(
-                        model=p["model"],
-                        messages=[
-                            {"role": "system", "content": p["system_prompt"]},
-                            {"role": "user", "content": user_content},
-                        ],
-                        max_tokens=self._max_tokens,
-                        temperature=self._temperature,
-                    ),
+                    litellm.acompletion(**kwargs),
                     timeout=timeout,
                 )
-                return {"id": pid, "name": p["name"], "model": p["model"], "status": "success",
+                return {"id": pid, "name": p["name"], "model": self._model, "status": "success",
                         "content": resp.choices[0].message.content}
             except Exception as e:
-                return {"id": pid, "name": p["name"], "model": p["model"], "status": "error", "error": str(e)}
+                return {"id": pid, "name": p["name"], "model": self._model, "status": "error", "error": str(e)}
 
         # 并行调用所有选中的视角
         results = await asyncio.gather(*[call_one(p) for p in valid], return_exceptions=True)

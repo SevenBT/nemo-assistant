@@ -10,14 +10,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
-from app.core.config import (
-    MODEL_TEMPLATES,
-    SHANGDAO_MODELS,
-    cfg,
-    get_api_key,
-    get_litellm_provider_api_key,
-    get_shangdao_api_key,
-)
+from app.core.config import cfg
 from app.core.llm_gateway import LLMGateway
 
 
@@ -25,9 +18,9 @@ from app.core.llm_gateway import LLMGateway
 class ModelOverride:
     """Describes a specific model selection for tool generation.
 
-    api_type: "openai" | "shangdao" | "litellm"
-    model_id:  model identifier (e.g. "gpt-4o", "Qwen3_235B", "claude-3-5-sonnet-20241022")
-    provider:  only used when api_type == "litellm" (e.g. "anthropic", "openai")
+    api_type:  always "litellm" (the single entrypoint)
+    model_id:  model identifier (e.g. "gpt-4o", "claude-3-5-sonnet-20241022")
+    provider:  litellm provider (e.g. "anthropic", "openai")
     label:     human-readable display name
     """
     api_type: str
@@ -37,7 +30,7 @@ class ModelOverride:
 
 
 class _ConfigProxy:
-    """Thin proxy that overrides api_type and model for LLMGateway.
+    """Thin proxy that overrides the default model for LLMGateway.
 
     LLMGateway normally reads from the cfg singleton. For tool generation we
     provide the small attribute interface it needs so the dialog can call a
@@ -46,18 +39,6 @@ class _ConfigProxy:
 
     def __init__(self, override: ModelOverride):
         self._override = override
-
-    @property
-    def api_type(self) -> str:
-        return self._override.api_type
-
-    @property
-    def model(self) -> str:
-        return self._override.model_id
-
-    @property
-    def shangdao_model(self) -> str:
-        return self._override.model_id
 
     @property
     def litellm_default_model(self) -> str:
@@ -80,37 +61,15 @@ def build_model_options() -> list[ModelOverride]:
     """Build the list of available model options from current config."""
     options: list[ModelOverride] = []
 
-    # Current OpenAI-compatible endpoint
-    current_model = cfg.get(cfg.model)
-    options.append(ModelOverride(
-        api_type="openai",
-        model_id=current_model,
-        label=f"{current_model}  (当前接口)",
-    ))
-
-    # Shangdao models
-    if cfg.get(cfg.shangdaoEnabled):
-        shangdao_names = list(SHANGDAO_MODELS)
-        current_shangdao_model = cfg.get(cfg.shangdaoModel)
-        if current_shangdao_model and current_shangdao_model not in shangdao_names:
-            shangdao_names.insert(0, current_shangdao_model)
-        for name in shangdao_names:
-            options.append(ModelOverride(
-                api_type="shangdao",
-                model_id=name,
-                label=f"{name}  (商道)",
-            ))
-
     # LiteLLM enabled models
-    if cfg.get(cfg.litellmEnabled):
-        for m in cfg.get(cfg.litellmModels):
-            if m.get("enabled"):
-                options.append(ModelOverride(
-                    api_type="litellm",
-                    model_id=m["id"],
-                    label=f"{m['name']}  ({m['provider']})",
-                    provider=m["provider"],
-                ))
+    for m in cfg.get(cfg.litellmModels):
+        if m.get("enabled"):
+            options.append(ModelOverride(
+                api_type="litellm",
+                model_id=m["id"],
+                label=f"{m['name']}  ({m['provider']})",
+                provider=m["provider"],
+            ))
 
     return options
 

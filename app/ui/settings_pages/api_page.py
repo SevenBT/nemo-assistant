@@ -1,12 +1,13 @@
-"""API 连接设置页 — OpenAI / 商道 / LiteLLM 三段折叠配置"""
+"""API 连接设置页 — 单一 LiteLLM 入口
 
-from PyQt6.QtCore import Qt
+用户自定义模型条目（id/name/provider/api_base），按 provider 保存 API Key，
+切换默认模型即切换供应商。
+"""
+
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
-    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLineEdit,
@@ -21,14 +22,9 @@ from PyQt6.QtWidgets import (
 from app.ui.litellm_model_edit_dialog import LiteLLMModelEditDialog
 from app.ui.litellm_template_dialog import LiteLLMTemplateDialog
 from app.core.config import (
-    SHANGDAO_MODELS,
     cfg,
-    get_api_key,
     get_litellm_provider_api_key,
-    get_shangdao_api_key,
-    set_api_key,
     set_litellm_provider_api_key,
-    set_shangdao_api_key,
 )
 
 
@@ -44,155 +40,8 @@ class ApiPage(QScrollArea):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(16, 16, 16, 16)
 
-        # ── OpenAI section ──
-        form = QFormLayout()
-        self._base_url = QLineEdit()
-        self._base_url.setText(cfg.get(cfg.apiBaseUrl))
-        self._base_url.setPlaceholderText("https://api.openai.com/v1")
-        self._base_url.editingFinished.connect(
-            lambda: cfg.set(cfg.apiBaseUrl, self._base_url.text().strip())
-        )
-        form.addRow("API 地址:", self._base_url)
-
-        self._api_key = QLineEdit()
-        self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._api_key.setText(get_api_key())
-        self._api_key.setPlaceholderText("sk-…")
-        self._api_key.editingFinished.connect(
-            lambda: set_api_key(self._api_key.text().strip())
-        )
-        form.addRow("API Key:", self._api_key)
-
-        self._model = QLineEdit()
-        self._model.setText(cfg.get(cfg.model))
-        self._model.setPlaceholderText("gpt-4o")
-        self._model.editingFinished.connect(
-            lambda: cfg.set(cfg.model, self._model.text().strip())
-        )
-        form.addRow("模型:", self._model)
-
-        # 识图（多模态）能力：截图/图片附件是否把像素发给模型
-        self._vision = QComboBox()
-        self._VISION_OPTIONS = [
-            ("auto", "自动（按模型名判断）"),
-            ("on", "始终开启"),
-            ("off", "始终关闭"),
-        ]
-        for value, label in self._VISION_OPTIONS:
-            self._vision.addItem(label, value)
-        current_vision = cfg.get(cfg.visionSupport)
-        vision_idx = self._vision.findData(current_vision)
-        self._vision.setCurrentIndex(vision_idx if vision_idx >= 0 else 0)
-        self._vision.currentIndexChanged.connect(
-            lambda i: cfg.set(cfg.visionSupport, self._vision.itemData(i))
-        )
-        self._vision.setToolTip(
-            "识图功能是否把图片像素发给模型。\n"
-            "自动：常见多模态模型名（gpt-4o/claude/gemini/vl 等）自动识别。\n"
-            "若用自定义模型名且确认支持视觉，选「始终开启」。"
-        )
-        form.addRow("识图能力:", self._vision)
-
-        self._max_tokens = QSpinBox()
-        self._max_tokens.setRange(256, 65536)
-        self._max_tokens.setSingleStep(256)
-        self._max_tokens.setValue(cfg.get(cfg.maxTokens))
-        self._max_tokens.valueChanged.connect(
-            lambda v: cfg.set(cfg.maxTokens, v)
-        )
-        form.addRow("最大 Token:", self._max_tokens)
-
-        self._temperature = QDoubleSpinBox()
-        self._temperature.setRange(0.0, 2.0)
-        self._temperature.setSingleStep(0.1)
-        self._temperature.setDecimals(1)
-        self._temperature.setValue(cfg.get(cfg.temperature))
-        self._temperature.valueChanged.connect(
-            lambda v: cfg.set(cfg.temperature, round(v, 1))
-        )
-        form.addRow("Temperature:", self._temperature)
-
-        layout.addLayout(form)
-
-        # ── Separator ──
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(sep)
-
-        # ── Shangdao section ──
-        sd_header = QHBoxLayout()
-        self._sd_enabled = QCheckBox("启用商道 API")
-        self._sd_enabled.setChecked(cfg.get(cfg.shangdaoEnabled))
-        self._sd_enabled.toggled.connect(self._on_sd_toggled)
-        sd_header.addWidget(self._sd_enabled)
-        sd_header.addStretch()
-        self._sd_toggle_btn = QPushButton("▶ 展开配置")
-        self._sd_toggle_btn.setFixedWidth(90)
-        self._sd_toggle_btn.setFlat(True)
-        self._sd_toggle_btn.clicked.connect(self._toggle_sd)
-        sd_header.addWidget(self._sd_toggle_btn)
-        layout.addLayout(sd_header)
-
-        self._sd_detail = QWidget()
-        sd_form = QFormLayout(self._sd_detail)
-        sd_form.setContentsMargins(0, 0, 0, 0)
-
-        self._sd_base_url = QLineEdit()
-        self._sd_base_url.setText(cfg.get(cfg.shangdaoBaseUrl))
-        self._sd_base_url.editingFinished.connect(
-            lambda: cfg.set(cfg.shangdaoBaseUrl, self._sd_base_url.text().strip())
-        )
-        sd_form.addRow("API 地址:", self._sd_base_url)
-
-        self._sd_api_key = QLineEdit()
-        self._sd_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._sd_api_key.setText(get_shangdao_api_key())
-        self._sd_api_key.editingFinished.connect(
-            lambda: set_shangdao_api_key(self._sd_api_key.text().strip())
-        )
-        sd_form.addRow("API Key:", self._sd_api_key)
-
-        self._sd_model = QComboBox()
-        self._sd_model.setEditable(True)
-        for name in SHANGDAO_MODELS:
-            self._sd_model.addItem(name, name)
-        current_sd_model = cfg.get(cfg.shangdaoModel)
-        if self._sd_model.findText(current_sd_model) < 0:
-            self._sd_model.addItem(current_sd_model, current_sd_model)
-        self._sd_model.setCurrentText(current_sd_model)
-        self._sd_model.lineEdit().setPlaceholderText("输入商道模型名")
-        self._sd_model.currentTextChanged.connect(
-            lambda v: cfg.set(cfg.shangdaoModel, v.strip())
-        )
-        sd_form.addRow("模型:", self._sd_model)
-
-        self._sd_detail.setVisible(False)
-        layout.addWidget(self._sd_detail)
-
-        # ── Separator ──
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(sep2)
-
-        # ── LiteLLM section ──
-        ll_header = QHBoxLayout()
-        self._ll_enabled = QCheckBox("启用 LiteLLM")
-        self._ll_enabled.setChecked(cfg.get(cfg.litellmEnabled))
-        self._ll_enabled.toggled.connect(self._on_ll_toggled)
-        ll_header.addWidget(self._ll_enabled)
-        ll_header.addStretch()
-        self._ll_toggle_btn = QPushButton("▶ 展开配置")
-        self._ll_toggle_btn.setFixedWidth(90)
-        self._ll_toggle_btn.setFlat(True)
-        self._ll_toggle_btn.clicked.connect(self._toggle_ll)
-        ll_header.addWidget(self._ll_toggle_btn)
-        layout.addLayout(ll_header)
-
-        self._ll_detail = QWidget()
-        ll_form = QFormLayout(self._ll_detail)
-        ll_form.setContentsMargins(0, 0, 0, 0)
+        # ── 模型管理 ──
+        ll_form = QFormLayout()
 
         self._ll_default_model = QComboBox()
         self._ll_default_model.currentIndexChanged.connect(self._on_ll_default_changed)
@@ -218,54 +67,68 @@ class ApiPage(QScrollArea):
             ll_model_actions_layout.addWidget(btn)
         ll_form.addRow("模型管理:", ll_model_actions)
 
-        # Provider API keys
+        layout.addLayout(ll_form)
+
+        # ── Provider API Keys ──
         self._ll_key_group = QGroupBox("API Key 配置")
         self._ll_key_layout = QFormLayout(self._ll_key_group)
         self._ll_key_layout.setContentsMargins(8, 8, 8, 8)
         self._ll_provider_keys: dict[str, QLineEdit] = {}
-        ll_form.addRow(self._ll_key_group)
+        layout.addWidget(self._ll_key_group)
         self._refresh_ll_models()
 
-        self._ll_detail.setVisible(False)
-        layout.addWidget(self._ll_detail)
+        # ── 通用参数 ──
+        param_group = QGroupBox("通用参数")
+        param_form = QFormLayout(param_group)
+        param_form.setContentsMargins(8, 8, 8, 8)
+
+        # 识图（多模态）能力：截图/图片附件是否把像素发给模型
+        self._vision = QComboBox()
+        self._VISION_OPTIONS = [
+            ("auto", "自动（按模型名判断）"),
+            ("on", "始终开启"),
+            ("off", "始终关闭"),
+        ]
+        for value, label in self._VISION_OPTIONS:
+            self._vision.addItem(label, value)
+        current_vision = cfg.get(cfg.visionSupport)
+        vision_idx = self._vision.findData(current_vision)
+        self._vision.setCurrentIndex(vision_idx if vision_idx >= 0 else 0)
+        self._vision.currentIndexChanged.connect(
+            lambda i: cfg.set(cfg.visionSupport, self._vision.itemData(i))
+        )
+        self._vision.setToolTip(
+            "识图功能是否把图片像素发给模型。\n"
+            "自动：常见多模态模型名（gpt-4o/claude/gemini/vl 等）自动识别。\n"
+            "若用自定义模型名且确认支持视觉，选「始终开启」。"
+        )
+        param_form.addRow("识图能力:", self._vision)
+
+        self._max_tokens = QSpinBox()
+        self._max_tokens.setRange(256, 65536)
+        self._max_tokens.setSingleStep(256)
+        self._max_tokens.setValue(cfg.get(cfg.maxTokens))
+        self._max_tokens.valueChanged.connect(
+            lambda v: cfg.set(cfg.maxTokens, v)
+        )
+        param_form.addRow("最大 Token:", self._max_tokens)
+
+        self._temperature = QDoubleSpinBox()
+        self._temperature.setRange(0.0, 2.0)
+        self._temperature.setSingleStep(0.1)
+        self._temperature.setDecimals(1)
+        self._temperature.setValue(cfg.get(cfg.temperature))
+        self._temperature.valueChanged.connect(
+            lambda v: cfg.set(cfg.temperature, round(v, 1))
+        )
+        param_form.addRow("Temperature:", self._temperature)
+
+        layout.addWidget(param_group)
 
         layout.addStretch()
         self.setWidget(container)
 
     # ── Event handlers ──
-
-    def _toggle_sd(self):
-        visible = not self._sd_detail.isVisible()
-        self._sd_detail.setVisible(visible)
-        self._sd_toggle_btn.setText("▼ 收起配置" if visible else "▶ 展开配置")
-
-    def _on_sd_toggled(self, enabled: bool):
-        cfg.set(cfg.shangdaoEnabled, enabled)
-        if enabled:
-            cfg.set(cfg.apiType, "shangdao")
-        elif not cfg.get(cfg.litellmEnabled):
-            cfg.set(cfg.apiType, "openai")
-        # Disable OpenAI fields when shangdao is active
-        for w in (self._base_url, self._api_key, self._model, self._vision,
-                  self._max_tokens, self._temperature):
-            w.setEnabled(not enabled)
-        self._ll_enabled.setEnabled(not enabled)
-
-    def _toggle_ll(self):
-        visible = not self._ll_detail.isVisible()
-        self._ll_detail.setVisible(visible)
-        self._ll_toggle_btn.setText("▼ 收起配置" if visible else "▶ 展开配置")
-
-    def _on_ll_toggled(self, enabled: bool):
-        cfg.set(cfg.litellmEnabled, enabled)
-        if enabled:
-            cfg.set(cfg.apiType, "litellm")
-        elif not cfg.get(cfg.shangdaoEnabled):
-            cfg.set(cfg.apiType, "openai")
-        for w in (self._base_url, self._api_key, self._model, self._vision,
-                  self._max_tokens, self._temperature):
-            w.setEnabled(not enabled)
-        self._sd_enabled.setEnabled(not enabled)
 
     def _refresh_ll_models(self, selected_model_id: str | None = None):
         models = list(cfg.get(cfg.litellmModels) or [])

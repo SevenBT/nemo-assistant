@@ -1,7 +1,6 @@
 """测试多模态图片通道：图片附件 → OpenAI image_url 结构。
 
-验证 merge_attachments_to_content 在 vision 开/关下的分流行为，
-以及 shangdao 的 list content 降级（_flatten_content）。
+验证 merge_attachments_to_content 在 vision 开/关下的分流行为。
 """
 import base64
 import sys
@@ -15,7 +14,6 @@ if sys.platform == "win32":
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.conversation_prompt_builder import merge_attachments_to_content
-from app.core.llm_gateway import _flatten_content, _messages_with_text_tool_history
 from app.models.attachment import Attachment
 from app.models.message import Message, MessageRole
 
@@ -156,36 +154,6 @@ def test_missing_image_file_skips_image_url():
     # 文件不存在 → 无 image_url → 退回字符串
     assert isinstance(content, str), "取不到图片数据时应退回文本"
     assert "解释" in content
-
-
-def test_flatten_content_keeps_text_drops_image():
-    content = [
-        {"type": "text", "text": "你好"},
-        {"type": "image_url", "image_url": {"url": "data:image/png;base64,xxx"}},
-    ]
-    flat = _flatten_content(content)
-    assert "你好" in flat
-    assert "[图片]" in flat
-    assert "base64" not in flat, "不应把 base64 塞进文本"
-
-
-def test_flatten_content_passthrough_string():
-    assert _flatten_content("plain") == "plain"
-    assert _flatten_content(None) == ""
-
-
-def test_shangdao_history_flattens_list_content():
-    messages = [
-        {"role": "user", "content": [
-            {"type": "text", "text": "看这个"},
-            {"type": "image_url", "image_url": {"url": "data:image/png;base64,zzz"}},
-        ]},
-    ]
-    out = _messages_with_text_tool_history(messages)
-    assert out[0]["content"] == "看这个\n[图片]" or (
-        "看这个" in out[0]["content"] and "[图片]" in out[0]["content"]
-    )
-    assert isinstance(out[0]["content"], str)
 
 
 if __name__ == "__main__":

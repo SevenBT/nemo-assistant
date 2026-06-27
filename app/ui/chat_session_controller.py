@@ -630,9 +630,8 @@ class ChatSessionController(QObject):
         hint = ""
         if error_msg and "404" in error_msg:
             hint = (
-                "\n\n提示：请在设置中检查 API 地址"
-                f"（当前: {cfg.get(cfg.apiBaseUrl)}）和模型名称"
-                f"（当前: {cfg.get(cfg.model)}）"
+                "\n\n提示：请在设置中检查默认模型的 API 地址和模型名称"
+                f"（当前模型: {cfg.get(cfg.litellmDefaultModel)}）"
             )
         elif error_msg and ("401" in error_msg or "Unauthorized" in error_msg):
             hint = "\n\n提示：API Key 无效，请在设置中重新填写"
