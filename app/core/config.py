@@ -123,6 +123,17 @@ THEME_OPTIONS = [
 _SERVICE_NAME = "ai-agent-desktop"
 _ACCOUNT_SEARCH_KEY = "web_search_api_key"
 
+# ── Hotkey defaults (single source of truth) ──────────────────────────
+# config 项默认值、迁移、HotkeyManager、设置页都从这里取默认组合键，
+# 避免默认值散落多处产生分歧。键为 action id，值为 keyboard 组合串。
+DEFAULT_HOTKEYS: dict[str, str] = {
+    "screenshot": "ctrl+alt+a",
+    "new_note": "ctrl+alt+n",
+    "toggle_window": "ctrl+alt+space",
+    "quick_ask": "ctrl+alt+q",
+    "selection": "ctrl+alt+e",
+}
+
 
 # ── AppConfig declaration ─────────────────────────────────────────────
 
@@ -169,7 +180,12 @@ class AppConfig(QConfig):
     maxTokens = RangeConfigItem(
         "API", "MaxTokens", 4096, RangeValidator(256, 65536)
     )
-    temperature = ConfigItem("API", "Temperature", 0.7)
+    temperature = RangeConfigItem(
+        "API", "Temperature", 0.7, RangeValidator(0.0, 2.0)
+    )
+    topP = RangeConfigItem(
+        "API", "TopP", 1.0, RangeValidator(0.0, 1.0)
+    )
     systemPrompt = ConfigItem("API", "SystemPrompt", "")
     # 当前模型是否支持多模态识图（发送图片像素）。
     # "auto" = 按模型名启发式推断；"on"/"off" = 用户手动覆盖。
@@ -192,13 +208,21 @@ class AppConfig(QConfig):
     toolStates = ConfigItem("Tools", "ToolStates", {})
 
     # -- Hotkeys --
-    hotkeyScreenshot = ConfigItem("Hotkeys", "Screenshot", "ctrl+alt+a")
-    hotkeyNewNote = ConfigItem("Hotkeys", "NewNote", "ctrl+alt+n")
-    hotkeyToggleWindow = ConfigItem(
-        "Hotkeys", "ToggleWindow", "ctrl+alt+space"
+    hotkeyScreenshot = ConfigItem(
+        "Hotkeys", "Screenshot", DEFAULT_HOTKEYS["screenshot"]
     )
-    hotkeyQuickAsk = ConfigItem("Hotkeys", "QuickAsk", "ctrl+alt+q")
-    hotkeySelection = ConfigItem("Hotkeys", "Selection", "ctrl+alt+e")
+    hotkeyNewNote = ConfigItem(
+        "Hotkeys", "NewNote", DEFAULT_HOTKEYS["new_note"]
+    )
+    hotkeyToggleWindow = ConfigItem(
+        "Hotkeys", "ToggleWindow", DEFAULT_HOTKEYS["toggle_window"]
+    )
+    hotkeyQuickAsk = ConfigItem(
+        "Hotkeys", "QuickAsk", DEFAULT_HOTKEYS["quick_ask"]
+    )
+    hotkeySelection = ConfigItem(
+        "Hotkeys", "Selection", DEFAULT_HOTKEYS["selection"]
+    )
 
     # -- Selection (划词即行动) --
     selectionFloatEnabled = ConfigItem(

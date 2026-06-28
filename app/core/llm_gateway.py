@@ -100,6 +100,7 @@ class LLMRequest:
     tools: list[dict[str, Any]] | None = None
     max_tokens: int = 4096
     temperature: float = 0.7
+    top_p: float = 1.0
     provider: str = ""
     api_key: str = ""
     base_url: str = ""
@@ -411,6 +412,7 @@ class LiteLLMAdapter:
             "messages": request.messages,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
+            "top_p": request.top_p,
             "stream": True,
             "stream_options": {"include_usage": True},
             "api_key": request.api_key,
@@ -833,6 +835,7 @@ class LLMGateway:
             tools=tools,
             max_tokens=cfg.get(cfg.maxTokens),
             temperature=cfg.get(cfg.temperature),
+            top_p=cfg.get(cfg.topP),
             api_key=get_litellm_provider_api_key(provider) if provider else "",
             base_url=base_url,
         )

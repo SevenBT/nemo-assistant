@@ -62,7 +62,7 @@ class TrashPage(QWidget):
 
         self._empty = BodyLabel("回收站是空的。", self)
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._empty)
+        layout.addWidget(self._empty, 1)
 
         self._list = ListWidget(self)
         layout.addWidget(self._list, 1)

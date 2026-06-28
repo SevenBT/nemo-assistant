@@ -16,13 +16,8 @@ try:
 except ImportError:
     _KB_OK = False
 
-DEFAULT_HOTKEYS: dict[str, str] = {
-    "screenshot":    "ctrl+alt+a",
-    "new_note":      "ctrl+alt+n",
-    "toggle_window": "ctrl+alt+space",
-    "quick_ask":     "ctrl+alt+q",
-    "selection":     "ctrl+alt+e",
-}
+# 默认组合键的单一来源在 config 中；此处复用，避免分歧。
+from app.core.config import DEFAULT_HOTKEYS  # noqa: E402
 
 _ACTION_LABELS: dict[str, str] = {
     "screenshot":    "截图",
@@ -52,6 +47,8 @@ class HotkeyManager(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # 最近一次 _register_all 中注册失败的 action 列表（供 UI 反馈）。
+        self.failed_actions: list[str] = []
 
     # ------------------------------------------------------------------ 公开接口
     def start(self):
@@ -87,15 +84,19 @@ class HotkeyManager(QObject):
             "quick_ask": cfg.get(cfg.hotkeyQuickAsk),
             "selection": cfg.get(cfg.hotkeySelection),
         }
+        self.failed_actions = []
         for action, signal_name in self._SIGNAL_MAP.items():
             combo = hotkeys.get(action) or DEFAULT_HOTKEYS.get(action, "")
-            if combo:
-                self._safe_add(combo, getattr(self, signal_name).emit)
+            if combo and not self._safe_add(combo, getattr(self, signal_name).emit):
+                self.failed_actions.append(action)
 
-    def _safe_add(self, combo: str, callback):
+    def _safe_add(self, combo: str, callback) -> bool:
+        """注册单个热键，成功返回 True，失败记日志并返回 False。"""
         try:
             _kb.add_hotkey(combo, callback, suppress=False)
+            return True
         except Exception:
             logger.warning(
                 "HotkeyManager: 注册热键 '%s' 失败", combo, exc_info=True
             )
+            return False

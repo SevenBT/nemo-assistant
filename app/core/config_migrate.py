@@ -161,6 +161,7 @@ def _convert_old_to_new(old: dict) -> dict:
     new.setdefault("API", {})
     new["API"]["MaxTokens"] = api.get("max_tokens", 4096)
     new["API"]["Temperature"] = api.get("temperature", 0.7)
+    new["API"]["TopP"] = api.get("top_p", 1.0)
     new["API"]["SystemPrompt"] = api.get("system_prompt", "")
     # 临时携带旧 OpenAI 端点信息，供 _consolidate_to_litellm 消费后清除
     new["API"]["_LegacyBaseUrl"] = api.get("base_url", "https://api.openai.com/v1")
@@ -178,13 +179,15 @@ def _convert_old_to_new(old: dict) -> dict:
     new["LiteLLM"]["DefaultModel"] = ll.get("default_model", "gpt-4o")
     new["LiteLLM"]["Models"] = ll.get("models", [])
 
-    # Hotkeys
+    # Hotkeys（默认值取自单一来源 DEFAULT_HOTKEYS）
+    from app.core.config import DEFAULT_HOTKEYS
     hk = old.get("hotkeys", {})
     new.setdefault("Hotkeys", {})
-    new["Hotkeys"]["Screenshot"] = hk.get("screenshot", "ctrl+alt+a")
-    new["Hotkeys"]["NewNote"] = hk.get("new_note", "ctrl+alt+n")
-    new["Hotkeys"]["ToggleWindow"] = hk.get("toggle_window", "ctrl+alt+space")
-    new["Hotkeys"]["QuickAsk"] = hk.get("quick_ask", "ctrl+alt+q")
+    new["Hotkeys"]["Screenshot"] = hk.get("screenshot", DEFAULT_HOTKEYS["screenshot"])
+    new["Hotkeys"]["NewNote"] = hk.get("new_note", DEFAULT_HOTKEYS["new_note"])
+    new["Hotkeys"]["ToggleWindow"] = hk.get("toggle_window", DEFAULT_HOTKEYS["toggle_window"])
+    new["Hotkeys"]["QuickAsk"] = hk.get("quick_ask", DEFAULT_HOTKEYS["quick_ask"])
+    new["Hotkeys"]["Selection"] = hk.get("selection", DEFAULT_HOTKEYS["selection"])
 
     # Tools (tool_states from old format)
     new.setdefault("Tools", {})

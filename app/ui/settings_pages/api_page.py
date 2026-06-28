@@ -10,8 +10,10 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -123,10 +125,58 @@ class ApiPage(QScrollArea):
         )
         param_form.addRow("Temperature:", self._temperature)
 
+        self._top_p = QDoubleSpinBox()
+        self._top_p.setRange(0.0, 1.0)
+        self._top_p.setSingleStep(0.05)
+        self._top_p.setDecimals(2)
+        self._top_p.setValue(cfg.get(cfg.topP))
+        self._top_p.valueChanged.connect(
+            lambda v: cfg.set(cfg.topP, round(v, 2))
+        )
+        self._top_p.setToolTip(
+            "核采样（nucleus sampling）。\n"
+            "1.0 表示不裁剪候选词；调低会让输出更聚焦。\n"
+            "通常与 Temperature 二选一调整，不建议同时大幅改动。"
+        )
+        param_form.addRow("Top P:", self._top_p)
+
         layout.addWidget(param_group)
+
+        # ── 系统提示词 ──
+        prompt_group = QGroupBox("系统提示词")
+        prompt_layout = QVBoxLayout(prompt_group)
+        prompt_layout.setContentsMargins(8, 8, 8, 8)
+        prompt_hint = QLabel(
+            "全局系统提示词，作用于所有会话。单个会话若设置了自己的提示词，"
+            "则优先使用会话的。留空表示不附加全局提示词。"
+        )
+        prompt_hint.setWordWrap(True)
+        prompt_layout.addWidget(prompt_hint)
+        self._system_prompt = QPlainTextEdit()
+        self._system_prompt.setFixedHeight(120)
+        self._system_prompt.setPlaceholderText("例如：你是一个简洁、专业的中文助手……")
+        self._system_prompt.setPlainText(cfg.get(cfg.systemPrompt) or "")
+        self._system_prompt.focusOutEvent = self._wrap_prompt_focus_out(
+            self._system_prompt.focusOutEvent
+        )
+        prompt_layout.addWidget(self._system_prompt)
+        layout.addWidget(prompt_group)
 
         layout.addStretch()
         self.setWidget(container)
+
+    def _wrap_prompt_focus_out(self, original):
+        """系统提示词编辑框失焦时写回 cfg，避免每次按键都落盘。"""
+
+        def handler(event):
+            cfg.set(cfg.systemPrompt, self._system_prompt.toPlainText().strip())
+            original(event)
+
+        return handler
+
+    def save(self):
+        """供设置窗口在确定/关闭时统一调用，兜底未失焦的系统提示词编辑框。"""
+        cfg.set(cfg.systemPrompt, self._system_prompt.toPlainText().strip())
 
     # ── Event handlers ──
 

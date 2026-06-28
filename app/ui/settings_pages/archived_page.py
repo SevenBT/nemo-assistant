@@ -47,14 +47,18 @@ class ArchivedPage(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        layout.addWidget(StrongBodyLabel("归档会话", self))
+        header = QHBoxLayout()
+        header.addWidget(StrongBodyLabel("归档会话", self))
+        header.addStretch()
+        layout.addLayout(header)
+
         hint = BodyLabel("删除的会话会移到这里。可恢复回会话列表，或彻底删除。", self)
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
         self._empty = BodyLabel("暂无归档会话。", self)
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._empty)
+        layout.addWidget(self._empty, 1)
 
         self._list = ListWidget(self)
         layout.addWidget(self._list, 1)

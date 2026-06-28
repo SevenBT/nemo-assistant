@@ -113,7 +113,8 @@ class SettingsWindow(QDialog):
 
         self._stack.addWidget(AppearancePage(self))
         self._stack.addWidget(EditorPage(self))
-        self._stack.addWidget(ApiPage(self))
+        self._api_page = ApiPage(self)
+        self._stack.addWidget(self._api_page)
         self._stack.addWidget(ToolsPage(self._registry, self))
         self._stack.addWidget(HotkeysPage(self._hotkey_mgr, self))
         self._stack.addWidget(WindowPage(self))
@@ -140,11 +141,13 @@ class SettingsWindow(QDialog):
         self._stack.setCurrentIndex(index)
 
     def accept(self):
+        self._api_page.save()
         self._selection_page.save()
         cfg.save()
         super().accept()
 
     def closeEvent(self, event):
+        self._api_page.save()
         self._selection_page.save()
         cfg.set(cfg.settingsWidth, self.width())
         cfg.set(cfg.settingsHeight, self.height())
