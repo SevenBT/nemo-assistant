@@ -128,8 +128,6 @@ class AgentLoop(QThread):
                 if self._cancelled:
                     ctx.error_message = None
                     ctx.state = TurnState.FINALIZE
-                    if ctx.state is TurnState.DONE:
-                        break
                 # 取当前状态对应的handler
                 handler = getattr(self, f"_state_{ctx.state.name.lower()}")
                 self.state_changed.emit(ctx.state.name)
@@ -445,7 +443,9 @@ class AgentLoop(QThread):
                     tc["id"], tc["name"], tc["arguments"], result, duration_ms
                 )
 
-        return results
+        # 理论上每个槽都会被 as_completed 填充；过滤 None 防御 submit 异常等边界，
+        # 避免上游 `for tc, result in batch_results` 解包 None 崩溃。
+        return [r for r in results if r is not None]
 
     def _get_remaining_calls(
         self, all_calls: list[dict], current_batch: list[dict],

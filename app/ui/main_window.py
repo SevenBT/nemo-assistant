@@ -98,6 +98,8 @@ class MainWindow(FluentWindow):
         self._registry = ToolRegistry()
         # 统一 trace 存储：贯穿 LLM 调用与工具调用，落独立 traces.db。
         self._trace_store = TraceStore()
+        # 启动时清理一次历史 trace，防止 traces.db 无限增长耗尽磁盘。
+        self._trace_store.prune()
         self._llm_gateway = LLMGateway(trace_sink=self._trace_store)
         self._snap_mgr: EdgeSnapManager | None = None
 

@@ -4,6 +4,10 @@
 负责会话的 CRUD、消息追加、置顶排序，数据以 JSON 文件持久化到 SESSIONS_DIR。
 """
 import json
+import logging
+import os
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -12,12 +16,16 @@ from app.core.config import SESSIONS_DIR
 from app.models.message import Message
 from app.models.session import DEFAULT_SESSION_TITLE, SOURCE_MANUAL, Session
 
+logger = logging.getLogger(__name__)
+
 
 class SessionManager:
     """会话管理器，管理所有聊天会话的生命周期和持久化。"""
 
     def __init__(self):
         self._sessions: dict[str, Session] = {}
+        # UI 线程与 AgentLoop QThread 可能并发写同一会话文件，加锁串行化写入。
+        self._lock = threading.RLock()
         self._load_all()
 
     # ------------------------------------------------------------------ 加载/保存
@@ -30,14 +38,24 @@ class SessionManager:
                 session = Session.from_dict(data)
                 self._sessions[session.id] = session
             except Exception as e:
-                print(f"[SessionManager] Failed to load {path.name}: {e}")
+                logger.warning("[SessionManager] Failed to load %s: %s", path.name, e)
 
     def _path(self, session_id: str) -> Path:
         return SESSIONS_DIR / f"{session_id}.json"
 
     def _save(self, session: Session):
-        with open(self._path(session.id), "w", encoding="utf-8") as f:
-            json.dump(session.to_dict(), f, ensure_ascii=False, indent=2)
+        """原子写入：先写同目录临时文件，再 os.replace 替换，避免写一半崩溃损坏 JSON。"""
+        data = json.dumps(session.to_dict(), ensure_ascii=False, indent=2)
+        path = self._path(session.id)
+        with self._lock:
+            fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(data)
+                os.replace(tmp, path)  # 同目录替换，Windows/POSIX 均原子
+            except Exception:
+                Path(tmp).unlink(missing_ok=True)
+                raise
 
     # ------------------------------------------------------------------ CRUD
     def get_sessions(self) -> list[Session]:
