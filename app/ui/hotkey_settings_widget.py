@@ -80,14 +80,32 @@ class _Capture(QObject):
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
-        if not _KB_OK:
-            self.finished.emit("")
-            return
+        result = ""
+        if _KB_OK:
+            try:
+                combo = _kb.read_hotkey(suppress=True)
+                result = "" if combo.lower() == "escape" else combo
+            except Exception:
+                result = ""
+        self._safe_emit(result)
+
+    def _safe_emit(self, result: str):
+        """录制阻塞期间承载本对象的设置页可能已被销毁；emit 前确认对象仍存活。
+
+        read_hotkey(suppress=True) 会一直阻塞到有按键，期间若对话框关闭，
+        底层 C++ 对象已删除，直接 emit 会抛 RuntimeError 并使线程崩溃。
+        """
         try:
-            combo = _kb.read_hotkey(suppress=True)
-            self.finished.emit("" if combo.lower() == "escape" else combo)
+            from PyQt6 import sip
+            if sip.isdeleted(self):
+                return
         except Exception:
-            self.finished.emit("")
+            pass
+        try:
+            self.finished.emit(result)
+        except RuntimeError:
+            # 对象已在 emit 前一刻被删除，安全忽略。
+            pass
 
 
 class _HotkeyRow(QWidget):
