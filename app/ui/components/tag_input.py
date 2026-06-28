@@ -19,7 +19,11 @@ class TagButton(PillPushButton):
     removed = pyqtSignal(str)
 
     def __init__(self, display_text: str, tag_name: str, parent=None):
-        super().__init__(display_text, parent)
+        # 注意：qfluentwidgets 的 PushButton 系用 @singledispatchmethod 分派构造，
+        # 其 text 重载体内会调 self.__init__(parent=parent)，在子类上会按子类签名
+        # 重新分派 → 命中本签名缺参崩溃。故走 parent-only 重载再 setText 绕开递归。
+        super().__init__(parent)
+        self.setText(display_text)
         self.tag_name = tag_name
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clicked.connect(lambda: self.removed.emit(self.tag_name))

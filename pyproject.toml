@@ -1,0 +1,23 @@
+[tool.pytest.ini_options]
+# 只收集主项目 tests/，避免扫到 .venv 或 nanobot 子项目的第三方测试。
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "ui: 需要 QApplication 的测试",
+    "integration: 集成测试（真实文件 / SQLite 等）",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+# 覆盖率只统计应用代码，排除测试、虚拟环境与独立子项目。
+source = ["app"]
+omit = [
+    "tests/*",
+    ".venv/*",
+    "nanobot/*",
+]
+
+[tool.coverage.report]
+show_missing = true

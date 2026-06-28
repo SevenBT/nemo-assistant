@@ -5,10 +5,19 @@ from pathlib import Path
 # 设置 UTF-8 输出
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stdout = sys.stdout if "pytest" in sys.modules else io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, str(Path(__file__).parent))
+
+import pytest
+
+# 该测试针对已移除的旧 API（ConfigManager + edge_snap_width_threshold 0~1 比例），
+# 现配置改为 cfg.edgeSnapThreshold（20~80 px 区间），语义不同，待按新 API 重写。
+pytest.skip(
+    "stale: ConfigManager API removed, see cfg.edgeSnapThreshold",
+    allow_module_level=True,
+)
 
 from app.core.config import ConfigManager
 
