@@ -271,8 +271,15 @@ class ScriptToolAdapter(BuiltinTool):
         with open(manifest_path, encoding="utf-8") as f:
             manifest = json.load(f)
 
-        tool_dir = manifest_path.parent
-        script_path = str(tool_dir / manifest.get("script", "tool.py"))
+        tool_dir = manifest_path.parent.resolve()
+        # script 字段完全来自用户 manifest，必须校验解析后仍在 tool_dir 内，
+        # 否则恶意 manifest 可用 "../../../x.py" 让子进程执行工具目录外的任意脚本。
+        script_resolved = (tool_dir / manifest.get("script", "tool.py")).resolve()
+        if not script_resolved.is_relative_to(tool_dir):
+            raise ValueError(
+                f"script 路径越界，必须在工具目录内: {manifest.get('script')!r}"
+            )
+        script_path = str(script_resolved)
 
         # 将 manifest 中的参数定义转换为标准 JSON Schema 格式
         properties = {}
