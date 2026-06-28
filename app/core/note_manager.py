@@ -56,8 +56,7 @@ class NoteManager:
                 """
             )
             notes = [Note.from_row(row) for row in cursor.fetchall()]
-            for note in notes:
-                note.tags = self._get_note_tags(conn, note.id)
+            self._attach_tags(conn, notes)
             return notes
 
     def get(self, note_id: Union[str, int]) -> Optional[Note]:
@@ -193,8 +192,7 @@ class NoteManager:
                 """
             )
             notes = [Note.from_row(row) for row in cursor.fetchall()]
-            for note in notes:
-                note.tags = self._get_note_tags(conn, note.id)
+            self._attach_tags(conn, notes)
             return notes
 
     def trash_count(self) -> int:
@@ -266,8 +264,7 @@ class NoteManager:
                 """
             )
             notes = [Note.from_row(row) for row in cursor.fetchall()]
-            for note in notes:
-                note.tags = self._get_note_tags(conn, note.id)
+            self._attach_tags(conn, notes)
             return notes
 
     def pin_note(self, note_id: Union[str, int], x: int, y: int):
@@ -376,6 +373,27 @@ class NoteManager:
         )
         return [row["name"] for row in cursor.fetchall()]
 
+    def _attach_tags(self, conn: sqlite3.Connection, notes: list[Note]) -> None:
+        """批量为一组笔记填充 tags，单次查询替代 N+1（每条笔记一次查询）。"""
+        if not notes:
+            return
+        ids = [n.id for n in notes]
+        placeholders = ",".join("?" * len(ids))
+        cursor = conn.execute(
+            f"""
+            SELECT nt.note_id, t.name FROM tags t
+            JOIN note_tags nt ON t.id = nt.tag_id
+            WHERE nt.note_id IN ({placeholders})
+            ORDER BY t.name
+            """,
+            ids,
+        )
+        tags_by_note: dict[int, list[str]] = {}
+        for row in cursor.fetchall():
+            tags_by_note.setdefault(row["note_id"], []).append(row["name"])
+        for note in notes:
+            note.tags = tags_by_note.get(note.id, [])
+
     def get_all_tags(self) -> list[str]:
         """
         获取所有标签名称。
@@ -451,8 +469,7 @@ class NoteManager:
                 (tag_name,),
             )
             notes = [Note.from_row(row) for row in cursor.fetchall()]
-            for note in notes:
-                note.tags = self._get_note_tags(conn, note.id)
+            self._attach_tags(conn, notes)
             return notes
 
     def _set_note_tags(self, conn: sqlite3.Connection, note_id: int, tags: list[str]):
@@ -525,8 +542,7 @@ class NoteManager:
                 (note_type,),
             )
             notes = [Note.from_row(row) for row in cursor.fetchall()]
-            for note in notes:
-                note.tags = self._get_note_tags(conn, note.id)
+            self._attach_tags(conn, notes)
             return notes
 
     def toggle_todo_completed(self, note_id: Union[str, int]) -> bool:
@@ -691,8 +707,7 @@ class NoteManager:
 
             cursor = conn.execute(query, params + order_params)
             notes = [Note.from_row(row) for row in cursor.fetchall()]
-            for note in notes:
-                note.tags = self._get_note_tags(conn, note.id)
+            self._attach_tags(conn, notes)
             return notes
 
     # ------------------------------------------------------------------ folder CRUD
@@ -769,7 +784,6 @@ class NoteManager:
                     (folder_id,),
                 )
             notes = [Note.from_row(row) for row in cursor.fetchall()]
-            for note in notes:
-                note.tags = self._get_note_tags(conn, note.id)
+            self._attach_tags(conn, notes)
             return notes
 

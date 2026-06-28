@@ -167,6 +167,9 @@ class Dream:
         valid_categories = {"personality", "user", "project", "fact"}
         # 已有同类记忆，用于 ADD 查重（含本轮新增的，避免一批指令内自我重复）
         existing_by_cat: dict[str, list[str]] = {}
+        # UPDATE/DELETE 的 id 白名单：只允许操作本次发给 LLM 的 global 记忆。
+        # 否则 LLM 幻觉出的 id 可能恰好命中某 session 记忆而被误删/误改。
+        allowed_ids = {m.id for m in (existing or [])}
         for m in existing or []:
             existing_by_cat.setdefault(m.category, []).append(m.content)
 
@@ -191,16 +194,20 @@ class Dream:
                     existing_by_cat.setdefault(category, []).append(content)
                 elif action == "UPDATE":
                     memory_id = d.get("id")
-                    if memory_id:
-                        self._mem.update(
-                            memory_id=memory_id,
-                            content=d.get("content"),
-                            importance=d.get("importance"),
-                        )
+                    if memory_id not in allowed_ids:
+                        logger.warning(f"[Dream] 跳过越界 UPDATE，id 不在 global 记忆内: {memory_id}")
+                        continue
+                    self._mem.update(
+                        memory_id=memory_id,
+                        content=d.get("content"),
+                        importance=d.get("importance"),
+                    )
                 elif action == "DELETE":
                     memory_id = d.get("id")
-                    if memory_id:
-                        self._mem.delete(memory_id)
+                    if memory_id not in allowed_ids:
+                        logger.warning(f"[Dream] 跳过越界 DELETE，id 不在 global 记忆内: {memory_id}")
+                        continue
+                    self._mem.delete(memory_id)
             except Exception as e:
                 logger.warning(f"[Dream] 执行指令失败: {d} -> {e}")
 

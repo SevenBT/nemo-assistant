@@ -10,6 +10,7 @@ Consolidator — 对话 token 超限时自动压缩旧消息为摘要。
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -41,6 +42,28 @@ def _estimate_tokens(text: str) -> int:
     chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
     other_chars = len(text) - chinese_chars
     return int(chinese_chars / 1.5 + other_chars / 4)
+
+
+def _message_token_text(m: "Message") -> str:
+    """单条消息用于 token 估算的全部文本：含 content + tool_calls(参数+结果)。
+
+    仅用 m.content 会严重低估 —— assistant 的 tool_calls(arguments)、tool 角色的
+    结果 JSON 往往体量很大，漏算会导致压缩触发过晚、实际超出上下文窗口。
+    """
+    parts = [m.content or ""]
+    for tc in getattr(m, "tool_calls", None) or []:
+        args = getattr(tc, "arguments", None)
+        result = getattr(tc, "result", None)
+        if args:
+            parts.append(json.dumps(args, ensure_ascii=False))
+        if result:
+            parts.append(json.dumps(result, ensure_ascii=False))
+    return "\n".join(p for p in parts if p)
+
+
+def _estimate_messages_tokens(messages: list["Message"]) -> int:
+    """估算整段消息的 token 总量（含 tool_calls）。"""
+    return _estimate_tokens("\n".join(_message_token_text(m) for m in messages))
 
 
 def _messages_to_text(messages: list["Message"]) -> str:
@@ -80,8 +103,7 @@ class Consolidator:
         如果压缩成功，返回 [摘要系统消息] + 保留的近期消息。
         如果 LLM 调用失败，做 raw 截断。
         """
-        total_text = "\n".join(m.content or "" for m in messages)
-        estimated_tokens = _estimate_tokens(total_text)
+        estimated_tokens = _estimate_messages_tokens(messages)
 
         threshold = int(self._max_tokens * 0.7)
         if estimated_tokens <= threshold:
@@ -96,7 +118,7 @@ class Consolidator:
         keep_count = len(messages)
         running_tokens = estimated_tokens
         for i, m in enumerate(messages):
-            msg_tokens = _estimate_tokens(m.content or "")
+            msg_tokens = _estimate_tokens(_message_token_text(m))
             running_tokens -= msg_tokens
             if running_tokens <= target_tokens:
                 keep_count = len(messages) - i - 1

@@ -5,6 +5,9 @@
 任务配置持久化到 jobs.json，执行时调用 ToolManager 运行对应工具脚本。
 """
 import json
+import logging
+import os
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +19,8 @@ from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.core.config import DATA_DIR
+
+logger = logging.getLogger(__name__)
 
 JOBS_FILE = DATA_DIR / "jobs.json"
 
@@ -107,7 +112,7 @@ class SchedulerManager:
             if trigger_type == "date":
                 return DateTrigger(**config)
         except Exception as e:
-            print(f"[Scheduler] Trigger error: {e}")
+            logger.error("[Scheduler] Trigger error: %s", e)
         return None
 
     def _run_job(self, job_id: str):
@@ -121,14 +126,28 @@ class SchedulerManager:
             return
         if not self._tool_manager:
             return
-        result = self._tool_manager.execute(job["tool_name"], job["params"])
+        # 工具执行可能抛异常；不捕获的话 APScheduler 会吞掉、_on_result 永不触发，
+        # 用户无从感知失败。包成 error 结果上报，保证回调始终被调用。
+        try:
+            result = self._tool_manager.execute(job["tool_name"], job["params"])
+        except Exception as e:
+            logger.exception("[Scheduler] Job '%s' execution failed", job.get("name"))
+            result = {"status": "error", "data": {"message": str(e)}}
         if self._on_result:
             self._on_result(job_id, job["name"], result)
 
     def _save_jobs(self):
         JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(JOBS_FILE, "w", encoding="utf-8") as f:
-            json.dump(list(self._jobs.values()), f, ensure_ascii=False, indent=2)
+        # 原子写：先写临时文件再替换，避免写一半崩溃损坏 jobs.json 丢失全部任务。
+        data = json.dumps(list(self._jobs.values()), ensure_ascii=False, indent=2)
+        fd, tmp = tempfile.mkstemp(dir=str(JOBS_FILE.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(data)
+            os.replace(tmp, JOBS_FILE)
+        except Exception:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
     def _load_jobs(self):
         if not JOBS_FILE.exists():
@@ -137,7 +156,7 @@ class SchedulerManager:
             with open(JOBS_FILE, encoding="utf-8") as f:
                 jobs: list[dict] = json.load(f)
         except Exception as e:
-            print(f"[Scheduler] Load failed: {e}")
+            logger.error("[Scheduler] Load failed: %s", e)
             return
 
         for job in jobs:
@@ -156,4 +175,4 @@ class SchedulerManager:
                     )
                 self._jobs[job["id"]] = job
             except Exception as e:
-                print(f"[Scheduler] Restore job '{job.get('name')}' failed: {e}")
+                logger.error("[Scheduler] Restore job '%s' failed: %s", job.get('name'), e)
