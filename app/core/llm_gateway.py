@@ -395,9 +395,10 @@ class LiteLLMAdapter:
         cancel_token: CancellationToken | None = None,
     ) -> Iterator[dict]:
         try:
-            import litellm
-        except ImportError:
-            yield {"type": "error", "message": "LiteLLM 未安装，请运行: pip install litellm"}
+            from app.core.litellm_loader import load_litellm
+            litellm = load_litellm()
+        except ImportError as e:
+            yield {"type": "error", "message": str(e)}
             return
 
         if not request.provider:

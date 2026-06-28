@@ -139,7 +139,8 @@ class MultiModelConsultTool(BuiltinTool):
 
     async def _consult_async(self, query: str, perspectives: list, context: str, timeout: float) -> str:
         """异步并行调用多个视角（统一使用当前 LiteLLM 默认模型）。"""
-        import litellm
+        from app.core.litellm_loader import load_litellm
+        litellm = load_litellm()
 
         # 过滤无效的视角名称
         valid = [p for p in perspectives if p in PERSPECTIVES]
