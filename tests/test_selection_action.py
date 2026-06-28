@@ -287,30 +287,149 @@ def test_restore_empty_backup_clears_clipboard():
     assert clipboard.text() == ""
 
 
-# ── selection_monitor: is_drag_selection ─────────────────────────────────
+# ── selection_monitor: is_drag_selection（按住期间真实轨迹判定）──────────────
 
-def test_drag_with_enough_distance_and_time():
-    assert is_drag_selection(dx=50, dy=0, duration=0.3) is True
-
-
-def test_click_too_short_distance_rejected():
-    # 几乎没位移 → 点击，不是拖选
-    assert is_drag_selection(dx=3, dy=2, duration=0.3) is False
+def test_drag_with_enough_path_and_moves():
+    # 按住期间走了 50px 轨迹、有 move 事件 → 拖选
+    assert is_drag_selection(path_len=50, move_count=5, duration=0.3) is True
 
 
-def test_drag_too_fast_rejected():
-    # 瞬时抖动 → 过滤
-    assert is_drag_selection(dx=50, dy=0, duration=0.01) is False
+def test_click_with_zero_moves_rejected():
+    # 纯点击：按住期间 0 个 move → 必非拖选（无论 up 坐标毛刺多大）
+    assert is_drag_selection(path_len=0, move_count=0, duration=0.3) is False
+
+
+def test_coordinate_glitch_without_moves_rejected():
+    # up 时刻坐标毛刺：起落点差几百 px，但按住期间无 move、轨迹为 0 → 不误判
+    assert is_drag_selection(path_len=0, move_count=0, duration=0.078) is False
+
+
+def test_short_path_rejected():
+    # 有几次 move 但轨迹太短（手抖）→ 不是拖选
+    assert is_drag_selection(path_len=5, move_count=3, duration=0.3) is False
+
+
+def test_fast_drag_accepted_regardless_of_duration():
+    # 快速划词：耗时极短但轨迹够长、有 move → 仍判为拖选（修复「选太快不弹」）
+    assert is_drag_selection(path_len=200, move_count=8, duration=0.05) is True
 
 
 def test_drag_too_slow_rejected():
-    # 拖了 10 秒 → 多半是拖窗/拖文件，非选字
-    assert is_drag_selection(dx=50, dy=0, duration=10.0) is False
+    # 按住 10 秒 → 多半是拖窗/拖文件，非选字
+    assert is_drag_selection(path_len=200, move_count=20, duration=10.0) is False
 
 
-def test_drag_uses_chebyshev_distance():
-    # 纵向位移足够也算（max(|dx|,|dy|)）
-    assert is_drag_selection(dx=0, dy=50, duration=0.3) is True
+# ── selection_monitor: _on_event 物理按键状态机（点击 vs 拖选 vs 钩子故障）────
+#
+# 新实现不信任 mouse 库的 down/up 标签，改用 GetAsyncKeyState 物理按键状态驱动。
+# 测试据此建模：每个事件附一个「此刻按键是否物理按下」的布尔，喂给被 stub 的
+# is_left_button_physically_down。事件本身只是「有事发生」的触发器。
+
+class _Ev:
+    """带坐标的假事件。kind 仅用于可读性，被测代码不依赖它。"""
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
+def _make_monitor():
+    import app.core.selection_monitor as sm
+
+    monitor = sm.SelectionMonitor()
+    emitted = []
+    monitor._maybe_emit = lambda x, y: emitted.append((x, y))
+    return monitor, emitted
+
+
+def _drive(monkeypatch, monitor, steps):
+    """steps: [(event, btn_down_bool), ...]。按顺序投递，每步前设定物理按键状态。"""
+    import app.core.selection_monitor as sm
+
+    class _FakeMouse:
+        LEFT = "left"
+
+        @staticmethod
+        def get_position():
+            return (0, 0)
+
+    monkeypatch.setattr(sm, "_mouse", _FakeMouse(), raising=False)
+    monkeypatch.setattr(sm, "is_text_cursor", lambda: True)
+    clock = {"t": 0.0}
+
+    def _fake_monotonic():
+        clock["t"] += 0.3
+        return clock["t"]
+
+    monkeypatch.setattr(sm.time, "monotonic", _fake_monotonic)
+
+    btn = {"down": False}
+    monkeypatch.setattr(
+        sm, "is_left_button_physically_down", lambda: btn["down"]
+    )
+    for ev, down in steps:
+        btn["down"] = down
+        monitor._on_event(ev)
+
+
+def test_drag_with_moves_emits(monkeypatch):
+    # 按下 → 持续按住期间几个 move 累积轨迹 → 松开：真实拖选 → 弹
+    monitor, emitted = _make_monitor()
+    _drive(monkeypatch, monitor, [
+        (_Ev(0, 0), True),     # 按下边沿
+        (_Ev(20, 0), True),    # 持续按下 + 移动
+        (_Ev(40, 0), True),
+        (_Ev(60, 0), True),
+        (_Ev(60, 0), False),   # 松开边沿
+    ])
+    assert emitted == [(60, 0)]
+
+
+def test_click_without_moves_ignored(monkeypatch):
+    # 纯点击：按下 → 立刻松开，按住期间无 move（轨迹=0）→ 不弹
+    monitor, emitted = _make_monitor()
+    _drive(monkeypatch, monitor, [
+        (_Ev(100, 100), True),
+        (_Ev(100, 100), False),
+    ])
+    assert emitted == []
+
+
+def test_dropped_down_recovered_by_first_move(monkeypatch):
+    # 钩子丢了 DOWN 事件：第一个仍按着的 move 事件被识别为按下边沿、救回起点。
+    # 这是「右向左漏弹」的主因——丢 DOWN 导致旧实现真 up 成孤立 up 被忽略。
+    monitor, emitted = _make_monitor()
+    _drive(monkeypatch, monitor, [
+        # 没有 down 事件；第一个事件就是按住状态下的 move
+        (_Ev(1200, 685), True),   # 按下边沿（救回）
+        (_Ev(1100, 685), True),
+        (_Ev(1000, 685), True),
+        (_Ev(1000, 685), False),  # 松开边沿
+    ])
+    assert emitted == [(1000, 685)]
+
+
+def test_ghost_up_with_button_still_down_ignored(monkeypatch):
+    # 幽灵 UP：钩子吐假释放，但物理键仍按着 → 无松开边沿、继续累积，真松开才判定。
+    monitor, emitted = _make_monitor()
+    _drive(monkeypatch, monitor, [
+        (_Ev(1200, 685), True),   # 按下
+        (_Ev(1200, 685), True),   # 幽灵 up：被测代码看到的是「仍按下」→ 不结束
+        (_Ev(1100, 685), True),   # 真实拖动 move
+        (_Ev(1000, 685), True),
+        (_Ev(1000, 685), False),  # 真松开
+    ])
+    assert emitted == [(1000, 685)]
+
+
+def test_idle_events_ignored(monkeypatch):
+    # 空闲期（按键始终抬起）的杂散 move 不触发任何东西。
+    monitor, emitted = _make_monitor()
+    _drive(monkeypatch, monitor, [
+        (_Ev(100, 0), False),
+        (_Ev(200, 0), False),
+    ])
+    assert emitted == []
+
 
 
 # ── selection_monitor: should_emit（光标门槛防误弹）─────────────────────────

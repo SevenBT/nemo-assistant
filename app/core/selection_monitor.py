@@ -29,8 +29,16 @@ except ImportError:
 
 # 手势判定阈值。注意：手势只是「可能选了文字」的预筛——是否真的选中由随后的
 # 静默取词决定（取不到就什么都不做）。阈值只为减少无谓的取词尝试。
-_MIN_DRAG_DISTANCE = 40      # 起落点位移下限（px）：低于此视为点击/手抖，非拖选
-_MIN_DRAG_DURATION = 0.12    # 起落最短耗时（s）：过滤误触发的瞬时抖动
+#
+# ★ 判定依据是「按住期间累积的真实移动轨迹长度」，不是起落两点的位移差。
+# 原因（实测日志验证）：mouse 库的全局钩子在 up 时刻偶发坐标毛刺——把原地
+# 点击的 up 采成几百像素外的脏坐标（如 78ms 内位移 702px，人手不可能），
+# 导致「点击切行」被误判为拖选而误弹。而轨迹长度只累加按住期间真实收到的
+# move 事件：点击期间无 move（轨迹=0，不弹）；快速划词哪怕 <0.1s 系统也会
+# 吐出多个 move（轨迹够，照弹）；单点毛刺不进轨迹。耗时门槛因此取消——它
+# 既会误杀快速划词、又拦不住高速毛刺，两端互斥，治标不治本。
+_MIN_DRAG_DISTANCE = 40      # 按住期间累积轨迹下限（px）：低于此视为点击/手抖
+_MIN_DRAG_MOVES = 1          # 按住期间最少 move 事件数：0 个=纯点击，必非拖选
 _MAX_DRAG_DURATION = 5.0     # 起落最长耗时（s）：超时多半是拖窗/拖文件，非选字
 
 # 标准 I 形（文本）光标句柄。可选文字区域悬停时系统光标为 IDC_IBEAM；
@@ -155,6 +163,26 @@ def is_text_cursor() -> bool:
         return True
 
 
+# 左键虚拟键码，用于在 up 事件时核实物理按键真实状态。
+_VK_LBUTTON = 0x01
+
+
+def is_left_button_physically_down() -> bool:
+    """查左键当前是否物理按下（GetAsyncKeyState 最高位）。
+
+    用于识别「幽灵 UP」：mouse 库钩子偶发在按下后、拖动前吐出一个停在按下点、
+    0 个 move 的假 UP 事件（实测日志证实）。此刻用户手其实还按着——物理按键
+    仍为下。据此把假 UP 与真释放区分开：真释放时按键确实抬起，返回 False。
+
+    API 失败时返回 False（fail-open：当作真释放正常处理，不卡住手势）。
+    """
+    try:
+        state = ctypes.windll.user32.GetAsyncKeyState(_VK_LBUTTON)
+        return bool(state & 0x8000)
+    except Exception:
+        return False
+
+
 def should_emit(status, was_text_cursor: bool) -> bool:
     """根据 UIA 取词状态与「拖动时是否为文本光标」决定是否弹动作条。
 
@@ -177,23 +205,32 @@ def should_emit(status, was_text_cursor: bool) -> bool:
 
 
 def is_drag_selection(
-    dx: float,
-    dy: float,
+    path_len: float,
+    move_count: int,
     duration: float,
     *,
     min_distance: float = _MIN_DRAG_DISTANCE,
-    min_duration: float = _MIN_DRAG_DURATION,
+    min_moves: int = _MIN_DRAG_MOVES,
     max_duration: float = _MAX_DRAG_DURATION,
 ) -> bool:
     """判定一次「按下→松开」是否构成划词手势。
 
-    纯函数，便于单测。dx/dy 为起落点位移，duration 为耗时（秒）。
-    位移用切比雪夫距离（max(|dx|,|dy|)）足够区分点击与拖选，省去开方。
+    纯函数，便于单测。判定依据是按住期间累积的真实移动轨迹，而非起落两点
+    位移差——后者会被钩子的坐标毛刺污染（见模块顶部阈值注释）。
+
+    参数：
+      path_len:   按住期间累积的轨迹总长（相邻 move 点间切比雪夫距离之和，px）。
+      move_count: 按住期间收到的 move 事件数。纯点击为 0；任何拖动 ≥1。
+      duration:   起落耗时（秒）。只保留上限，过滤拖窗/拖文件的超长按住。
+
+    点击切行：move_count=0 → 直接否。快速划词：move_count≥1 且轨迹够长 → 真。
+    单点坐标毛刺：不产生 move，path_len/move_count 都不增长 → 不误判。
     """
-    distance = max(abs(dx), abs(dy))
-    if distance < min_distance:
+    if move_count < min_moves:
         return False
-    if duration < min_duration or duration > max_duration:
+    if path_len < min_distance:
+        return False
+    if duration > max_duration:
         return False
     return True
 
@@ -222,7 +259,18 @@ class SelectionMonitor(QObject):
         self._press_x = 0
         self._press_y = 0
         self._press_t = 0.0
-        self._press_text_cursor = True  # 按下时是否为文本光标，门槛兜底路径用
+        self._press_text_cursor = True  # 按下边沿记录的光标形状，门槛兜底路径用
+        # 手势状态：_press_pending 为「上一次事件时左键是否物理按下」，是状态机
+        # 的「上一态」。配合每次事件读到的物理按键真实状态做边沿检测（见
+        # _on_event）。不再依赖 mouse 库会丢/会假报的 down/up 事件标签。
+        self._press_pending = False
+        # 按住期间累积的真实移动轨迹：last_x/y 为上一个采样点，path_len 为累积
+        # 轨迹总长，move_count 为按住期间事件数。按下边沿重置，持续按下时累加，
+        # 松开边沿据此判定拖选。轨迹来自真实坐标流，不受单点坐标毛刺影响。
+        self._last_x = 0
+        self._last_y = 0
+        self._path_len = 0.0
+        self._move_count = 0
         self._hook = None
 
     # ------------------------------------------------------------------ 公开接口
@@ -264,27 +312,54 @@ class SelectionMonitor(QObject):
 
     # ------------------------------------------------------------------ 内部实现
     def _on_event(self, event):
-        """钩子线程回调。只记录左键按下/松开的坐标与时间，不读内容。"""
-        # mouse 库的事件类型；用 duck typing 避免强依赖内部类名。
-        button = getattr(event, "button", None)
-        event_type = getattr(event, "event_type", None)
-        if button != getattr(_mouse, "LEFT", "left"):
-            return
+        """钩子线程回调。**不信任** mouse 库的 down/up 事件标签——实测它会丢
+        DOWN、吐幽灵 UP、重复 UP，逐症打补丁治不完。改用 GetAsyncKeyState 的
+        物理左键真实状态驱动状态机：钩子事件只当「有事发生」的触发器，每次事件
+        读一次真实按键状态，按边沿转换处理。
 
-        if event_type == "down":
-            x, y = _mouse.get_position()
-            self._press_x, self._press_y = x, y
+          - 上次未按、现在按下（按下边沿）：手势开始，重置轨迹累积器。
+          - 持续按下：累积移动轨迹。
+          - 上次按下、现在松开（松开边沿）：手势结束，判定是否拖选。
+
+        这样丢 DOWN（靠第一个仍按着的事件救回起点）、幽灵 UP（物理键仍按着→无
+        松开边沿）、重复 UP 全部自然化解，因为判据是硬件状态而非钩子标签。
+        """
+        # 取当前坐标：MoveEvent 自带 x/y；ButtonEvent 用 get_position()。
+        mx = getattr(event, "x", None)
+        my = getattr(event, "y", None)
+        if mx is None or my is None:
+            try:
+                mx, my = _mouse.get_position()
+            except Exception:
+                return
+
+        down_now = is_left_button_physically_down()
+        was_down = self._press_pending
+
+        if down_now and not was_down:
+            # 按下边沿：手势开始。
+            self._press_pending = True
+            self._press_x, self._press_y = mx, my
             self._press_t = time.monotonic()
             # 按下瞬间记录光标形状：在文字上是 I-beam，拖标题栏/桌面是箭头。
-            # 用按下时刻而非松开时刻——松开时光标可能已移出文本区。
             self._press_text_cursor = is_text_cursor()
-        elif event_type == "up":
-            x, y = _mouse.get_position()
-            dx = x - self._press_x
-            dy = y - self._press_y
+            self._last_x, self._last_y = mx, my
+            self._path_len = 0.0
+            self._move_count = 0
+        elif down_now and was_down:
+            # 持续按下：累积真实移动轨迹（判定拖选的依据，不受坐标毛刺影响）。
+            self._path_len += max(
+                abs(mx - self._last_x), abs(my - self._last_y)
+            )
+            self._last_x, self._last_y = mx, my
+            self._move_count += 1
+        elif not down_now and was_down:
+            # 松开边沿：手势结束，判定。
+            self._press_pending = False
             duration = time.monotonic() - self._press_t
-            if is_drag_selection(dx, dy, duration):
-                self._maybe_emit(x, y)
+            if is_drag_selection(self._path_len, self._move_count, duration):
+                self._maybe_emit(mx, my)
+        # not down_now and not was_down：空闲期的杂散事件，忽略。
 
     def _maybe_emit(self, x: int, y: int):
         """手势命中后用 UIA 查前台选区，决定是否弹窗。
@@ -311,8 +386,9 @@ class SelectionMonitor(QObject):
         except Exception:
             status, text = selection_uia.SelectionStatus.NO_TEXT_PATTERN, ""
 
+        emit = should_emit(status, self._press_text_cursor)
         # 综合 UIA 状态与按下时光标形状决定是否弹（拖标题栏/桌面被这里挡掉）。
-        if not should_emit(status, self._press_text_cursor):
+        if not emit:
             return
 
         # 回退锚点：用「按下点 + 松手点」的包围盒，水平取中点、垂直取较低者
