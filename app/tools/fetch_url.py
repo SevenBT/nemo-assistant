@@ -17,7 +17,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 from typing import Any, TYPE_CHECKING
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Str, tool_params
@@ -133,7 +133,26 @@ class FetchUrlTool(BuiltinTool):
         }
 
         try:
-            resp = httpx.get(url, headers=headers, timeout=self._timeout, follow_redirects=True)
+            # 手动逐跳跟随重定向：每一跳都重新做 SSRF 校验，
+            # 防止外网 URL 经 30x 重定向到内网地址绕过首跳检查。
+            _MAX_REDIRECTS = 5
+            with httpx.Client(
+                headers=headers, timeout=self._timeout, follow_redirects=False
+            ) as client:
+                for _ in range(_MAX_REDIRECTS + 1):
+                    safe, reason = _check_url_safety(url)
+                    if not safe:
+                        return {"status": "error", "data": {"message": reason, "url": url}}
+                    resp = client.get(url)
+                    if resp.is_redirect:
+                        location = resp.headers.get("location")
+                        if not location:
+                            break
+                        url = urljoin(str(resp.url), location)
+                        continue
+                    break
+                else:
+                    return {"status": "error", "data": {"message": "重定向次数过多", "url": url}}
             resp.raise_for_status()
             content_type = resp.headers.get("content-type", "")
 

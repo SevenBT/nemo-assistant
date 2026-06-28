@@ -161,11 +161,15 @@ class ScriptToolAdapter(BuiltinTool):
         # 构造传给脚本的 JSON 输入
         stdin_payload = json.dumps({"params": params, "context": {}}, ensure_ascii=False)
 
-        # 设置环境变量，让脚本能 import 工具目录和共享 site-packages 中的包
-        env = os.environ.copy()
-        extra_paths = [str(self._deps_mgr.site_packages_path), self._tool_dir]
-        existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = os.pathsep.join(extra_paths + ([existing] if existing else []))
+        # 最小化子进程环境：不继承主进程全部 env（避免泄露 API Key / 凭证等敏感变量），
+        # 仅透传 run_python 同款系统白名单，再注入脚本所需的 PYTHONPATH。
+        # 工具运行所需的配置应通过 stdin_payload["context"] 显式传入，而非依赖 env 继承。
+        from app.tools.run_python import _build_minimal_env
+
+        env = _build_minimal_env()
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(self._deps_mgr.site_packages_path), self._tool_dir]
+        )
 
         try:
             result = subprocess.run(
