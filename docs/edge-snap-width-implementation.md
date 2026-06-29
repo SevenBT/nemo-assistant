@@ -30,7 +30,7 @@
 - ✓ 测试宽度比例计算逻辑
 - ✓ 所有测试通过
 
-### 2. `docs/edge_snap_width_threshold.md`
+### 2. `docs/edge-snap-width-threshold.md`
 - ✓ 功能说明文档
 - ✓ 使用场景和配置方式
 - ✓ 技术实现细节
@@ -132,7 +132,7 @@ python test_edge_snap_width.py
 - [x] 修改 `app/ui/edge_snap.py` 添加宽度检查逻辑
 - [x] 修改 `app/ui/settings_dialog.py` 添加设置界面
 - [x] 创建测试脚本 `test_edge_snap_width.py`
-- [x] 创建功能文档 `docs/edge_snap_width_threshold.md`
+- [x] 创建功能文档 `docs/edge-snap-width-threshold.md`
 - [x] 运行测试验证功能正确性
 - [x] 创建实现总结文档
 

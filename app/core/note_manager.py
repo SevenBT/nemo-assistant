@@ -1,6 +1,9 @@
 """
-笔记管理器，使用 SQLite 存储。
+Note manager backed by SQLite.
 
+Provides note CRUD, trash management, tag management, and desktop-pin support.
+
+笔记管理器，使用 SQLite 存储。
 提供笔记的 CRUD 操作、回收站管理、标签管理和桌面固定功能。
 """
 

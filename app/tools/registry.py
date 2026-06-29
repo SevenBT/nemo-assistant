@@ -1,4 +1,23 @@
 """
+Unified tool registry — the single execution entry point of the tool system.
+
+Responsibilities:
+  1. Register/unregister tool instances
+  2. Query tools (by name, all, or enabled-only)
+  3. Emit the tool list in OpenAI function-calling format
+  4. Execute tools: cast -> validate -> execute, with error classification
+     and automatic retry
+  5. Format execution results (error-type-specific hints + length truncation)
+
+Error classification:
+  TOOL_NOT_FOUND  tool missing, not retryable
+  PARAM_INVALID   validation failed, not retryable (LLM passed bad args; let
+                  the LLM correct itself)
+  TIMEOUT         execution timed out, retryable (retry_safe tools only)
+  NETWORK         network/external-service error, retryable (retry_safe only)
+  PERMISSION      permission/security error, not retryable, fatal
+  RUNTIME         other runtime error, cautiously retryable (retry_safe only)
+
 统一工具注册中心 — 工具系统的唯一执行入口。
 
 职责：

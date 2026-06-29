@@ -1,6 +1,10 @@
 """
-应用程序入口。
+Application entry point.
 
+Startup flow: check dependencies -> configure crash logging ->
+initialize the Qt application -> create the main window.
+
+应用程序入口。
 启动流程：检查依赖 → 配置崩溃日志 → 初始化 Qt 应用 → 创建主窗口。
 """
 import subprocess

@@ -10,6 +10,8 @@ Layout:
   │  page 1: NotesPanel                                          │
   │  page 2: ToolboxPanel                                        │
   └──────────────────────────────────────────────────────────────┘
+
+主浮窗。无边框透明窗口，三页（聊天 / 笔记 / 工坊）通过 stackedWidget 切换。
 """
 import threading
 from pathlib import Path

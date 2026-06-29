@@ -1,4 +1,17 @@
 """
+Built-in tool package — the top-level entry of the unified tool system.
+
+This package implements the full tool lifecycle:
+  - base.py:     ABC base class defining the interface every tool implements
+  - schema.py:   Schema DSL declaring JSON Schema params via Python classes
+  - context.py:  ToolContext dependency-injection container for shared resources
+  - registry.py: ToolRegistry managing tool registration/query/execution
+  - loader.py:   pkgutil-based auto-discovery that scans and registers tools
+  - script_adapter.py: adapts user script tools to the BuiltinTool interface
+
+To add a tool, create a .py file in this package subclassing BuiltinTool —
+no other files need to change.
+
 内置工具包 — 统一工具系统的顶层入口。
 
 本包实现了完整的工具生命周期管理：

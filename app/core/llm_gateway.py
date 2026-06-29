@@ -1,5 +1,9 @@
-"""统一 LLM 网关。
+"""Unified LLM gateway.
 
+Centralizes model routing, local rate limiting, retry policy, streaming
+event normalization, and JSONL observability logging.
+
+统一 LLM 网关。
 集中处理模型路由、本地限流、重试策略、流式事件标准化和 JSONL 观测日志。
 """
 from __future__ import annotations

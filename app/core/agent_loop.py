@@ -1,4 +1,18 @@
 """
+AgentLoop — a state-machine-driven agent execution loop.
+
+Architecture:
+    AgentLoop subclasses QThread and runs the state machine on a background
+    thread. The machine has 5 states: PREPARE -> STREAM -> EXECUTE ->
+    FEEDBACK -> DONE. Each state maps to a _state_xxx method that returns an
+    event string to drive the transition. It communicates with the UI layer
+    via Qt signals to stay thread-safe.
+
+Tool execution:
+    All tools (built-in + external scripts) are dispatched through the
+    ToolManager. Read-only tools run concurrently; side-effecting tools run
+    serially.
+
 AgentLoop — 状态机驱动的 Agent 执行循环。
 
 整体架构：
