@@ -1,6 +1,6 @@
 # Assistant · 桌面 AI 助手浮窗
 
-常驻屏幕角落的个人 AI 助手。**贴一张便签、框一块屏幕、说一句话让它替你干活** —— 截图取词、随手记录、对话即可调用工具完成日常任务。
+常驻屏幕角落的个人 AI 助手。**划一段词、贴一张便签、框一块屏幕、说一句话让它替你干活** —— 划词解释翻译、截图取词、随手记录、对话即可调用工具完成日常任务。
 
 基于 PyQt6 + Fluent Design 的无边框透明浮窗，本地优先，数据存在你自己的电脑上。
 
@@ -13,6 +13,7 @@
 | | 功能 | 说明 |
 |---|---|---|
 | 💬 | **对话即调用工具** | 和助手聊天，它会自己决定调用搜索、读写文件、执行命令、记笔记、定提醒等工具来完成任务 |
+| ✏️ | **划词即用** | 在任意软件里选中文字，浮标一点即可**解释 / 翻译 / 润色 / 订正语法 / 存便签**，或追问对话；润色、翻译、订正的结果可一键**写回原处覆盖选区** |
 | 📌 | **桌面便签** | `Ctrl+Alt+N` 随手贴一张浮动便签到屏幕上，内容自动存档 |
 | ✂️ | **截图 + OCR** | `Ctrl+Alt+A` 框选截图，一键 OCR 取词、贴图到桌面、或直接发给 AI |
 | 📝 | **笔记管理** | Markdown 笔记，支持文件夹、标签、全文搜索、`[[双链]]` 跳转 |
@@ -40,11 +41,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
-首次启动后，进入 **设置 → API**，配置任意一种 LLM 后端即可开始：
+首次启动后，进入 **设置 → API** 添加模型即可开始。
 
-- **OpenAI 兼容**：填 `base_url` + `api_key` + 模型名（支持 OpenAI、以及任何兼容 OpenAI 接口的服务）
-- **LiteLLM**：通过 LiteLLM 接入上百种模型
-- **商汤商道**：内置支持
+所有模型统一通过 **LiteLLM** 接入：可添加任意 LiteLLM 支持的模型 —— OpenAI、Anthropic、DeepSeek、Gemini 等各家，以及任何兼容 OpenAI 接口的服务（每个模型可单独填写 `api_base`）。选择一个模型设为默认即可对话。
 
 API Key 通过系统 keyring 安全存储，不写入明文配置。
 
@@ -73,7 +72,7 @@ API Key 通过系统 keyring 安全存储，不写入明文配置。
 main.py                  入口：依赖检查 → 崩溃日志 → 启动 Qt
 │
 ├── app/core/            核心业务层
-│   ├── llm_gateway      统一 LLM 网关（多后端 / 限流 / 重试 / 流式 / 日志）
+│   ├── llm_gateway      统一 LLM 网关（LiteLLM 接入 / 限流 / 重试 / 流式 / 日志）
 │   ├── agent_loop       Agent 状态机循环（prepare→stream→execute→feedback→finalize）
 │   ├── note_manager     笔记 / 便签 / 待办存储（SQLite）
 │   ├── memory_manager   长期记忆
@@ -126,7 +125,7 @@ finalize  无更多工具调用时结束，持久化会话
 ## 技术栈
 
 - **GUI**：PyQt6 + [PyQt-Fluent-Widgets](https://github.com/zhiyiYo/PyQt-Fluent-Widgets)
-- **LLM**：OpenAI SDK / LiteLLM（多后端）
+- **LLM**：LiteLLM（统一接入各家模型）
 - **存储**：SQLite（笔记、记忆）+ JSON（会话、配置）
 - **调度**：APScheduler
 - **OCR**：RapidOCR (ONNX Runtime)
@@ -152,6 +151,14 @@ build.bat        # 调用 PyInstaller (AI_Agent.spec)
 
 ---
 
+## 致谢
+
+- 笔记编辑器的 wiki 双链解析、查找替换、Markdown 语法高亮等代码移植/改编自 [noteration](https://github.com/lilamr/noteration)（MIT）。完整的第三方许可证声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+---
+
 ## License
 
 [MIT](LICENSE)
+
+本项目使用了第三方开源代码，其版权与许可证声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
