@@ -1,6 +1,7 @@
 """
 Wiki-link parser for Markdown text.
-Ported from noteration/editor/wiki_links.py.
+Adapted from noteration (MIT): noteration/editor/wiki_links.py
+See THIRD_PARTY_NOTICES.md.
 """
 
 from __future__ import annotations

@@ -1,6 +1,7 @@
 r"""
 Markdown 语法高亮器。
-移植自 noteration/editor/syntax_highlighter.py。
+Adapted from noteration (MIT): noteration/editor/syntax_highlighter.py
+See THIRD_PARTY_NOTICES.md.
 
 覆盖 CommonMark 基本语法：ATX/Setext 标题、粗体/斜体、代码块、
 引用、列表、链接、图片、Wiki-link、水平线、转义字符等。
@@ -17,7 +18,7 @@ from PyQt6.QtGui import (
 class MarkdownHighlighter(QSyntaxHighlighter):
     """
     Markdown syntax highlighter for QPlainTextEdit.
-    Ported from noteration. Uses block states for fenced code blocks.
+    Adapted from noteration (MIT). Uses block states for fenced code blocks.
     """
 
     _STATE_NORMAL = 0

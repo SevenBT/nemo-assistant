@@ -44,7 +44,7 @@ class MarkdownEditor(QPlainTextEdit):
         self.setPlaceholderText("在此输入 Markdown 内容…")
         self.setAcceptDrops(True)
 
-        # Syntax highlighter (from noteration)
+        # Syntax highlighter (adapted from noteration, MIT)
         self._highlighter = MarkdownHighlighter(self.document())
         # Set initial default text color from theme
         try:

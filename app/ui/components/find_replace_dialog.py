@@ -1,6 +1,7 @@
 """
 查找替换对话框。
-移植自 noteration/editor/find_replace.py，适配 PyQt6 + qfluentwidgets。
+Adapted from noteration (MIT): noteration/editor/find_replace.py，适配 PyQt6 + qfluentwidgets。
+See THIRD_PARTY_NOTICES.md.
 """
 
 from __future__ import annotations
