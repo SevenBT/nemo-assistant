@@ -48,6 +48,8 @@ python main.py
 
 API Key 通过系统 keyring 安全存储，不写入明文配置。
 
+> 应用配置存放在 `config/app_config.json`（不入库）。可参考 `config/app_config.example.json` 了解可用字段，应用首次启动会自动生成默认配置。
+
 ---
 
 ## 快捷键
@@ -152,4 +154,4 @@ build.bat        # 调用 PyInstaller (AI_Agent.spec)
 
 ## License
 
-_（待补充：建议 MIT）_
+[MIT](LICENSE)

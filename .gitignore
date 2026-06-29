@@ -20,7 +20,8 @@ crash.log
 run_log.txt
 
 # ── 用户配置（含 API Key，不入库）────────────────────────────────────
-config/
+config/*
+!config/app_config.example.json
 
 # ── IDE ───────────────────────────────────────────────────────────────
 .idea/
@@ -34,7 +35,9 @@ config/
 .codex/config.toml
 .codex/environments/
 
-.gitignore
 nanobot/**
 /nanobot
 /logs
+
+# ── 实验性子项目 / 临时工作区（虚拟环境、模型下载等，不入库）──────────
+work/

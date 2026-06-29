@@ -1,0 +1,98 @@
+{
+  "Selection": {
+    "ActiveReadingSessionId": "",
+    "ContinueExplainEnabled": true,
+    "ExplainEnabled": true,
+    "ExplainPrompt": "请用简洁的语言解释下面这段文字的含义：\n\n{text}",
+    "FixGrammarPrompt": "修正下面这段文字里的错别字、标点和语法错误，保持原意、风格和语言不变。只输出修正后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}",
+    "FloatEnabled": true,
+    "NoteEnabled": true,
+    "PolishPrompt": "润色下面这段文字，使其更通顺自然、表达更准确，保持原意与语言。只输出润色后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}",
+    "RewriteEnabled": true,
+    "RewriteVerify": true,
+    "TranslatePrompt": "翻译下面这段文字：是中文就译成英文，是其他语言就译成中文。只输出译文，不要任何解释、前后缀或代码块包裹：\n\n{text}"
+  },
+  "API": {
+    "ApiType": "litellm",
+    "MaxTokens": 3328,
+    "SystemPrompt": "",
+    "Temperature": 0.7,
+    "TopP": 1.0,
+    "VisionSupport": "on"
+  },
+  "Appearance": {
+    "ContentFontSize": 16,
+    "NavigationFontSize": 15,
+    "Theme": "everforest"
+  },
+  "Window": {
+    "EdgeSnap": true,
+    "EdgeSnapThreshold": 40,
+    "MinimizeTo": "taskbar",
+    "Height": 852,
+    "Width": 800
+  },
+  "Editor": {
+    "EditorFontSize": 16
+  },
+  "QFluentWidgets": {
+    "FontFamilies": [
+      "Segoe UI",
+      "Microsoft YaHei",
+      "PingFang SC"
+    ],
+    "ThemeColor": "#ffa7c080",
+    "ThemeMode": "Dark"
+  },
+  "Hotkeys": {
+    "NewNote": "ctrl+alt+n",
+    "QuickAsk": "ctrl+alt+q",
+    "Screenshot": "ctrl+alt+a",
+    "Selection": "ctrl+alt+e",
+    "ToggleWindow": "ctrl+alt+space"
+  },
+  "LiteLLM": {
+    "DefaultModel": "gpt-4o",
+    "Models": [
+      {
+        "id": "gpt-4o",
+        "name": "GPT-4o",
+        "provider": "openai",
+        "enabled": true
+      },
+      {
+        "id": "claude-3-5-sonnet-20241022",
+        "name": "Claude 3.5 Sonnet",
+        "provider": "anthropic",
+        "enabled": false
+      },
+      {
+        "id": "deepseek-chat",
+        "name": "DeepSeek Chat",
+        "provider": "openai",
+        "api_base": "https://api.deepseek.com",
+        "enabled": false
+      }
+    ]
+  },
+  "Layout": {
+    "NoteListVisible": true,
+    "NoteListWidth": 250,
+    "SessionPanelWidth": 312,
+    "SettingsHeight": 656,
+    "SettingsPage": 0,
+    "SettingsWidth": 1051
+  },
+  "Tools": {
+    "SaveDir": "",
+    "SearchProvider": "bocha",
+    "ToolStates": {
+      "get_system_info": false,
+      "exec": false,
+      "run_python": false,
+      "save_file": false,
+      "hello": false
+    },
+    "Workspace": ""
+  }
+}
