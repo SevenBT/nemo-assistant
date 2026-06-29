@@ -28,12 +28,10 @@ config/*
 .vscode/
 *.iml
 
-# ── Claude Code 本地设置 ──────────────────────────────────────────────
-.claude/settings.local.json
-
-# ── Codex 本地配置（hooks 已入库，仅忽略本地配置）─────────────────────
-.codex/config.toml
-.codex/environments/
+# ── AI 工具本地配置（个人开发环境，不入库）──────────────────────────
+.claude/
+.codex/
+.agents/
 
 nanobot/**
 /nanobot

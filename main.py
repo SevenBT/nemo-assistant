@@ -78,7 +78,7 @@ def main():
     app.setApplicationName("AI Agent")
     app.setQuitOnLastWindowClosed(False)  # 保持托盘常驻
 
-    icon_path = Path(__file__).parent / "assets" / "AI助手.png"
+    icon_path = Path(__file__).parent / "assets" / "app_icon.png"
     icon = QIcon(str(icon_path))
     app.setWindowIcon(icon)
 
