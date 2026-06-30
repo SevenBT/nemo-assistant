@@ -28,6 +28,7 @@ from qfluentwidgets import TransparentToolButton, FluentIcon
 
 from app.core.config import cfg
 from app.core.llm_gateway import CancellationToken, LLMGateway
+from app.i18n import t
 from app.ui import style
 from app.ui.global_click_watcher import GlobalClickWatcher
 from app.ui.non_activating_popup import NonActivatingPopup
@@ -75,7 +76,7 @@ class _BubbleWorker(threading.Thread):
                 if event["type"] == "text":
                     self._on_chunk(event["delta"])
                 elif event["type"] == "error":
-                    self._on_error(event.get("message", "LLM 请求失败"))
+                    self._on_error(event.get("message", t("resultbubble.requestFailed")))
                     return
                 elif event["type"] == "done":
                     break
@@ -166,11 +167,11 @@ class ResultBubble(NonActivatingPopup):
         footer_row.setSpacing(2)
         footer_row.addStretch()
         self._copy_btn = TransparentToolButton(FluentIcon.COPY, self)
-        self._copy_btn.setToolTip("复制改写结果")
+        self._copy_btn.setToolTip(t("resultbubble.copyTooltip"))
         self._copy_btn.clicked.connect(self._on_copy_clicked)
         footer_row.addWidget(self._copy_btn)
         self._replace_btn = TransparentToolButton(FluentIcon.PASTE, self)
-        self._replace_btn.setToolTip("替换原文（写回源应用）")
+        self._replace_btn.setToolTip(t("resultbubble.replaceTooltip"))
         self._replace_btn.clicked.connect(self._on_replace_clicked)
         footer_row.addWidget(self._replace_btn)
         self._footer.hide()
@@ -291,7 +292,7 @@ class ResultBubble(NonActivatingPopup):
         # 气泡用 action.render(text)，与对应动作共用同一份（含自定义）提示词。
         action = get_text_action(action_key)
         if action is None or not action.goes_to_ai:
-            self._content.setPlainText("不支持的动作")
+            self._content.setPlainText(t("resultbubble.unsupportedAction"))
             self._streaming = False
             return
         prompt = action.render(text)
@@ -409,7 +410,7 @@ class ResultBubble(NonActivatingPopup):
     def _on_stream_error(self, msg: str):
         self._streaming = False
         if not self._full_text:
-            self._content.setPlainText(f"[错误] {msg}")
+            self._content.setPlainText(t("resultbubble.error", msg=msg))
 
     # ── 取消 / 清理 ────────────────────────────────────────────────────
 

@@ -8,24 +8,46 @@
 """
 from dataclasses import dataclass
 
+from app.i18n import t
+
 
 @dataclass(frozen=True)
 class VisionAction:
     """One screenshot-to-AI preset.
 
+    展示文案（标签 / 会话标题 / 提示词）一律存 i18n key，在属性里运行时
+    取 t()。模块级常量在 import 时构建，那时语言尚未锁定（init_language 在
+    QApplication 之后才调），所以绝不能在构造期调 t()，必须延后到访问时。
+
     Attributes:
         key: stable identifier, used in the ``captured`` action string as
             ``"vision:<key>"``.
         icon: emoji shown on the toolbar button.
-        label: short button caption.
-        prompt: text prefilled into the chat input alongside the image.
-        session_title: title for the fresh session this action creates.
+        label_key: i18n key for the short button caption.
+        title_key: i18n key for the fresh session's title.
+        prompt_key: i18n key for the text prefilled alongside the image;
+            empty means no preset prompt (the general "ask" action).
     """
     key: str
     icon: str
-    label: str
-    prompt: str
-    session_title: str
+    label_key: str
+    title_key: str
+    prompt_key: str = ""
+
+    @property
+    def label(self) -> str:
+        """按当前语言取按钮标签。"""
+        return t(self.label_key)
+
+    @property
+    def session_title(self) -> str:
+        """按当前语言取新建会话标题。"""
+        return t(self.title_key)
+
+    @property
+    def prompt(self) -> str:
+        """按当前语言取预设提示词；无预设（通用问AI）时返回空串。"""
+        return t(self.prompt_key) if self.prompt_key else ""
 
     @property
     def action_id(self) -> str:
@@ -38,41 +60,42 @@ class VisionAction:
 
 
 # Default action set. "ask" is the general catch-all; the rest are presets.
+# 仅存 key；展示文案在属性里运行时取 t()，故顺序/语言无关。
 VISION_ACTIONS: tuple[VisionAction, ...] = (
     VisionAction(
         key="ask",
         icon="🤖",
-        label="问AI",
-        prompt="",  # 通用：不预填，让用户自己写问题
-        session_title="问AI",
+        label_key="vision.ask.label",
+        title_key="vision.ask.title",
+        prompt_key="",  # 通用：不预填，让用户自己写问题
     ),
     VisionAction(
         key="explain",
         icon="💡",
-        label="解释",
-        prompt="请解释这张图片的内容。",
-        session_title="解释截图",
+        label_key="vision.explain.label",
+        title_key="vision.explain.title",
+        prompt_key="vision.explain.prompt",
     ),
     VisionAction(
         key="translate",
         icon="🌐",
-        label="翻译",
-        prompt="请翻译图片中的文字，保持原有的排版结构。",
-        session_title="翻译截图",
+        label_key="vision.translate.label",
+        title_key="vision.translate.title",
+        prompt_key="vision.translate.prompt",
     ),
     VisionAction(
         key="solve",
         icon="✏️",
-        label="解题",
-        prompt="请解答图片中的题目，给出详细步骤。",
-        session_title="解题截图",
+        label_key="vision.solve.label",
+        title_key="vision.solve.title",
+        prompt_key="vision.solve.prompt",
     ),
     VisionAction(
         key="table",
         icon="📊",
-        label="转表格",
-        prompt="请把图片中的表格转换成 Markdown 表格，保持行列结构。",
-        session_title="转表格截图",
+        label_key="vision.table.label",
+        title_key="vision.table.title",
+        prompt_key="vision.table.prompt",
     ),
 )
 

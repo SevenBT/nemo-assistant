@@ -19,6 +19,7 @@ from typing import Any
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Str, tool_params
+from app.i18n import t
 
 
 class ReminderTool(BuiltinTool):
@@ -30,16 +31,16 @@ class ReminderTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "向用户发送一条提醒消息，适合配合定时任务使用"
+        return t("tool.reminder.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "message",
-            message=Str("要提醒的内容，例如：该写作业了"),
+            message=Str(t("tool.reminder.param.message")),
         )
 
     def execute(self, params: dict[str, Any]) -> dict[str, Any]:
-        message = params.get("message", "提醒")
+        message = params.get("message", t("tool.reminder.msg.default"))
         now = datetime.now().strftime("%H:%M:%S")
         return {"status": "success", "data": {"message": message, "time": now}}

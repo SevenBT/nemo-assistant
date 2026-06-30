@@ -34,6 +34,7 @@ from qfluentwidgets import (
 )
 
 from app.core.config import NOTES_IMAGES_DIR, cfg
+from app.i18n import t
 from app.core.note_manager import NoteManager
 from app.models.note import Folder
 from app.ui.components.markdown_editor import MarkdownEditor
@@ -139,7 +140,7 @@ class NoteItemDelegate(ListItemDelegate):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._folder_pixmap = FluentIcon.FOLDER.icon().pixmap(self._ICON, self._ICON)
+        self._folder_pixmap = None
         self._cached_fs = -1
         self._cached_dark = None
         self._rebuild_cache()
@@ -164,6 +165,11 @@ class NoteItemDelegate(ListItemDelegate):
         except Exception:
             self._cached_dark = False
             self._text_pen = QPen(QColor("#000000"))
+        # 文件夹图标用当前文字色显式着色并随主题重建，否则切换深浅后
+        # 图标仍是旧色（浅色主题下白图标不可见）。
+        self._folder_pixmap = FluentIcon.FOLDER.icon(
+            color=self._text_pen.color()
+        ).pixmap(self._ICON, self._ICON)
         self._muted_pen = QPen(self._MUTED)
         self._sel_overlay = (QColor(255, 255, 255, 28) if self._cached_dark
                              else QColor(0, 0, 0, 18))
@@ -271,7 +277,7 @@ class NoteItemDelegate(ListItemDelegate):
         painter.setPen(self._muted_pen)
         w = max(rect.right() - x - 8, 0)
         painter.drawText(QRect(x, rect.top(), w, rect.height()),
-                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, "未分类")
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, t("notes.uncategorized"))
 
 
 
@@ -332,8 +338,8 @@ class NotesPanel(QWidget):
         header_row.setSpacing(6)
 
         self._pivot = SegmentedWidget()
-        self._pivot.addItem(_TAB_NOTE, "笔记")
-        self._pivot.addItem(_TAB_STICKY, "便签")
+        self._pivot.addItem(_TAB_NOTE, t("notes.tab.note"))
+        self._pivot.addItem(_TAB_STICKY, t("notes.tab.sticky"))
         self._pivot.setCurrentItem(self._current_tab)
         self._pivot.currentItemChanged.connect(self._on_tab_changed)
         header_row.addWidget(self._pivot)
@@ -341,7 +347,7 @@ class NotesPanel(QWidget):
 
         self._new_btn = TransparentToolButton(FluentIcon.ADD)
         self._new_btn.setFixedSize(28, 28)
-        self._new_btn.setToolTip("新建")
+        self._new_btn.setToolTip(t("notes.new"))
         self._new_btn.clicked.connect(lambda: self._on_new(self._current_tab))
         header_row.addWidget(self._new_btn)
         list_panel_layout.addLayout(header_row)
@@ -380,7 +386,7 @@ class NotesPanel(QWidget):
         editor_header.setContentsMargins(0, 0, 0, 0)
         editor_header.setSpacing(6)
 
-        self._preview_btn = TogglePushButton(FluentIcon.VIEW, "预览")
+        self._preview_btn = TogglePushButton(FluentIcon.VIEW, t("notes.preview"))
         self._preview_btn.clicked.connect(self._on_preview_clicked)
         self._preview_btn.hide()
         editor_header.addWidget(self._preview_btn)
@@ -390,7 +396,7 @@ class NotesPanel(QWidget):
         right_layout.addLayout(editor_header)
 
         self._title_edit = LineEdit()
-        self._title_edit.setPlaceholderText("标题…")
+        self._title_edit.setPlaceholderText(t("notes.title.placeholder"))
         right_layout.addWidget(self._title_edit)
 
         # Apply note editor font size from config
@@ -402,7 +408,7 @@ class NotesPanel(QWidget):
         # Markdown editor (for note type)
         self._md_editor = MarkdownEditor(images_dir=NOTES_IMAGES_DIR)
         self._md_editor.setObjectName("noteMarkdownEditor")
-        self._md_editor.setPlaceholderText("在此输入 Markdown 内容…")
+        self._md_editor.setPlaceholderText(t("notes.md.placeholder"))
         self._md_editor.setFont(_editor_font)
         self._md_editor.wiki_link_activated.connect(self._on_wiki_link_clicked)
         right_layout.addWidget(self._md_editor, 1)
@@ -417,7 +423,7 @@ class NotesPanel(QWidget):
         # Rich text editor (for sticky type — HTML with images)
         self._sticky_edit = TextEdit()
         self._sticky_edit.setObjectName("noteStickyEdit")
-        self._sticky_edit.setPlaceholderText("在此输入便签内容…")
+        self._sticky_edit.setPlaceholderText(t("notes.sticky.placeholder"))
         self._sticky_edit.setFont(_editor_font)
         # qfluentwidgets' built-in TextEditMenu fails to restore the selection
         # (its _onItemClicked builds a cursor but never setTextCursor), so
@@ -497,7 +503,7 @@ class NotesPanel(QWidget):
                 self._load()
                 self._load_note_into_editor(note.id)
                 return
-        self._show_status(f"未找到笔记: {target}")
+        self._show_status(t("notes.notFound", target=target))
 
     # ------------------------------------------------------------------ load
     def _load(self):
@@ -616,7 +622,7 @@ class NotesPanel(QWidget):
 
     def _on_new_folder(self):
         from PyQt6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "新建文件夹", "文件夹名称:")
+        name, ok = QInputDialog.getText(self, t("notes.folder.new.title"), t("notes.folder.new.label"))
         if ok and name.strip():
             self._mgr.create_folder(name.strip())
             self._load()
@@ -637,12 +643,12 @@ class NotesPanel(QWidget):
 
     def _rename_folder_dialog(self, folder_id: int, current_name: str):
         from PyQt6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "重命名文件夹", "新名称:", text=current_name)
+        name, ok = QInputDialog.getText(self, t("notes.folder.rename.title"), t("notes.folder.rename.label"), text=current_name)
         if ok and name.strip():
             self._on_folder_renamed(folder_id, name.strip())
 
     def _delete_folder_confirm(self, folder_id: int):
-        if self._confirm("删除文件夹", "删除文件夹后，其中的笔记将移至顶层。确定继续吗？"):
+        if self._confirm(t("notes.folder.delete.title"), t("notes.folder.delete.msg")):
             self._on_folder_deleted(folder_id)
 
     def _on_tag_filter_changed(self, tag_name: str):
@@ -781,13 +787,13 @@ class NotesPanel(QWidget):
         self._sticky_edit.setEnabled(enabled)
 
         if not enabled:
-            self._title_edit.setPlaceholderText("请从左侧列表选择笔记…")
-            self._md_editor.setPlaceholderText("请从左侧列表选择笔记…")
-            self._sticky_edit.setPlaceholderText("请从左侧列表选择笔记…")
+            self._title_edit.setPlaceholderText(t("notes.select.placeholder"))
+            self._md_editor.setPlaceholderText(t("notes.select.placeholder"))
+            self._sticky_edit.setPlaceholderText(t("notes.select.placeholder"))
         else:
-            self._title_edit.setPlaceholderText("标题…")
-            self._md_editor.setPlaceholderText("在此输入 Markdown 内容…")
-            self._sticky_edit.setPlaceholderText("在此输入便签内容…")
+            self._title_edit.setPlaceholderText(t("notes.title.placeholder"))
+            self._md_editor.setPlaceholderText(t("notes.md.placeholder"))
+            self._sticky_edit.setPlaceholderText(t("notes.sticky.placeholder"))
 
     # ------------------------------------------------------------------ toolbar state
     def _update_toolbar(self):
@@ -798,10 +804,10 @@ class NotesPanel(QWidget):
     def _on_new(self, note_type: str = "note"):
         self._flush_current()
         if note_type == "sticky":
-            note = self._mgr.create(title="新便签", content="", note_type="sticky")
+            note = self._mgr.create(title=t("notes.defaultSticky"), content="", note_type="sticky")
             target_tab = _TAB_STICKY
         else:
-            note = self._mgr.create(title="新笔记", content="", note_type="note")
+            note = self._mgr.create(title=t("notes.defaultNote"), content="", note_type="note")
             target_tab = _TAB_NOTE
 
         # Keep the list on the tab matching the new item so it stays visible
@@ -818,9 +824,9 @@ class NotesPanel(QWidget):
         if not selected:
             return
         n = len(selected)
-        msg = f"确定要将选中的 {n} 条笔记移入回收站吗？" if n > 1 else "确定要将这条笔记移入回收站吗？"
+        msg = t("notes.delete.msgMany", n=n) if n > 1 else t("notes.delete.msgOne")
 
-        if not self._confirm("移入回收站", msg):
+        if not self._confirm(t("notes.delete.title"), msg):
             return
 
         self._auto_save_timer.stop()
@@ -875,7 +881,7 @@ class NotesPanel(QWidget):
         if not current_note:
             return
 
-        title = self._title_edit.text().strip() or "无标题"
+        title = self._title_edit.text().strip() or t("notes.untitled")
 
         if current_note.note_type == "sticky":
             content = self._sticky_edit.toHtml()
@@ -888,7 +894,7 @@ class NotesPanel(QWidget):
         note = self._mgr.update(self._current_note_id, title, content)
 
         if note:
-            self._status_label.setText("已保存")
+            self._status_label.setText(t("notes.status.saved"))
             self._status_timer.start()
             self.note_updated.emit(self._current_note_id, title, content)
             self._update_note_item_text(self._current_note_id, note.title, note.updated_at)
@@ -945,13 +951,13 @@ class NotesPanel(QWidget):
             if item_type == "folder":
                 folder_id = item_id
                 folder_name = item.data(_ROLE_TITLE) or ""
-                menu.addAction(Action(FluentIcon.FOLDER_ADD, "新建文件夹",
+                menu.addAction(Action(FluentIcon.FOLDER_ADD, t("notes.menu.newFolder"),
                                       triggered=self._on_new_folder))
                 menu.addSeparator()
-                menu.addAction(Action(FluentIcon.EDIT, "重命名",
+                menu.addAction(Action(FluentIcon.EDIT, t("notes.menu.rename"),
                                       triggered=lambda: self._rename_folder_dialog(folder_id, folder_name)))
                 menu.addSeparator()
-                menu.addAction(Action(FluentIcon.DELETE, "删除文件夹",
+                menu.addAction(Action(FluentIcon.DELETE, t("notes.menu.deleteFolder"),
                                       triggered=lambda: self._delete_folder_confirm(folder_id)))
                 menu.exec(global_pos)
                 return
@@ -964,47 +970,47 @@ class NotesPanel(QWidget):
             # Only sticky notes can be pinned to screen
             if note and note.note_type == "sticky":
                 if note.is_pinned:
-                    menu.addAction(Action(FluentIcon.UNPIN, "取消固定",
+                    menu.addAction(Action(FluentIcon.UNPIN, t("notes.menu.unpin"),
                                           triggered=lambda: self._unpin_note(note_id)))
                 else:
-                    menu.addAction(Action(FluentIcon.PIN, "贴到屏幕",
+                    menu.addAction(Action(FluentIcon.PIN, t("notes.menu.pinToScreen"),
                                           triggered=lambda: self._pin_note_to_screen(note_id)))
                 menu.addSeparator()
 
-            menu.addAction(Action(FluentIcon.COPY, "复制内容",
+            menu.addAction(Action(FluentIcon.COPY, t("notes.menu.copyContent"),
                                   triggered=lambda: self._copy_note_content(note_id)))
-            menu.addAction(Action(FluentIcon.DOCUMENT, "创建副本",
+            menu.addAction(Action(FluentIcon.DOCUMENT, t("notes.menu.duplicate"),
                                   triggered=lambda: self._duplicate_note(note_id)))
-            menu.addAction(Action(FluentIcon.SAVE, "导出 .txt",
+            menu.addAction(Action(FluentIcon.SAVE, t("notes.menu.exportTxt"),
                                   triggered=lambda: self._export_note_txt(note_id)))
             if note and note.note_type == "note":
-                menu.addAction(Action(FluentIcon.DOCUMENT, "导出 .md",
+                menu.addAction(Action(FluentIcon.DOCUMENT, t("notes.menu.exportMd"),
                                       triggered=lambda: self._export_note_md(note_id)))
             # Move to folder submenu
             folders = self._mgr.get_folders()
             if folders:
-                move_menu = RoundMenu("移入文件夹", menu)
+                move_menu = RoundMenu(t("notes.menu.moveToFolder"), menu)
                 menu.addMenu(move_menu)
-                move_menu.addAction(Action(FluentIcon.FOLDER, "无文件夹",
+                move_menu.addAction(Action(FluentIcon.FOLDER, t("notes.menu.noFolder"),
                                            triggered=lambda: self._move_to_folder(note_id, None)))
                 for f in folders:
                     move_menu.addAction(Action(FluentIcon.FOLDER, f.name,
                                                triggered=lambda checked=False, fid=f.id: self._move_to_folder(note_id, fid)))
             menu.addSeparator()
-            menu.addAction(Action(FluentIcon.DELETE, "删除",
+            menu.addAction(Action(FluentIcon.DELETE, t("notes.menu.delete"),
                                   triggered=lambda: (
                                       self._on_delete() if len(self._list.selectedItems()) > 1
                                       else self._on_delete_by_id(note_id)
                                   )))
         else:
-            menu.addAction(Action(FluentIcon.EDIT, "新建笔记",
+            menu.addAction(Action(FluentIcon.EDIT, t("notes.menu.newNote"),
                                   triggered=lambda: self._on_new("note")))
-            menu.addAction(Action(FluentIcon.PIN, "新建便签",
+            menu.addAction(Action(FluentIcon.PIN, t("notes.menu.newSticky"),
                                   triggered=lambda: self._on_new("sticky")))
             # New folder only applies to the 笔记 view (stickies have no folders)
             if self._current_tab == _TAB_NOTE:
                 menu.addSeparator()
-                menu.addAction(Action(FluentIcon.FOLDER_ADD, "新建文件夹",
+                menu.addAction(Action(FluentIcon.FOLDER_ADD, t("notes.menu.newFolder"),
                                       triggered=self._on_new_folder))
 
         menu.exec(global_pos)
@@ -1018,7 +1024,7 @@ class NotesPanel(QWidget):
         else:
             text = note.content
         QGuiApplication.clipboard().setText(text)
-        self._show_status("已复制到剪贴板")
+        self._show_status(t("notes.status.copied"))
 
     def _duplicate_note(self, note_id: int):
         note = self._mgr.get(note_id)
@@ -1026,17 +1032,17 @@ class NotesPanel(QWidget):
             return
         self._flush_current()
         new_note = self._mgr.create(note_type=note.note_type)
-        self._mgr.update(new_note.id, f"{note.title} (副本)", note.content)
+        self._mgr.update(new_note.id, t("notes.copyName", title=note.title), note.content)
         self._load()
-        self._show_status("已创建副本")
+        self._show_status(t("notes.status.duplicated"))
 
     def _export_note_txt(self, note_id: int):
         note = self._mgr.get(note_id)
         if not note:
             return
-        safe_name = note.title[:40].replace("/", "-").replace("\\", "-") or "笔记"
+        safe_name = note.title[:40].replace("/", "-").replace("\\", "-") or t("notes.fallbackName")
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出笔记", f"{safe_name}.txt", "文本文件 (*.txt)"
+            self, t("notes.export.txt.title"), f"{safe_name}.txt", t("notes.export.txt.filter")
         )
         if not path:
             return
@@ -1047,29 +1053,29 @@ class NotesPanel(QWidget):
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(f"{note.title}\n{'─' * 40}\n{body}\n")
-            self._show_status("已导出")
+            self._show_status(t("notes.status.exported"))
         except OSError:
-            QMessageBox.warning(self, "导出失败", "无法写入文件，请检查路径权限。")
+            QMessageBox.warning(self, t("notes.export.failed.title"), t("notes.export.failed.msg"))
 
     def _export_note_md(self, note_id: int):
         note = self._mgr.get(note_id)
         if not note:
             return
-        safe_name = note.title[:40].replace("/", "-").replace("\\", "-") or "笔记"
+        safe_name = note.title[:40].replace("/", "-").replace("\\", "-") or t("notes.fallbackName")
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出 Markdown", f"{safe_name}.md", "Markdown 文件 (*.md)"
+            self, t("notes.export.md.title"), f"{safe_name}.md", t("notes.export.md.filter")
         )
         if not path:
             return
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(f"# {note.title}\n\n{note.content}\n")
-            self._show_status("已导出")
+            self._show_status(t("notes.status.exported"))
         except OSError:
-            QMessageBox.warning(self, "导出失败", "无法写入文件，请检查路径权限。")
+            QMessageBox.warning(self, t("notes.export.failed.title"), t("notes.export.failed.msg"))
 
     def _on_delete_by_id(self, note_id: int):
-        if not self._confirm("移入回收站", "确定要将这条笔记移入回收站吗？"):
+        if not self._confirm(t("notes.delete.title"), t("notes.delete.msgOne")):
             return
         self._auto_save_timer.stop()
         if note_id == self._current_note_id:
@@ -1105,21 +1111,21 @@ class NotesPanel(QWidget):
             f"QMenu::item:selected {{ background: {hover_bg}; }}"
         )
 
-        undo_act = menu.addAction("撤销")
+        undo_act = menu.addAction(t("edit.undo"))
         undo_act.setEnabled(edit.document().isUndoAvailable())
-        redo_act = menu.addAction("重做")
+        redo_act = menu.addAction(t("edit.redo"))
         redo_act.setEnabled(edit.document().isRedoAvailable())
         menu.addSeparator()
 
         has_selection = edit.textCursor().hasSelection()
-        cut_act = menu.addAction("剪切")
+        cut_act = menu.addAction(t("edit.cut"))
         cut_act.setEnabled(has_selection)
-        copy_act = menu.addAction("复制")
+        copy_act = menu.addAction(t("edit.copy"))
         copy_act.setEnabled(has_selection)
-        paste_act = menu.addAction("粘贴")
+        paste_act = menu.addAction(t("edit.paste"))
         paste_act.setEnabled(edit.canPaste())
         menu.addSeparator()
-        select_all_act = menu.addAction("全选")
+        select_all_act = menu.addAction(t("edit.selectAll"))
         select_all_act.setEnabled(not edit.document().isEmpty())
 
         action = menu.exec(edit.mapToGlobal(pos))
@@ -1143,7 +1149,7 @@ class NotesPanel(QWidget):
             self._expanded_folders.add(folder_id)
         self._current_note_id = note_id
         self._load()
-        self._show_status("已移动")
+        self._show_status(t("notes.status.moved"))
 
     # ------------------------------------------------------------------ drag & drop
     def _on_rows_moved(self, *_):
@@ -1186,7 +1192,7 @@ class NotesPanel(QWidget):
 
     def _reload_after_move(self):
         self._load()
-        self._show_status("已移动")
+        self._show_status(t("notes.status.moved"))
 
     def _pin_note_to_screen(self, note_id: int):
         from app.ui.sticky_note_window import StickyNoteWindow
@@ -1269,6 +1275,18 @@ class NotesPanel(QWidget):
 
     def refresh(self):
         self._load()
+
+    def refresh_theme(self):
+        """主题切换后刷新列表配色与编辑器文字色。
+
+        列表 delegate 把文字色缓存了（只在 _load 时重建），便签编辑器
+        的文字色也需跟随主题，否则切换深浅后必须点一下文件夹才变色。
+        Markdown 编辑器自身监听 PaletteChange 自动刷新，无需在此处理。
+        """
+        self._delegate.refresh_theme()
+        self._list.viewport().update()
+        if self._current_tab == _TAB_STICKY and self._current_note_id:
+            self._apply_sticky_text_color()
 
     def refresh_note(self, note_id: int):
         if self._current_note_id == note_id:

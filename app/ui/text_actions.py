@@ -16,20 +16,24 @@ from dataclasses import dataclass
 from qfluentwidgets import FluentIcon
 
 from app.core.config import cfg
+from app.i18n import t
 
 
 @dataclass(frozen=True)
 class TextAction:
     """One selected-text-to-action preset.
 
+    展示文案（标签 / 会话标题 / 默认提示词）一律存 i18n key，在属性里运行时
+    取 t()。模块级常量在 import 时构建（语言此时未锁定），故不能在构造期调 t()。
+
     Attributes:
         key: stable identifier, used in the popup's action string.
         icon: FluentIcon shown on the popup button.
-        label: short button caption (also used as tooltip).
-        default_prompt: text sent to chat, with ``{text}`` filled by the
-            selection. 用户可在设置页覆盖（见 render）。空串表示该动作不走
-            LLM（如「存便签」）——调用方按 key 自行处理。
-        session_title: title for the fresh chat session this action creates.
+        label_key: i18n key for the short button caption (also tooltip).
+        prompt_key: i18n key for the text sent to chat, with ``{text}`` filled
+            by the selection. 用户可在设置页覆盖（见 render）。空 key 表示该动作
+            不走 LLM（如「存便签」）——调用方按 key 自行处理。
+        title_key: i18n key for the fresh chat session's title (empty for local).
         mode: 处理方式——
             "oneshot"   一次性：气泡显示，不落库、无上下文（解释）；
             "compose"   续入：把选中文填进激活快速会话的输入框，等用户加
@@ -41,10 +45,25 @@ class TextAction:
     """
     key: str
     icon: FluentIcon
-    label: str
-    default_prompt: str
-    session_title: str
+    label_key: str
+    prompt_key: str
+    title_key: str
     mode: str = "oneshot"
+
+    @property
+    def label(self) -> str:
+        """按当前语言取按钮标签。"""
+        return t(self.label_key)
+
+    @property
+    def default_prompt(self) -> str:
+        """按当前语言取内置默认提示词；无预设（compose/local）返回空串。"""
+        return t(self.prompt_key) if self.prompt_key else ""
+
+    @property
+    def session_title(self) -> str:
+        """按当前语言取新建会话标题。"""
+        return t(self.title_key) if self.title_key else ""
 
     @property
     def goes_to_ai(self) -> bool:
@@ -102,74 +121,62 @@ class TextAction:
 _EXPLAIN_PROMPT = "请用简洁的语言解释下面这段文字的含义：\n\n{text}"
 # 改写类提示词统一强约束「只输出结果」——否则 AI 带「好的，这是改写后的：」之类
 # 前缀，直接回填会污染原文（这是 rewrite 区别于 explain 的关键）。
-_POLISH_PROMPT = (
-    "润色下面这段文字，使其更通顺自然、表达更准确，保持原意与语言。"
-    "只输出润色后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}"
-)
-_TRANSLATE_PROMPT = (
-    "翻译下面这段文字：是中文就译成英文，是其他语言就译成中文。"
-    "只输出译文，不要任何解释、前后缀或代码块包裹：\n\n{text}"
-)
-_FIX_GRAMMAR_PROMPT = (
-    "修正下面这段文字里的错别字、标点和语法错误，保持原意、风格和语言不变。"
-    "只输出修正后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}"
-)
-
+# 提示词文案改由 i18n 提供（textaction.*.prompt），见 default_prompt 属性。
 TEXT_ACTIONS: tuple[TextAction, ...] = (
     TextAction(
         key="explain",
         icon=FluentIcon.DICTIONARY,
-        label="解释",
-        default_prompt=_EXPLAIN_PROMPT,
-        session_title="解释选中",
+        label_key="textaction.explain.label",
+        prompt_key="textaction.explain.prompt",
+        title_key="textaction.explain.title",
         mode="oneshot",
     ),
     TextAction(
         key="continue_explain",
         icon=FluentIcon.CHAT,
-        label="续入会话",
-        default_prompt="",  # compose：无预设提示词，用户自己加指令
-        session_title="快速会话",
+        label_key="textaction.continue.label",
+        prompt_key="",  # compose：无预设提示词，用户自己加指令
+        title_key="session.reading.defaultTitle",
         mode="compose",
     ),
     TextAction(
         key="new_continue_explain",
         icon=FluentIcon.ADD,
-        label="新建会话",
-        default_prompt="",  # compose：无预设提示词
-        session_title="快速会话",
+        label_key="textaction.newContinue.label",
+        prompt_key="",  # compose：无预设提示词
+        title_key="session.reading.defaultTitle",
         mode="compose_new",
     ),
     TextAction(
         key="polish",
         icon=FluentIcon.EDIT,
-        label="润色",
-        default_prompt=_POLISH_PROMPT,
-        session_title="润色改写",
+        label_key="textaction.polish.label",
+        prompt_key="textaction.polish.prompt",
+        title_key="textaction.polish.title",
         mode="rewrite",
     ),
     TextAction(
         key="translate_inplace",
         icon=FluentIcon.LANGUAGE,
-        label="翻译",
-        default_prompt=_TRANSLATE_PROMPT,
-        session_title="翻译",
+        label_key="textaction.translate.label",
+        prompt_key="textaction.translate.prompt",
+        title_key="textaction.translate.title",
         mode="rewrite",
     ),
     TextAction(
         key="fix_grammar",
         icon=FluentIcon.ACCEPT,
-        label="订正",
-        default_prompt=_FIX_GRAMMAR_PROMPT,
-        session_title="订正改写",
+        label_key="textaction.fix.label",
+        prompt_key="textaction.fix.prompt",
+        title_key="textaction.fix.title",
         mode="rewrite",
     ),
     TextAction(
         key="note",
         icon=FluentIcon.QUICK_NOTE,
-        label="存便签",
-        default_prompt="",  # 本地：不走 AI，直接写入笔记库
-        session_title="",
+        label_key="textaction.note.label",
+        prompt_key="",  # 本地：不走 AI，直接写入笔记库
+        title_key="",
         mode="local",
     ),
 )

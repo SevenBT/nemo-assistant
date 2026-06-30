@@ -120,12 +120,14 @@ MODEL_TEMPLATES: dict[str, list[dict]] = {
 
 THEME_OPTIONS = [
     # Dark
-    "warm_night", "obsidian", "morandi_dusk",
-    "tokyo_night", "mocha", "rose_pine", "nord", "everforest",
+    "warm_night", "obsidian",
+    "mocha", "rose_pine", "nord", "everforest",
+    "solarized", "gruvbox",
     # Light
     "almond", "misty", "sage", "morandi_clay",
     "morandi_haze", "morandi_olive", "morandi_lilac",
     "latte", "rose_pine_dawn",
+    "solarized_light", "gruvbox_light",
 ]
 
 # ── Keyring constants ─────────────────────────────────────────────────
@@ -152,6 +154,10 @@ class AppConfig(QConfig):
     """应用配置类，所有配置项为类属性，支持信号通知变更。"""
 
     # -- Appearance --
+    # 界面语言：默认英文（en），可切中文（zh）。切换后需重启生效。
+    language = OptionsConfigItem(
+        "Appearance", "Language", "en", OptionsValidator(["en", "zh"])
+    )
     theme = OptionsConfigItem(
         "Appearance", "Theme", "almond", OptionsValidator(THEME_OPTIONS)
     )

@@ -3,19 +3,20 @@
 from qfluentwidgets import FluentIcon
 
 from app.core.config import cfg
+from app.i18n import t
 from app.ui.settings_pages.base_auto_page import AutoSettingPage, CardSpec
 
 
 class EditorPage(AutoSettingPage):
     def __init__(self, parent=None):
         super().__init__(
-            "编辑器",
+            t("settings.editor.group"),
             [
                 CardSpec(
                     cfg.editorFontSize,
                     FluentIcon.EDIT,
-                    "编辑器字体大小",
-                    "聊天输入框、笔记编辑器、便利贴编辑器的字体大小",
+                    t("settings.editor.fontSize"),
+                    t("settings.editor.fontSize.desc"),
                 ),
             ],
             parent,

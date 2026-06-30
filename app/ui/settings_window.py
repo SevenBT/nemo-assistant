@@ -15,23 +15,25 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.config import cfg
+from app.i18n import t
 
 
 class SettingsWindow(QDialog):
     """Main settings dialog with left navigation and right content area."""
 
+    # (i18n key, page id) — 导航标签运行时按当前语言取。
     _PAGES = [
-        ("外观", "appearance"),
-        ("编辑器", "editor"),
-        ("API 连接", "api"),
-        ("工具", "tools"),
-        ("快捷键", "hotkeys"),
-        ("窗口", "window"),
-        ("划词", "selection"),
-        ("归档会话", "archived"),
-        ("回收站", "trash"),
-        ("运行记录", "trace"),
-        ("评测集", "eval"),
+        ("settings.nav.appearance", "appearance"),
+        ("settings.nav.editor", "editor"),
+        ("settings.nav.api", "api"),
+        ("settings.nav.tools", "tools"),
+        ("settings.nav.hotkeys", "hotkeys"),
+        ("settings.nav.window", "window"),
+        ("settings.nav.selection", "selection"),
+        ("settings.nav.archived", "archived"),
+        ("settings.nav.trash", "trash"),
+        ("settings.nav.trace", "trace"),
+        ("settings.nav.eval", "eval"),
     ]
 
     def __init__(
@@ -57,7 +59,7 @@ class SettingsWindow(QDialog):
         self._trace_store = trace_store
         self._llm_gateway = llm_gateway
         self._prompt_builder = prompt_builder
-        self.setWindowTitle("设置")
+        self.setWindowTitle(t("settings.title"))
         self.setMinimumSize(640, 480)
         self.resize(cfg.get(cfg.settingsWidth), cfg.get(cfg.settingsHeight))
         self._build()
@@ -72,7 +74,7 @@ class SettingsWindow(QDialog):
         self._nav.setFixedWidth(140)
         self._nav.setSpacing(2)
         for label, _ in self._PAGES:
-            item = QListWidgetItem(label)
+            item = QListWidgetItem(t(label))
             item.setSizeHint(item.sizeHint().__class__(140, 36))
             self._nav.addItem(item)
 

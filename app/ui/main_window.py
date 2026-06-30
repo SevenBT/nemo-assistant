@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.config import cfg, USER_TOOLS_DIR
+from app.i18n import t
 from app.core.conversation_prompt_builder import ConversationPromptBuilder
 from app.core.llm_gateway import LLMGateway
 from app.core.note_manager import NoteManager
@@ -360,9 +361,9 @@ class MainWindow(FluentWindow):
         self._toolbox_panel.setObjectName("toolboxInterface")
 
         # 注册页面到 FluentWindow（switchTo 需要）
-        self.addSubInterface(chat_page, FluentIcon.CHAT, "聊天")
-        self.addSubInterface(self._notes_panel, FluentIcon.EDIT, "笔记")
-        self.addSubInterface(self._toolbox_panel, FluentIcon.DEVELOPER_TOOLS, "工坊")
+        self.addSubInterface(chat_page, FluentIcon.CHAT, t("nav.chat"))
+        self.addSubInterface(self._notes_panel, FluentIcon.EDIT, t("nav.notes"))
+        self.addSubInterface(self._toolbox_panel, FluentIcon.DEVELOPER_TOOLS, t("nav.workshop"))
 
         # 保存页面引用供 _switch_view 使用
         self._pages = [chat_page, self._notes_panel, self._toolbox_panel]
@@ -483,9 +484,9 @@ class MainWindow(FluentWindow):
     def _on_scheduler_result(self, job_id: str, job_name: str, result: dict):
         data = result.get("data", {})
         if result.get("status") == "success":
-            body = data.get("message") or "执行成功"
+            body = data.get("message") or t("scheduler.execSuccess")
         else:
-            body = data.get("message") or "执行失败"
+            body = data.get("message") or t("scheduler.execFailed")
         self._notify_signal.emit(job_name, body)
 
     @pyqtSlot(str, str)
@@ -530,6 +531,9 @@ class MainWindow(FluentWindow):
             editor_font_size=cfg.get(cfg.editorFontSize),
         )
         self.setStyleSheet(custom_qss)
+        # 笔记列表 delegate 缓存了主题色，需显式刷新，否则切换深浅后
+        # 列表/便签文字色不变，必须点一下文件夹才更新。
+        self._notes_panel.refresh_theme()
 
     def _switch_view(self, index: int):
         if 0 <= index < len(self._pages):

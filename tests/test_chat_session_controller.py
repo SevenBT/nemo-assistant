@@ -112,8 +112,10 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.controller.cancel_worker("s1")
 
         self.assertTrue(FakeWorker.instances[0].cancelled)
-        self.assertEqual(self.sessions.session.messages[-1].content, "partial\n\n（已取消）")
-        bubble.set_content.assert_any_call("partial\n\n（已取消）")
+        from app.i18n import t
+        marker = t("chat.cancelled")
+        self.assertEqual(self.sessions.session.messages[-1].content, f"partial\n\n{marker}")
+        bubble.set_content.assert_any_call(f"partial\n\n{marker}")
         self.input.set_running.assert_called_with(False)
         self.chat.stop_typing.assert_called()
         self.assertEqual(self.sessions.saved, ["s1"])

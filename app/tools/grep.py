@@ -20,6 +20,7 @@ from typing import Any, TYPE_CHECKING
 from app.tools.base import BuiltinTool
 from app.tools.schema import Bool, Int, Str, tool_params
 from app.tools._path_utils import IGNORE_DIRS, is_binary, resolve_safe
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.tools.context import ToolContext
@@ -45,20 +46,20 @@ class GrepTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "搜索文件内容，支持正则表达式，可按 glob 过滤文件类型"
+        return t("tool.grep.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "pattern",
-            pattern=Str("搜索模式（正则表达式或纯文本）"),
-            root=Str("搜索起始目录，相对于工作目录，默认根目录"),
-            glob=Str("文件过滤 glob，如 '*.py'"),
-            case_sensitive=Bool("是否区分大小写，默认 false"),
-            fixed_string=Bool("是否按纯文本匹配（非正则），默认 false"),
-            context_lines=Int("匹配行前后的上下文行数，默认 0", maximum=10),
-            max_results=Int("最大匹配数量，默认 100", maximum=200),
-            output_mode=Str("输出模式: content/files/count", enum=["content", "files", "count"]),
+            pattern=Str(t("tool.grep.param.pattern")),
+            root=Str(t("tool.grep.param.root")),
+            glob=Str(t("tool.grep.param.glob")),
+            case_sensitive=Bool(t("tool.grep.param.case_sensitive")),
+            fixed_string=Bool(t("tool.grep.param.fixed_string")),
+            context_lines=Int(t("tool.grep.param.context_lines"), maximum=10),
+            max_results=Int(t("tool.grep.param.max_results"), maximum=200),
+            output_mode=Str(t("tool.grep.param.output_mode"), enum=["content", "files", "count"]),
         )
 
     @property
@@ -76,13 +77,13 @@ class GrepTool(BuiltinTool):
         output_mode = params.get("output_mode", "content")
 
         if not pattern_str:
-            return {"status": "error", "data": {"message": "pattern 不能为空"}}
+            return {"status": "error", "data": {"message": t("tool.grep.msg.pattern_empty")}}
 
         root, err = resolve_safe(root_str, self._workspace)
         if err:
             return {"status": "error", "data": {"message": err}}
         if not root.exists() or not root.is_dir():
-            return {"status": "error", "data": {"message": f"目录不存在: {root_str}"}}
+            return {"status": "error", "data": {"message": t("tool.grep.msg.dir_not_found", path=root_str)}}
 
         # 编译正则
         if fixed_string:
@@ -91,7 +92,7 @@ class GrepTool(BuiltinTool):
         try:
             regex = re.compile(pattern_str, flags)
         except re.error as e:
-            return {"status": "error", "data": {"message": f"正则表达式错误: {e}"}}
+            return {"status": "error", "data": {"message": t("tool.grep.msg.regex_error", error=e)}}
 
         # 搜索
         files_searched = 0

@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.i18n import t
 from app.tools.registry import ToolRegistry
 from app.tools.script_adapter import ScriptToolAdapter
 
@@ -51,7 +52,7 @@ class ToolTestDialog(QDialog):
         self._tool = tool
         self._registry = registry
         self._worker: _ExecWorker | None = None
-        self.setWindowTitle(f"测试工具 — {tool.name}")
+        self.setWindowTitle(t("tooldlg.test.title", name=tool.name))
         self.setMinimumSize(520, 500)
         self._build()
 
@@ -66,7 +67,7 @@ class ToolTestDialog(QDialog):
         layout.addWidget(info)
 
         # ── Parameter inputs ─────────────────────────────────────────
-        params_label = QLabel("参数")
+        params_label = QLabel(t("tooldlg.test.params"))
         params_label.setStyleSheet("font-size: 12px; font-weight: 600; margin-top: 6px;")
         layout.addWidget(params_label)
 
@@ -90,11 +91,11 @@ class ToolTestDialog(QDialog):
                 layout.addLayout(row)
                 self._param_inputs[pname] = edit
         else:
-            layout.addWidget(QLabel("  此工具无需输入参数"))
+            layout.addWidget(QLabel(t("tooldlg.test.no_params")))
 
         # ── Run button ───────────────────────────────────────────────
         btn_row = QHBoxLayout()
-        self._run_btn = QPushButton("▶ 运行测试")
+        self._run_btn = QPushButton(t("tooldlg.test.run"))
         self._run_btn.setObjectName("sendBtn")
         self._run_btn.setFixedHeight(36)
         self._run_btn.clicked.connect(self._on_run)
@@ -107,7 +108,7 @@ class ToolTestDialog(QDialog):
         layout.addLayout(btn_row)
 
         # ── Output area ──────────────────────────────────────────────
-        output_label = QLabel("执行结果")
+        output_label = QLabel(t("tooldlg.test.result"))
         output_label.setStyleSheet("font-size: 12px; font-weight: 600; margin-top: 6px;")
         layout.addWidget(output_label)
 
@@ -116,7 +117,7 @@ class ToolTestDialog(QDialog):
         self._output.setStyleSheet(
             "font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 12px;"
         )
-        self._output.setPlaceholderText("点击「运行测试」查看结果...")
+        self._output.setPlaceholderText(t("tooldlg.test.result_ph"))
         layout.addWidget(self._output, 1)
 
     def _on_run(self):
@@ -142,7 +143,7 @@ class ToolTestDialog(QDialog):
                 params[pname] = val
 
         self._run_btn.setEnabled(False)
-        self._status_label.setText("执行中...")
+        self._status_label.setText(t("tooldlg.test.running"))
         self._output.setPlainText("")
 
         self._worker = _ExecWorker(self._registry, self._tool.name, params)

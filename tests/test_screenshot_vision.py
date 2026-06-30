@@ -54,7 +54,8 @@ def test_vision_action_attaches_image_and_passes_action():
     assert att.parsed_content == "", "识图不应跑 OCR 填 parsed_content"
 
     assert va.key == "explain", "应传递对应的识图动作"
-    assert va.prompt == "请解释这张图片的内容。", f"提示词错误: {va.prompt}"
+    from app.i18n import t
+    assert va.prompt == t("vision.explain.prompt"), f"提示词错误: {va.prompt}"
     assert va.auto_send is True, "解释动作应自动发送"
     assert va.session_title, "应带会话标题"
 

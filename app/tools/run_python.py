@@ -24,6 +24,7 @@ from typing import Any, TYPE_CHECKING
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Int, Str, tool_params
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.tools.context import ToolContext
@@ -72,14 +73,14 @@ class RunPythonTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "在隔离子进程中执行 Python 代码片段，捕获并返回输出。支持已安装的第三方包，使用 print() 输出结果"
+        return t("tool.run_python.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "code",
-            code=Str("要执行的 Python 代码，使用 print() 输出结果"),
-            timeout=Int("超时秒数，默认 30，最大 120", maximum=_MAX_TIMEOUT),
+            code=Str(t("tool.run_python.param.code")),
+            timeout=Int(t("tool.run_python.param.timeout"), maximum=_MAX_TIMEOUT),
         )
 
     @property
@@ -112,10 +113,10 @@ class RunPythonTool(BuiltinTool):
         except subprocess.TimeoutExpired:
             return {
                 "status": "error",
-                "data": {"message": f"代码执行超时 ({timeout}s)", "timed_out": True},
+                "data": {"message": t("tool.run_python.msg.timeout", timeout=timeout), "timed_out": True},
             }
         except OSError as e:
-            return {"status": "error", "data": {"message": f"启动子进程失败: {e}"}}
+            return {"status": "error", "data": {"message": t("tool.run_python.msg.spawn_failed", error=e)}}
 
         stdout = result.stdout or ""
         stderr = result.stderr or ""
@@ -126,7 +127,7 @@ class RunPythonTool(BuiltinTool):
             return {
                 "status": "error",
                 "data": {
-                    "message": f"代码以非零状态退出 (code={result.returncode})",
+                    "message": t("tool.run_python.msg.nonzero_exit", code=result.returncode),
                     "output": stdout[:_MAX_OUTPUT],
                     "stderr": stderr[:_MAX_OUTPUT],
                     "return_code": result.returncode,

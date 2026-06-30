@@ -7,20 +7,22 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.i18n import t
+
 
 class ManualParamsDialog(QDialog):
     """Ask the user to fill in parameters marked as source=manual."""
 
     def __init__(self, tool_name: str, param_names: list[str], parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"补充参数 — {tool_name}")
+        self.setWindowTitle(t("manualparams.title", name=tool_name))
         self.setMinimumWidth(360)
         self._fields: dict[str, QLineEdit] = {}
         self._build(param_names)
 
     def _build(self, param_names: list[str]):
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("以下参数需要手动输入："))
+        layout.addWidget(QLabel(t("manualparams.prompt")))
 
         form = QFormLayout()
         for name in param_names:

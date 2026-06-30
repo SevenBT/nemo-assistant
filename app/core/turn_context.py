@@ -4,7 +4,10 @@
 状态流转：
     PREPARE → STREAM → EXECUTE → FEEDBACK → STREAM → ... → FINALIZE → DONE
                  ↓ (no_tools)                  ↓ (max_turns)
-              FINALIZE                      FINALIZE
+              FINALIZE                   WRAP_UP → FINALIZE
+
+WRAP_UP（强制收尾轮）：达到 max_turns 时不直接终止，而是去掉 tools 再调一次
+LLM，让模型基于已有工具结果产出纯文本最终答复，避免「工具跑完却无任何输出」。
 """
 import time
 from dataclasses import dataclass, field
@@ -18,6 +21,7 @@ class TurnState(Enum):
     STREAM = auto()
     EXECUTE = auto()
     FEEDBACK = auto()
+    WRAP_UP = auto()
     FINALIZE = auto()
     DONE = auto()
 
@@ -34,7 +38,10 @@ TRANSITIONS: dict[tuple[TurnState, str], TurnState] = {
     (TurnState.EXECUTE, "ok"): TurnState.FEEDBACK,
     (TurnState.EXECUTE, "cancelled"): TurnState.FINALIZE,
     (TurnState.FEEDBACK, "continue"): TurnState.STREAM,
-    (TurnState.FEEDBACK, "max_turns"): TurnState.FINALIZE,
+    (TurnState.FEEDBACK, "max_turns"): TurnState.WRAP_UP,
+    (TurnState.WRAP_UP, "ok"): TurnState.FINALIZE,
+    (TurnState.WRAP_UP, "error"): TurnState.FINALIZE,
+    (TurnState.WRAP_UP, "cancelled"): TurnState.FINALIZE,
     (TurnState.FINALIZE, "ok"): TurnState.DONE,
 }
 

@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from app.core.config import USER_TOOLS_DIR
 from app.core.tool_generator import ModelOverride, build_model_options, parse_result, stream_generate
+from app.i18n import t
 from app.tools.registry import ToolRegistry
 
 
@@ -75,7 +76,7 @@ class ToolGenerateDialog(QDialog):
         self._full_text = ""
         self._manifest_str = ""
         self._script_str = ""
-        self.setWindowTitle("AI 生成工具")
+        self.setWindowTitle(t("tooldlg.gen.title"))
         self.setMinimumSize(620, 600)
         self._build()
 
@@ -84,19 +85,15 @@ class ToolGenerateDialog(QDialog):
         layout.setSpacing(10)
 
         # ── Requirement input ────────────────────────────────────────
-        layout.addWidget(QLabel("描述你想要的工具功能："))
+        layout.addWidget(QLabel(t("tooldlg.gen.req_label")))
         self._req_edit = QTextEdit()
-        self._req_edit.setPlaceholderText(
-            "例如：每天从指定网站抓取新闻标题，整理成列表返回\n"
-            "例如：将文本翻译成英文并返回结果\n"
-            "例如：查询指定城市的实时天气"
-        )
+        self._req_edit.setPlaceholderText(t("tooldlg.gen.req_ph"))
         self._req_edit.setMaximumHeight(90)
         layout.addWidget(self._req_edit)
 
         # ── Model selector ───────────────────────────────────────────
         model_row = QHBoxLayout()
-        model_row.addWidget(QLabel("模型:"))
+        model_row.addWidget(QLabel(t("tooldlg.gen.model")))
         self._model_combo = QComboBox()
         self._model_combo.setMinimumWidth(260)
         self._model_options: list[ModelOverride] = build_model_options()
@@ -107,7 +104,7 @@ class ToolGenerateDialog(QDialog):
         layout.addLayout(model_row)
 
         btn_row = QHBoxLayout()
-        self._gen_btn = QPushButton("✨ 生成")
+        self._gen_btn = QPushButton(t("tooldlg.gen.generate"))
         self._gen_btn.setObjectName("sendBtn")
         self._gen_btn.setFixedHeight(34)
         self._gen_btn.clicked.connect(self._on_generate)
@@ -125,14 +122,14 @@ class ToolGenerateDialog(QDialog):
         self._manifest_edit.setStyleSheet(
             "font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 12px;"
         )
-        self._manifest_edit.setPlaceholderText("生成后显示 manifest.json ...")
+        self._manifest_edit.setPlaceholderText(t("tooldlg.gen.manifest_ph"))
         self._tabs.addTab(self._manifest_edit, "manifest.json")
 
         self._script_edit = QPlainTextEdit()
         self._script_edit.setStyleSheet(
             "font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 12px;"
         )
-        self._script_edit.setPlaceholderText("生成后显示 tool.py ...")
+        self._script_edit.setPlaceholderText(t("tooldlg.gen.script_ph"))
         self._tabs.addTab(self._script_edit, "tool.py")
 
         # Raw output tab for debugging
@@ -141,22 +138,22 @@ class ToolGenerateDialog(QDialog):
         self._raw_edit.setStyleSheet(
             "font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 11px;"
         )
-        self._raw_edit.setPlaceholderText("AI 原始输出 ...")
-        self._tabs.addTab(self._raw_edit, "原始输出")
+        self._raw_edit.setPlaceholderText(t("tooldlg.gen.raw_ph"))
+        self._tabs.addTab(self._raw_edit, t("tooldlg.gen.raw_tab"))
 
         layout.addWidget(self._tabs, 1)
 
         # ── Tool name + save ─────────────────────────────────────────
         name_row = QHBoxLayout()
-        name_row.addWidget(QLabel("工具名称:"))
+        name_row.addWidget(QLabel(t("tooldlg.gen.tool_name")))
         self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("从 manifest.json 自动读取，可修改")
+        self._name_edit.setPlaceholderText(t("tooldlg.gen.tool_name_ph"))
         name_row.addWidget(self._name_edit)
         layout.addLayout(name_row)
 
         # ── Bottom buttons ───────────────────────────────────────────
         bottom = QHBoxLayout()
-        self._regen_btn = QPushButton("重新生成")
+        self._regen_btn = QPushButton(t("tooldlg.gen.regenerate"))
         self._regen_btn.setObjectName("noteToolBtn")
         self._regen_btn.setEnabled(False)
         self._regen_btn.clicked.connect(self._on_generate)
@@ -164,13 +161,13 @@ class ToolGenerateDialog(QDialog):
 
         bottom.addStretch()
 
-        self._save_btn = QPushButton("保存到工坊")
+        self._save_btn = QPushButton(t("tooldlg.gen.save"))
         self._save_btn.setObjectName("sendBtn")
         self._save_btn.setEnabled(False)
         self._save_btn.clicked.connect(self._on_save)
         bottom.addWidget(self._save_btn)
 
-        cancel_btn = QPushButton("取消")
+        cancel_btn = QPushButton(t("common.cancel"))
         cancel_btn.setObjectName("noteToolBtn")
         cancel_btn.clicked.connect(self.reject)
         bottom.addWidget(cancel_btn)
@@ -181,7 +178,7 @@ class ToolGenerateDialog(QDialog):
     def _on_generate(self):
         requirement = self._req_edit.toPlainText().strip()
         if not requirement:
-            QMessageBox.warning(self, "提示", "请先描述工具功能")
+            QMessageBox.warning(self, t("tooldlg.gen.tip_title"), t("tooldlg.gen.tip_no_req"))
             return
 
         # Stop any running worker
@@ -197,7 +194,7 @@ class ToolGenerateDialog(QDialog):
         self._save_btn.setEnabled(False)
         self._regen_btn.setEnabled(False)
         self._gen_btn.setEnabled(False)
-        self._status_label.setText("生成中...")
+        self._status_label.setText(t("tooldlg.gen.status_generating"))
         self._tabs.setCurrentIndex(2)  # show raw output while streaming
 
         idx = self._model_combo.currentIndex()
@@ -241,7 +238,7 @@ class ToolGenerateDialog(QDialog):
             pass
 
         self._save_btn.setEnabled(True)
-        self._status_label.setText("✓ 生成完成")
+        self._status_label.setText(t("tooldlg.gen.status_done"))
         self._status_label.setStyleSheet("font-size: 11px; color: #34D399;")
         self._tabs.setCurrentIndex(0)  # switch to manifest tab
 
@@ -259,19 +256,19 @@ class ToolGenerateDialog(QDialog):
         name = self._name_edit.text().strip()
 
         if not name:
-            QMessageBox.warning(self, "错误", "工具名称不能为空")
+            QMessageBox.warning(self, t("tooldlg.gen.err_title"), t("tooldlg.gen.err_no_name"))
             return
 
         import re
         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name):
-            QMessageBox.warning(self, "错误", "工具名称只能包含英文字母、数字和下划线")
+            QMessageBox.warning(self, t("tooldlg.gen.err_title"), t("tooldlg.gen.err_bad_name"))
             return
 
         # Validate manifest JSON
         try:
             manifest = json.loads(manifest_str)
         except json.JSONDecodeError as e:
-            QMessageBox.warning(self, "错误", f"manifest.json 格式错误：{e}")
+            QMessageBox.warning(self, t("tooldlg.gen.err_title"), t("tooldlg.gen.err_bad_manifest", err=e))
             return
 
         # Force name to match the input field
@@ -281,8 +278,8 @@ class ToolGenerateDialog(QDialog):
         if self._registry.get(name):
             reply = QMessageBox.question(
                 self,
-                "工具已存在",
-                f"工具「{name}」已存在，是否覆盖？",
+                t("tooldlg.gen.exists_title"),
+                t("tooldlg.gen.exists_body", name=name),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:

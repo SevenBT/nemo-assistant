@@ -31,6 +31,7 @@ from qfluentwidgets import (
 )
 
 from app.core.note_manager import NoteManager
+from app.i18n import t
 
 
 class TrashPage(QWidget):
@@ -49,18 +50,18 @@ class TrashPage(QWidget):
         layout.setSpacing(10)
 
         header = QHBoxLayout()
-        header.addWidget(StrongBodyLabel("回收站", self))
+        header.addWidget(StrongBodyLabel(t("settings.trash.title"), self))
         header.addStretch()
-        self._purge_all_btn = PushButton(FluentIcon.BROOM, "清空回收站", self)
+        self._purge_all_btn = PushButton(FluentIcon.BROOM, t("settings.trash.purge_all"), self)
         self._purge_all_btn.clicked.connect(self._purge_all)
         header.addWidget(self._purge_all_btn)
         layout.addLayout(header)
 
-        hint = BodyLabel("删除的笔记和便签会移到这里。可恢复回笔记列表，或彻底删除。", self)
+        hint = BodyLabel(t("settings.trash.hint"), self)
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        self._empty = BodyLabel("回收站是空的。", self)
+        self._empty = BodyLabel(t("settings.trash.empty"), self)
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._empty, 1)
 
@@ -90,19 +91,19 @@ class TrashPage(QWidget):
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(6)
 
-        tag = "便签" if note.note_type == "sticky" else "笔记"
-        title = note.title or "（无标题）"
-        label = BodyLabel(f"{title}  ·  {tag}", row)
+        tag = t("settings.trash.tag_sticky") if note.note_type == "sticky" else t("settings.trash.tag_note")
+        title = note.title or t("common.untitled")
+        label = BodyLabel(t("settings.trash.row", title=title, tag=tag), row)
         label.setToolTip(title)
         layout.addWidget(label, 1)
 
         restore_btn = TransparentToolButton(FluentIcon.RETURN, row)
-        restore_btn.setToolTip("恢复到笔记列表")
+        restore_btn.setToolTip(t("settings.trash.restore_tip"))
         restore_btn.clicked.connect(lambda: self._restore(note.id))
         layout.addWidget(restore_btn)
 
         delete_btn = TransparentToolButton(FluentIcon.DELETE, row)
-        delete_btn.setToolTip("彻底删除")
+        delete_btn.setToolTip(t("common.purge"))
         delete_btn.clicked.connect(lambda: self._purge(note.id, title))
         layout.addWidget(delete_btn)
 
@@ -117,8 +118,8 @@ class TrashPage(QWidget):
     def _purge(self, note_id, title: str):
         confirm = QMessageBox(self)
         confirm.setIcon(QMessageBox.Icon.Warning)
-        confirm.setWindowTitle("彻底删除")
-        confirm.setText(f"确定彻底删除「{title}」？\n此操作不可恢复。")
+        confirm.setWindowTitle(t("common.purge"))
+        confirm.setText(t("common.purge_confirm", title=title))
         confirm.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -136,8 +137,8 @@ class TrashPage(QWidget):
             return
         confirm = QMessageBox(self)
         confirm.setIcon(QMessageBox.Icon.Warning)
-        confirm.setWindowTitle("清空回收站")
-        confirm.setText(f"确定彻底删除回收站中全部 {tc} 条吗？\n此操作不可恢复。")
+        confirm.setWindowTitle(t("settings.trash.purge_all"))
+        confirm.setText(t("settings.trash.purge_all_confirm", n=tc))
         confirm.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )

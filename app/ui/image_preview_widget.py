@@ -12,6 +12,8 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
+
+from app.i18n import t
 from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout
 from qfluentwidgets import ToolTipPosition
 
@@ -48,7 +50,7 @@ class ImagePreviewWidget(QFrame):
 
         if pixmap.isNull():
             # Fall back to a filename label if the image can't be loaded.
-            label.setText(f"🖼️ {self._attachment.file_name}（无法预览）")
+            label.setText(t("preview.cannotPreview", name=self._attachment.file_name))
             label.setObjectName("fileName")
         else:
             scaled = pixmap.scaled(

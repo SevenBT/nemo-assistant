@@ -21,6 +21,7 @@ from qfluentwidgets import (
     MessageBox,
 )
 from app.ui.components.context_menu import ContextMenu
+from app.i18n import t
 
 from app.models.session import (
     SOURCE_MANUAL,
@@ -73,14 +74,14 @@ class SessionPanel(QFrame):
         # header row
         header = QHBoxLayout()
         header.setSpacing(6)
-        title = CaptionLabel("会话")
+        title = CaptionLabel(t("session.title"))
         title.setObjectName("panelTitle")
         header.addWidget(title)
         header.addStretch()
 
         new_btn = TransparentToolButton(FluentIcon.ADD)
         new_btn.setFixedSize(30, 30)
-        new_btn.setToolTip("新建会话")
+        new_btn.setToolTip(t("session.new"))
         new_btn.installEventFilter(
             ToolTipFilter(new_btn, showDelay=400, position=ToolTipPosition.BOTTOM)
         )
@@ -92,8 +93,8 @@ class SessionPanel(QFrame):
 
         # 来源 Tab：我的会话（手动） / 划词速记（划词气泡续聊）
         self._pivot = SegmentedWidget()
-        self._pivot.addItem(SOURCE_MANUAL, "我的会话")
-        self._pivot.addItem(SOURCE_READING, "快速会话")
+        self._pivot.addItem(SOURCE_MANUAL, t("session.tab.mine"))
+        self._pivot.addItem(SOURCE_READING, t("session.tab.quick"))
         self._pivot.setCurrentItem(SOURCE_MANUAL)
         self._pivot.currentItemChanged.connect(self._on_tab_changed)
         layout.addWidget(self._pivot)
@@ -245,24 +246,24 @@ class SessionPanel(QFrame):
         )
         if source == SOURCE_READING and sid != self._active_reading_id:
             menu.addAction(Action(
-                FluentIcon.PLAY, "设为连续阅读",
+                FluentIcon.PLAY, t("session.menu.setReading"),
                 triggered=lambda: self.session_activate_reading_requested.emit(sid),
             ))
             menu.addSeparator()
 
         pin_icon = FluentIcon.UNPIN if pinned else FluentIcon.PIN
-        pin_text = "取消置顶" if pinned else "置顶"
+        pin_text = t("session.menu.unpin") if pinned else t("session.menu.pin")
         menu.addAction(Action(pin_icon, pin_text,
                               triggered=lambda: self.session_pin_requested.emit(sid, not pinned)))
 
-        menu.addAction(Action(FluentIcon.SETTING, "会话设置",
+        menu.addAction(Action(FluentIcon.SETTING, t("session.menu.settings"),
                               triggered=lambda: self.session_settings_requested.emit(sid)))
         menu.addSeparator()
 
-        menu.addAction(Action(FluentIcon.EDIT, "重命名",
+        menu.addAction(Action(FluentIcon.EDIT, t("session.menu.rename"),
                               triggered=lambda: self._do_rename(sid, item)))
 
-        menu.addAction(Action(FluentIcon.DELETE, "删除",
+        menu.addAction(Action(FluentIcon.DELETE, t("session.menu.delete"),
                               triggered=lambda: self.session_delete_requested.emit(sid)))
 
         menu.exec(self._list.mapToGlobal(pos))
@@ -273,14 +274,14 @@ class SessionPanel(QFrame):
         class RenameBox(MessageBoxBase):
             def __init__(self, title: str, parent=None):
                 super().__init__(parent)
-                self.titleLabel = SubtitleLabel("重命名会话")
+                self.titleLabel = SubtitleLabel(t("session.rename.title"))
                 self.viewLayout.addWidget(self.titleLabel)
                 self.lineEdit = LineEdit()
                 self.lineEdit.setText(title)
                 self.lineEdit.selectAll()
                 self.viewLayout.addWidget(self.lineEdit)
-                self.yesButton.setText("确定")
-                self.cancelButton.setText("取消")
+                self.yesButton.setText(t("common.ok"))
+                self.cancelButton.setText(t("common.cancel"))
 
         box = RenameBox(item.toolTip(), self.window())
         if box.exec():

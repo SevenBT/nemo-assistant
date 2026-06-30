@@ -30,6 +30,7 @@ from qfluentwidgets import (
 )
 
 from app.models.session import SOURCE_READING
+from app.i18n import t
 
 
 class ArchivedPage(QWidget):
@@ -48,15 +49,15 @@ class ArchivedPage(QWidget):
         layout.setSpacing(10)
 
         header = QHBoxLayout()
-        header.addWidget(StrongBodyLabel("归档会话", self))
+        header.addWidget(StrongBodyLabel(t("settings.archived.title"), self))
         header.addStretch()
         layout.addLayout(header)
 
-        hint = BodyLabel("删除的会话会移到这里。可恢复回会话列表，或彻底删除。", self)
+        hint = BodyLabel(t("settings.archived.hint"), self)
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        self._empty = BodyLabel("暂无归档会话。", self)
+        self._empty = BodyLabel(t("settings.archived.empty"), self)
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._empty, 1)
 
@@ -85,19 +86,19 @@ class ArchivedPage(QWidget):
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(6)
 
-        tag = "快速会话" if session.source == SOURCE_READING else "会话"
-        title = session.title or "（无标题）"
-        label = BodyLabel(f"{title}  ·  {tag}", row)
+        tag = t("settings.archived.tag_reading") if session.source == SOURCE_READING else t("settings.archived.tag_session")
+        title = session.title or t("common.untitled")
+        label = BodyLabel(t("settings.archived.row", title=title, tag=tag), row)
         label.setToolTip(title)
         layout.addWidget(label, 1)
 
         restore_btn = TransparentToolButton(FluentIcon.RETURN, row)
-        restore_btn.setToolTip("恢复到会话列表")
+        restore_btn.setToolTip(t("settings.archived.restore_tip"))
         restore_btn.clicked.connect(lambda: self._restore(session.id))
         layout.addWidget(restore_btn)
 
         delete_btn = TransparentToolButton(FluentIcon.DELETE, row)
-        delete_btn.setToolTip("彻底删除")
+        delete_btn.setToolTip(t("common.purge"))
         delete_btn.clicked.connect(lambda: self._purge(session.id, title))
         layout.addWidget(delete_btn)
 
@@ -112,8 +113,8 @@ class ArchivedPage(QWidget):
     def _purge(self, sid: str, title: str):
         confirm = QMessageBox(self)
         confirm.setIcon(QMessageBox.Icon.Warning)
-        confirm.setWindowTitle("彻底删除")
-        confirm.setText(f"确定彻底删除「{title}」？\n此操作不可恢复。")
+        confirm.setWindowTitle(t("common.purge"))
+        confirm.setText(t("common.purge_confirm", title=title))
         confirm.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )

@@ -32,22 +32,25 @@ from qfluentwidgets import (
     setFont,
 )
 
-# 维度名 → 中文显示。
+from app.i18n import t
+
+# 维度名 → i18n key。值存 key，在 _dim_label 运行时取文案（语言启动后才锁定）。
 _DIM_LABELS = {
-    "completed": "任务完成",
-    "tool_success_rate": "工具成功率",
-    "error_recovery_rate": "错误恢复率",
-    "redundant_call_rate": "冗余调用率",
-    "json_valid_rate": "JSON 合法率",
-    "expected_tool_hit_rate": "期望工具命中率",
-    "judge_helpfulness": "Judge·有用性",
-    "judge_correctness": "Judge·准确性",
-    "judge_safety": "Judge·安全性",
+    "completed": "settings.eval.dim_completed",
+    "tool_success_rate": "settings.eval.dim_tool_success_rate",
+    "error_recovery_rate": "settings.eval.dim_error_recovery_rate",
+    "redundant_call_rate": "settings.eval.dim_redundant_call_rate",
+    "json_valid_rate": "settings.eval.dim_json_valid_rate",
+    "expected_tool_hit_rate": "settings.eval.dim_expected_tool_hit_rate",
+    "judge_helpfulness": "settings.eval.dim_judge_helpfulness",
+    "judge_correctness": "settings.eval.dim_judge_correctness",
+    "judge_safety": "settings.eval.dim_judge_safety",
 }
 
 
 def _dim_label(dim: str) -> str:
-    return _DIM_LABELS.get(dim, dim)
+    key = _DIM_LABELS.get(dim)
+    return t(key) if key else dim
 
 
 class _EvalRunWorker(QThread):
@@ -125,20 +128,19 @@ class EvalPage(QWidget):
         layout.setSpacing(10)
 
         header = QHBoxLayout()
-        header.addWidget(StrongBodyLabel("评测集", self))
+        header.addWidget(StrongBodyLabel(t("settings.eval.title"), self))
         header.addStretch()
-        self._run_btn = PushButton(FluentIcon.PLAY, "跑回归", self)
-        self._run_btn.setToolTip("用当前 model/prompt 重跑所有启用用例，规则打分并和上次对比。")
+        self._run_btn = PushButton(FluentIcon.PLAY, t("settings.eval.run"), self)
+        self._run_btn.setToolTip(t("settings.eval.run_tip"))
         self._run_btn.clicked.connect(self._on_run)
         header.addWidget(self._run_btn)
-        self._refresh_btn = PushButton(FluentIcon.SYNC, "刷新", self)
+        self._refresh_btn = PushButton(FluentIcon.SYNC, t("settings.eval.refresh"), self)
         self._refresh_btn.clicked.connect(self.reload)
         header.addWidget(self._refresh_btn)
         layout.addLayout(header)
 
         hint = CaptionLabel(
-            "从「运行记录」页把踩过坑的对话存为用例。换模型或改 prompt 后点「跑回归」，"
-            "确认旧问题没复活、核心指标没退步。", self
+            t("settings.eval.hint"), self
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -154,11 +156,11 @@ class EvalPage(QWidget):
         # 左列：用例 + 运行两个列表。
         left = QVBoxLayout()
         left.setSpacing(6)
-        left.addWidget(CaptionLabel("回归用例", self))
+        left.addWidget(CaptionLabel(t("settings.eval.cases"), self))
         self._case_list = ListWidget(self)
         self._case_list.setFixedWidth(240)
         left.addWidget(self._case_list, 1)
-        left.addWidget(CaptionLabel("历史运行", self))
+        left.addWidget(CaptionLabel(t("settings.eval.runs"), self))
         self._run_list = ListWidget(self)
         self._run_list.setFixedWidth(240)
         self._run_list.currentRowChanged.connect(self._on_select_run)
@@ -173,7 +175,7 @@ class EvalPage(QWidget):
 
     def reload(self):
         if self._store is None or not getattr(self._store, "enabled", False):
-            self._empty.setText("遥测未启用，无评测集。")
+            self._empty.setText(t("settings.eval.disabled"))
             self._empty.setVisible(True)
             return
         self._empty.setVisible(False)
@@ -228,7 +230,7 @@ class EvalPage(QWidget):
 
         self._run_btn.setEnabled(False)
         self._refresh_btn.setEnabled(False)
-        self._run_btn.setText("运行中…")
+        self._run_btn.setText(t("settings.eval.running"))
 
         worker = _EvalRunWorker(
             trace_store=self._store,
@@ -244,22 +246,22 @@ class EvalPage(QWidget):
 
     def _on_run_progress(self, done: int, total: int, title: str):
         if total and done < total:
-            self._run_btn.setText(f"运行中… {done}/{total}")
+            self._run_btn.setText(t("settings.eval.running_progress", done=done, total=total))
 
     def _on_run_finished(self, run_id, error: str):
         from app.ui.toast import show_toast
 
-        self._run_btn.setText("跑回归")
+        self._run_btn.setText(t("settings.eval.run"))
         self._refresh_btn.setEnabled(True)
         self._run_worker = None
 
         if error:
-            show_toast("评测运行", f"运行失败：{error}")
+            show_toast(t("settings.eval.toast_title"), t("settings.eval.toast_failed", error=error))
         elif run_id:
-            show_toast("评测运行", "回归运行完成")
+            show_toast(t("settings.eval.toast_title"), t("settings.eval.toast_done"))
             self.reload()
         else:
-            show_toast("评测运行", "没有可运行的用例")
+            show_toast(t("settings.eval.toast_title"), t("settings.eval.toast_no_cases"))
         # reload 会按当前条件重设 run 按钮可用性；失败/空跑时手动恢复。
         if not run_id:
             self._run_btn.setEnabled(bool(self._cases) and self._llm is not None)
@@ -274,11 +276,11 @@ def _case_row(case: dict, parent: QWidget) -> QWidget:
     col.setSpacing(2)
     enabled = bool(case.get("enabled", 1))
     title = case.get("title") or case.get("case_id", "")[:12]
-    name = BodyLabel(title if enabled else f"（停用）{title}", row)
+    name = BodyLabel(title if enabled else t("settings.eval.case_disabled", title=title), row)
     col.addWidget(name)
     tools = case.get("expected_tools") or ""
     if tools and tools not in ("[]", "null"):
-        col.addWidget(CaptionLabel(f"期望工具 {tools}", row))
+        col.addWidget(CaptionLabel(t("settings.eval.expected_tools", tools=tools), row))
     return row
 
 
@@ -292,7 +294,7 @@ def _run_row(run: dict, parent: QWidget) -> QWidget:
     head.setSpacing(6)
     head.addWidget(BodyLabel(started, row))
     head.addStretch()
-    head.addWidget(CaptionLabel(f"{run.get('case_count', 0)} 例", row))
+    head.addWidget(CaptionLabel(t("settings.eval.case_count", n=run.get('case_count', 0)), row))
     col.addLayout(head)
     meta = []
     if run.get("model"):
@@ -354,11 +356,11 @@ class _ComparisonCard(SimpleCardWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(6)
-        title = "维度对比（vs 上次运行）" if has_baseline else "维度均分（无基线）"
+        title = t("settings.eval.cmp_vs_baseline") if has_baseline else t("settings.eval.cmp_no_baseline")
         layout.addWidget(StrongBodyLabel(title, self))
 
         if not comparison:
-            layout.addWidget(CaptionLabel("本次运行无可聚合的指标。", self))
+            layout.addWidget(CaptionLabel(t("settings.eval.cmp_empty"), self))
             return
 
         for row in comparison:
@@ -385,7 +387,7 @@ class _ResultCard(CardWidget):
         col = QVBoxLayout(self)
         col.setContentsMargins(12, 10, 12, 10)
         col.setSpacing(4)
-        name = BodyLabel(f"用例 {res.get('case_id', '')[:12]}", self)
+        name = BodyLabel(t("settings.eval.result_case", id=res.get('case_id', '')[:12]), self)
         setFont(name, 14)
         col.addWidget(name)
         rule = _loads(res.get("rule_scores"))

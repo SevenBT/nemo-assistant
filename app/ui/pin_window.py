@@ -33,6 +33,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.i18n import t
+
 _RESIZE_BORDER = 8
 _MIN_W = 80
 _MIN_H = 60
@@ -157,13 +159,13 @@ class PinWindow(QWidget):
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
-        menu.addAction("📋 复制", self._copy_to_clipboard)
-        menu.addAction("💾 另存为...", self._save_as)
+        menu.addAction(t("pin.copy"), self._copy_to_clipboard)
+        menu.addAction(t("pin.saveAs"), self._save_as)
         menu.addSeparator()
-        menu.addAction("🔍 滚轮缩放大小", lambda: None)  # hint
-        menu.addAction("💫 Ctrl+滚轮调节透明度", lambda: None)  # hint
+        menu.addAction(t("pin.zoomHint"), lambda: None)  # hint
+        menu.addAction(t("pin.opacityHint"), lambda: None)  # hint
         menu.addSeparator()
-        menu.addAction("✕ 关闭", self.close)
+        menu.addAction(t("pin.close"), self.close)
         menu.exec(event.globalPos())
 
     def _copy_to_clipboard(self):
@@ -171,7 +173,7 @@ class PinWindow(QWidget):
 
     def _save_as(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "保存截图", "screenshot.png", "PNG (*.png)"
+            self, t("pin.saveDialogTitle"), "screenshot.png", "PNG (*.png)"
         )
         if path:
             self._pixmap.save(path, "PNG")

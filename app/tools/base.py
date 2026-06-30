@@ -20,6 +20,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, TYPE_CHECKING
 
+from app.i18n import t
+
 if TYPE_CHECKING:
     from app.tools.context import ToolContext
 
@@ -206,7 +208,7 @@ class BuiltinTool(ABC):
         # 检查必填参数
         for name in required:
             if name not in params:
-                errors.append(f"缺少必需参数: {name}")
+                errors.append(t("tool.validate.missing_required", name=name))
         # 检查类型和枚举约束
         for key, value in params.items():
             if key in properties:
@@ -214,11 +216,17 @@ class BuiltinTool(ABC):
                 expected_type = prop_schema.get("type")
                 if expected_type and not self._check_type(value, expected_type):
                     errors.append(
-                        f"参数 {key} 类型错误: 期望 {expected_type}, "
-                        f"实际 {type(value).__name__}"
+                        t(
+                            "tool.validate.type_error",
+                            param=key,
+                            expected=expected_type,
+                            actual=type(value).__name__,
+                        )
                     )
                 if "enum" in prop_schema and value not in prop_schema["enum"]:
-                    errors.append(f"参数 {key} 值不在允许范围: {prop_schema['enum']}")
+                    errors.append(
+                        t("tool.validate.enum_error", param=key, enum=prop_schema["enum"])
+                    )
         return errors
 
     @staticmethod

@@ -15,6 +15,7 @@ from typing import Any, TYPE_CHECKING
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Str, tool_params
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.tools.context import ToolContext
@@ -39,14 +40,14 @@ class SaveFileTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "将内容保存为本地文件（txt/md/json/csv/py 等），完成后在资源管理器中打开所在目录"
+        return t("tool.save_file.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "filename", "content",
-            filename=Str("文件名（含扩展名），如 'report.md'、'data.csv'"),
-            content=Str("要写入文件的文本内容"),
+            filename=Str(t("tool.save_file.param.filename")),
+            content=Str(t("tool.save_file.param.content")),
         )
 
     def execute(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -87,6 +88,6 @@ class SaveFileTool(BuiltinTool):
             "data": {
                 "path": str(file_path), "filename": file_path.name,
                 "size_bytes": len(content.encode("utf-8")),
-                "message": f"已保存到 {file_path}",
+                "message": t("tool.save_file.msg.saved", path=file_path),
             },
         }

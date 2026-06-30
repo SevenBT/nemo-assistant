@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.i18n import t
 from app.models.session import Session
 
 
@@ -17,7 +18,7 @@ class SessionSettingsDialog(QDialog):
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
         self._session = session
-        self.setWindowTitle("会话设置")
+        self.setWindowTitle(t("sessionsettings.title"))
         self.setMinimumSize(500, 400)
         self._build()
         self._load()
@@ -26,13 +27,13 @@ class SessionSettingsDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # 标题
-        title = QLabel(f"会话：{self._session.title}")
+        title = QLabel(t("sessionsettings.session_label", title=self._session.title))
         title.setStyleSheet("font-size: 14px; font-weight: bold; color: #d8dee9;")
         layout.addWidget(title)
 
         layout.addWidget(QLabel("System Prompt:"))
         self._prompt_edit = QPlainTextEdit()
-        self._prompt_edit.setPlaceholderText("留空则使用全局 System Prompt")
+        self._prompt_edit.setPlaceholderText(t("sessionsettings.prompt_ph"))
         self._prompt_edit.setMinimumHeight(200)
         layout.addWidget(self._prompt_edit)
 

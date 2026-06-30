@@ -21,6 +21,7 @@ from urllib.parse import urljoin, urlparse
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Str, tool_params
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.tools.context import ToolContext
@@ -51,20 +52,20 @@ def _check_url_safety(url: str) -> tuple[bool, str]:
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        return False, f"不支持的协议: {parsed.scheme}"
+        return False, t("tool.fetch_url.msg.unsupported_scheme", scheme=parsed.scheme)
 
     hostname = parsed.hostname
     if not hostname:
-        return False, "无效的 URL"
+        return False, t("tool.fetch_url.msg.invalid_url")
 
     # 直接拦截 localhost 别名
     if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-        return False, "禁止访问本机地址"
+        return False, t("tool.fetch_url.msg.blocked_localhost")
 
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
     except socket.gaierror:
-        return False, f"无法解析域名: {hostname}"
+        return False, t("tool.fetch_url.msg.dns_failed", hostname=hostname)
 
     for info in infos:
         try:
@@ -73,7 +74,7 @@ def _check_url_safety(url: str) -> tuple[bool, str]:
             continue
         for network in _BLOCKED_NETWORKS:
             if ip in network:
-                return False, f"禁止访问内网地址: {hostname} ({ip})"
+                return False, t("tool.fetch_url.msg.blocked_internal", hostname=hostname, ip=ip)
 
     return True, ""
 
@@ -95,13 +96,13 @@ class FetchUrlTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "抓取网页内容并提取正文文本，适合阅读文章、查看在线文档、获取网页信息"
+        return t("tool.fetch_url.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "url",
-            url=Str("要抓取的网页 URL，如 'https://example.com/article'"),
+            url=Str(t("tool.fetch_url.param.url")),
         )
 
     @property
@@ -152,7 +153,7 @@ class FetchUrlTool(BuiltinTool):
                         continue
                     break
                 else:
-                    return {"status": "error", "data": {"message": "重定向次数过多", "url": url}}
+                    return {"status": "error", "data": {"message": t("tool.fetch_url.msg.too_many_redirects"), "url": url}}
             resp.raise_for_status()
             content_type = resp.headers.get("content-type", "")
 

@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.ui import style
+from app.i18n import t
 
 _RESIZE_BORDER = 6
 _MIN_W = 180
@@ -117,7 +118,7 @@ class _TitleBar(QWidget):
         layout.setContentsMargins(10, 0, 6, 0)
         layout.setSpacing(4)
 
-        self._label = QLabel("便签")
+        self._label = QLabel(t("sticky.label"))
         self._label.setStyleSheet(
             f"color: {ink_secondary}; font-size: 11px; font-weight: 600;"
             "background: transparent; border: none;"
@@ -145,7 +146,7 @@ class _TitleBar(QWidget):
 
     def set_title(self, title: str):
         short = title[:18] + "…" if len(title) > 18 else title
-        self._label.setText(short or "便签")
+        self._label.setText(short or t("sticky.label"))
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -180,12 +181,12 @@ class _TitleBar(QWidget):
         is_top = bool(win.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
 
         menu = QMenu(self)
-        top_act = menu.addAction("取消置顶" if is_top else "置顶")
-        hide_act = menu.addAction("隐藏")
+        top_act = menu.addAction(t("sticky.menu.unpin") if is_top else t("sticky.menu.pin"))
+        hide_act = menu.addAction(t("sticky.menu.hide"))
         menu.addSeparator()
-        copy_act = menu.addAction("复制内容")
+        copy_act = menu.addAction(t("sticky.menu.copyContent"))
         menu.addSeparator()
-        del_act = menu.addAction("删除便签")
+        del_act = menu.addAction(t("sticky.menu.delete"))
 
         action = menu.exec(global_pos)
         if action == top_act:
@@ -302,7 +303,7 @@ class StickyNoteWindow(QWidget):
             f"QTextEdit {{ background: transparent; color: {ink};"
             f"border: none; padding: 8px 10px; font-size: 13px; line-height: 1.5; }}"
         )
-        self._content_edit.setPlaceholderText("在此记录…")
+        self._content_edit.setPlaceholderText(t("sticky.placeholder"))
         # Sticky notes store HTML (supports text + images)
         if content and "<" in content:
             self._content_edit.setHtml(content)
@@ -368,34 +369,34 @@ class StickyNoteWindow(QWidget):
         menu = QMenu(self)
 
         # Text editing operations
-        undo_action = menu.addAction("撤销")
+        undo_action = menu.addAction(t("edit.undo"))
         undo_action.setEnabled(self._content_edit.document().isUndoAvailable())
 
-        redo_action = menu.addAction("重做")
+        redo_action = menu.addAction(t("edit.redo"))
         redo_action.setEnabled(self._content_edit.document().isRedoAvailable())
 
         menu.addSeparator()
 
         has_selection = self._content_edit.textCursor().hasSelection()
 
-        cut_action = menu.addAction("剪切")
+        cut_action = menu.addAction(t("edit.cut"))
         cut_action.setEnabled(has_selection)
 
-        copy_action = menu.addAction("复制")
+        copy_action = menu.addAction(t("edit.copy"))
         copy_action.setEnabled(has_selection)
 
-        paste_action = menu.addAction("粘贴")
+        paste_action = menu.addAction(t("edit.paste"))
         paste_action.setEnabled(self._content_edit.canPaste())
 
         menu.addSeparator()
 
-        select_all_action = menu.addAction("全选")
+        select_all_action = menu.addAction(t("edit.selectAll"))
         select_all_action.setEnabled(not self._content_edit.document().isEmpty())
 
         menu.addSeparator()
 
         # Window operations
-        close_action = menu.addAction("✕ 关闭")
+        close_action = menu.addAction(t("sticky.menu.close"))
 
         global_pos = self._content_edit.mapToGlobal(pos)
         action = menu.exec(global_pos)

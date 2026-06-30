@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.config import MODEL_TEMPLATES, cfg
+from app.i18n import t
 
 
 class LiteLLMTemplateDialog(QDialog):
@@ -17,7 +18,7 @@ class LiteLLMTemplateDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("从模板添加模型")
+        self.setWindowTitle(t("litellm.template.title"))
         self.setMinimumWidth(400)
         self.setMinimumHeight(350)
         self._build()
@@ -27,13 +28,13 @@ class LiteLLMTemplateDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Provider 选择
-        layout.addWidget(QLabel("选择厂商:"))
+        layout.addWidget(QLabel(t("litellm.template.select_provider")))
         self._provider_combo = QComboBox()
         self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
         layout.addWidget(self._provider_combo)
 
         # 模型列表（多选）
-        layout.addWidget(QLabel("选择要添加的模型（可多选）:"))
+        layout.addWidget(QLabel(t("litellm.template.select_models")))
         self._model_list = QListWidget()
         self._model_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         layout.addWidget(self._model_list)
@@ -81,7 +82,7 @@ class LiteLLMTemplateDialog(QDialog):
         selected_items = self._model_list.selectedItems()
 
         if not selected_items:
-            QMessageBox.warning(self, "未选择模型", "请至少选择一个模型")
+            QMessageBox.warning(self, t("litellm.template.no_selection_title"), t("litellm.template.no_selection_body"))
             return
 
         provider = self._provider_combo.currentData()
@@ -94,7 +95,7 @@ class LiteLLMTemplateDialog(QDialog):
         for item in selected_items:
             model_data = item.data(Qt.ItemDataRole.UserRole)
             if model_data["id"] in existing_ids:
-                errors.append(f"模型 {model_data['id']} 已存在")
+                errors.append(t("litellm.template.err_exists", model_id=model_data['id']))
                 continue
             models.append({
                 "id": model_data["id"],
@@ -109,12 +110,12 @@ class LiteLLMTemplateDialog(QDialog):
         if errors:
             QMessageBox.warning(
                 self,
-                "部分添加失败",
-                f"成功添加 {added_count} 个模型\n\n失败:\n" + "\n".join(errors),
+                t("litellm.template.partial_fail_title"),
+                t("litellm.template.partial_fail_body", count=added_count) + "\n".join(errors),
             )
         else:
             QMessageBox.information(
-                self, "添加成功", f"成功添加 {added_count} 个模型"
+                self, t("litellm.template.success_title"), t("litellm.template.success_body", count=added_count)
             )
 
         self.accept()

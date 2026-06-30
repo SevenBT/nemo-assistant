@@ -5,15 +5,31 @@ from PyQt6.QtCore import QObject
 from app.core.agent_loop import AgentLoop
 from app.core.audit_hooks import EvalHook, SecurityAuditHook
 from app.core.config import cfg
+from app.i18n import t, all_translations
 from app.models.message import Message, MessageRole, ToolCall
-from app.models.session import DEFAULT_SESSION_TITLE, SOURCE_MANUAL, SOURCE_READING
+from app.models.session import (
+    default_session_title,
+    is_default_session_title,
+    SOURCE_MANUAL,
+    SOURCE_READING,
+)
 from app.ui.manual_params_dialog import ManualParamsDialog
 from app.ui.session_settings_dialog import SessionSettingsDialog
 
-_CANCELLED_MARKER = "（已取消）"
 
-# 划词「连续解释」的快速会话标题。
-READING_SESSION_TITLE = "快速会话"
+def _cancelled_marker() -> str:
+    """「已取消」标记（按当前语言）。"""
+    return t("chat.cancelled")
+
+
+def reading_session_title() -> str:
+    """划词「连续解释」快速会话的默认标题（按当前语言）。"""
+    return t("session.reading.defaultTitle")
+
+
+def is_reading_session_title(title: str) -> bool:
+    """是否仍是快速会话默认标题——兼容任何语言写入的旧数据。"""
+    return title in all_translations("session.reading.defaultTitle")
 
 
 class ChatSessionController(QObject):
@@ -105,7 +121,7 @@ class ChatSessionController(QObject):
 
         if source == SOURCE_READING:
             session = self._sessions.create(
-                title=READING_SESSION_TITLE, source=SOURCE_READING
+                title=reading_session_title(), source=SOURCE_READING
             )
         else:
             session = self._sessions.create()
@@ -118,17 +134,17 @@ class ChatSessionController(QObject):
     def _find_blank_session(self, source: str):
         """返回该来源下首个空白会话（无消息且仍是默认标题），没有则 None。
 
-        reading 来源用 READING_SESSION_TITLE 作默认标题，manual 用
-        DEFAULT_SESSION_TITLE；标题被改过或已有消息都视为非空白，不复用。
+        reading 来源用快速会话默认标题，manual 用普通默认标题；标题被改过
+        或已有消息都视为非空白，不复用。默认标题判断兼容任何语言写入的旧数据。
         """
-        default_title = (
-            READING_SESSION_TITLE if source == SOURCE_READING
-            else DEFAULT_SESSION_TITLE
+        is_default = (
+            is_reading_session_title if source == SOURCE_READING
+            else is_default_session_title
         )
         for s in self._sessions.get_sessions():
             if s.source != source:
                 continue
-            if not s.messages and s.title == default_title:
+            if not s.messages and is_default(s.title):
                 return s
         return None
 
@@ -614,11 +630,12 @@ class ChatSessionController(QObject):
 
     def _cancelled_content(self, text: str) -> str:
         text = text.rstrip()
-        if text.endswith(_CANCELLED_MARKER):
+        marker = _cancelled_marker()
+        if text.endswith(marker):
             return text
         if text:
-            return f"{text}\n\n{_CANCELLED_MARKER}"
-        return _CANCELLED_MARKER
+            return f"{text}\n\n{marker}"
+        return marker
 
     def _release_cancelled_worker(self, worker: AgentLoop):
         try:
@@ -629,10 +646,7 @@ class ChatSessionController(QObject):
     def _format_error(self, error_msg: str | None) -> str:
         hint = ""
         if error_msg and "404" in error_msg:
-            hint = (
-                "\n\n提示：请在设置中检查默认模型的 API 地址和模型名称"
-                f"（当前模型: {cfg.get(cfg.litellmDefaultModel)}）"
-            )
+            hint = t("chat.error.hint404", model=cfg.get(cfg.litellmDefaultModel))
         elif error_msg and ("401" in error_msg or "Unauthorized" in error_msg):
-            hint = "\n\n提示：API Key 无效，请在设置中重新填写"
-        return f"❌ 请求失败：{error_msg}{hint}"
+            hint = t("chat.error.hint401")
+        return t("chat.error.requestFailed", error=error_msg, hint=hint)

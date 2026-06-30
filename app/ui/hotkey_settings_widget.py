@@ -18,12 +18,15 @@ try:
 except ImportError:
     _KB_OK = False
 
+from app.i18n import t
+
+# (action id, i18n key) — 标签运行时按当前语言取（语言在启动时锁定）。
 _ACTIONS = [
-    ("screenshot",    "截图"),
-    ("new_note",      "新建便签"),
-    ("toggle_window", "显示/隐藏窗口"),
-    ("quick_ask",     "快速提问"),
-    ("selection",     "划词动作"),
+    ("screenshot",    "hotkeys.action.screenshot"),
+    ("new_note",      "hotkeys.action.newNote"),
+    ("toggle_window", "hotkeys.action.toggleWindow"),
+    ("quick_ask",     "hotkeys.action.quickAsk"),
+    ("selection",     "hotkeys.action.selection"),
 ]
 
 # 录制单个快捷键的最长等待（毫秒）；超时自动取消，避免 suppress 录制卡死吞键。
@@ -36,23 +39,23 @@ _MODIFIERS = {"ctrl", "control", "alt", "shift", "win", "windows", "cmd"}
 def _validate_combo(combo: str) -> str:
     """校验录入的组合键，返回错误信息；合法返回空串。"""
     if not combo:
-        return "未捕获到有效按键"
+        return t("hotkeys.err.noKey")
     parts = [p.strip().lower() for p in combo.split("+") if p.strip()]
     if not parts:
-        return "未捕获到有效按键"
+        return t("hotkeys.err.noKey")
     has_modifier = any(p in _MODIFIERS for p in parts)
     has_normal = any(p not in _MODIFIERS for p in parts)
     if not has_modifier:
-        return "快捷键必须包含至少一个修饰键（Ctrl / Alt / Shift / Win）"
+        return t("hotkeys.err.needModifier")
     if not has_normal:
-        return "快捷键不能只有修饰键，请再按一个普通键"
+        return t("hotkeys.err.needNormal")
     return ""
 
 
 def _fmt(combo: str) -> str:
     """'ctrl+alt+a' → 'Ctrl+Alt+A'"""
     if not combo:
-        return "（未设置）"
+        return t("hotkeys.unset")
 
     def _cap(part: str) -> str:
         low = part.lower()
@@ -128,7 +131,7 @@ class _HotkeyRow(QWidget):
         self._combo_lbl.setMinimumWidth(160)
         self._combo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self._btn = QPushButton("修改")
+        self._btn = QPushButton(t("hotkeys.modify"))
         self._btn.setFixedWidth(64)
         self._btn.clicked.connect(self._on_modify)
 
@@ -152,7 +155,7 @@ class _HotkeyRow(QWidget):
     def _on_modify(self):
         self._btn.setEnabled(False)
         self._btn.setText("…")
-        self._combo_lbl.setText("按下快捷键（Esc 取消）")
+        self._combo_lbl.setText(t("hotkeys.pressPrompt"))
         self._capturing = True
         if self._hotkey_mgr:
             self._hotkey_mgr.stop()
@@ -182,7 +185,7 @@ class _HotkeyRow(QWidget):
         if hasattr(self, "_timeout"):
             self._timeout.stop()
         self._btn.setEnabled(True)
-        self._btn.setText("修改")
+        self._btn.setText(t("hotkeys.modify"))
 
         if not combo:
             # 用户取消或超时：保持原值。
@@ -195,10 +198,10 @@ class _HotkeyRow(QWidget):
         if not error and self.conflict_checker:
             conflict_label = self.conflict_checker(self._action, combo)
             if conflict_label:
-                error = f"该快捷键已被「{conflict_label}」占用"
+                error = t("hotkeys.err.occupied", label=conflict_label)
 
         if error:
-            QMessageBox.warning(self, "快捷键无效", error)
+            QMessageBox.warning(self, t("hotkeys.err.invalidTitle"), error)
             self._combo_lbl.setText(_fmt(self._combo))
             if self._hotkey_mgr:
                 self._hotkey_mgr.reload()
@@ -227,22 +230,22 @@ class HotkeySettingsWidget(QWidget):
         hotkeys = self._config.hotkeys
         form = QFormLayout()
 
-        for action, label in _ACTIONS:
+        for action, label_key in _ACTIONS:
             combo = hotkeys.get(action, "")
             row = _HotkeyRow(action, combo, self._hotkey_mgr)
             row.conflict_checker = self._find_conflict
             self._rows.append(row)
-            form.addRow(label + ":", row)
+            form.addRow(t(label_key) + ":", row)
 
         layout.addLayout(form)
         layout.addStretch()
 
-        reset_btn = QPushButton("恢复默认")
+        reset_btn = QPushButton(t("hotkeys.restoreDefault"))
         reset_btn.clicked.connect(self._reset_defaults)
         layout.addWidget(reset_btn, alignment=Qt.AlignmentFlag.AlignRight)
 
         if not _KB_OK:
-            warn = QLabel("⚠ keyboard 库未安装，全局快捷键不可用")
+            warn = QLabel(t("hotkeys.kbMissing"))
             warn.setStyleSheet("color: orange;")
             layout.insertWidget(0, warn)
 
@@ -257,12 +260,12 @@ class HotkeySettingsWidget(QWidget):
 
     # ------------------------------------------------------------------ private
     def _find_conflict(self, action: str, combo: str) -> str | None:
-        """若 combo 已被其它 action 占用，返回那个 action 的中文标签；否则 None。"""
+        """若 combo 已被其它 action 占用，返回那个 action 的标签；否则 None。"""
         norm = combo.strip().lower()
         labels = dict(_ACTIONS)
         for row in self._rows:
             if row.action != action and row.current_combo.strip().lower() == norm:
-                return labels.get(row.action, row.action)
+                return t(labels.get(row.action, row.action))
         return None
 
     def _warn_failed_registrations(self):
@@ -271,11 +274,11 @@ class HotkeySettingsWidget(QWidget):
         if not failed:
             return
         labels = dict(_ACTIONS)
-        names = "、".join(labels.get(a, a) for a in failed)
+        names = "、".join(t(labels.get(a, a)) for a in failed)
         QMessageBox.warning(
             self,
-            "快捷键注册失败",
-            f"以下快捷键注册失败（可能被其它程序占用）：\n{names}\n\n请尝试换一组组合键。",
+            t("hotkeys.err.registerFailedTitle"),
+            t("hotkeys.err.registerFailedBody", names=names),
         )
 
     def _reset_defaults(self):

@@ -11,6 +11,7 @@ from typing import Any, TYPE_CHECKING
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Int, Str, tool_params
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.core.memory_manager import MemoryManager
@@ -33,30 +34,24 @@ class MemoryTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return (
-            "管理长期记忆（用户偏好、项目决策、重要事实等），保存的内容会在后续对话中"
-            "自动作为上下文提供给你。\n"
-            "- action=save：保存一条记忆，需 content + category，可选 scope/importance\n"
-            "- action=recall：查看已保存的记忆，可选 category/scope 过滤\n"
-            "- action=forget：删除一条记忆，需 memory_id"
-        )
+        return t("tool.memory.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "action",
-            action=Str("操作类型", enum=["save", "recall", "forget"]),
-            content=Str("action=save 时必填，记忆内容，简洁明确的一句话"),
+            action=Str(t("tool.memory.param.action"), enum=["save", "recall", "forget"]),
+            content=Str(t("tool.memory.param.content")),
             category=Str(
-                "记忆分类（save 必填，recall 可用于过滤）",
+                t("tool.memory.param.category"),
                 enum=["personality", "user", "project", "fact"],
             ),
             scope=Str(
-                "记忆范围：global=所有会话可见，session=仅当前会话可见（默认 global）",
+                t("tool.memory.param.scope"),
                 enum=["global", "session"],
             ),
-            importance=Int("重要性 1-10，默认 5（save 用）", minimum=1, maximum=10),
-            memory_id=Int("action=forget 时必填，要删除的记忆 ID"),
+            importance=Int(t("tool.memory.param.importance"), minimum=1, maximum=10),
+            memory_id=Int(t("tool.memory.param.memory_id")),
         )
 
     def execute(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -69,16 +64,16 @@ class MemoryTool(BuiltinTool):
             return self._forget(params)
         return {
             "status": "error",
-            "data": {"message": f"未知 action: {action}，应为 save/recall/forget"},
+            "data": {"message": t("tool.memory.msg.unknown_action", action=action)},
         }
 
     def _save(self, params: dict[str, Any]) -> dict[str, Any]:
         content = params.get("content")
         if not content:
-            return {"status": "error", "data": {"message": "action=save 需要 content"}}
+            return {"status": "error", "data": {"message": t("tool.memory.msg.save_needs_content")}}
         category = params.get("category")
         if not category:
-            return {"status": "error", "data": {"message": "action=save 需要 category"}}
+            return {"status": "error", "data": {"message": t("tool.memory.msg.save_needs_category")}}
         scope = params.get("scope", "global")
         importance = params.get("importance", 5)
         session_id = params.get("_session_id")  # 由 AgentLoop 注入
@@ -93,7 +88,7 @@ class MemoryTool(BuiltinTool):
         )
         return {
             "status": "success",
-            "data": {"id": memory.id, "message": f"已保存记忆: {content[:50]}"},
+            "data": {"id": memory.id, "message": t("tool.memory.msg.saved", content=content[:50])},
         }
 
     def _recall(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -118,8 +113,8 @@ class MemoryTool(BuiltinTool):
     def _forget(self, params: dict[str, Any]) -> dict[str, Any]:
         memory_id = params.get("memory_id")
         if memory_id is None:
-            return {"status": "error", "data": {"message": "action=forget 需要 memory_id"}}
+            return {"status": "error", "data": {"message": t("tool.memory.msg.forget_needs_id")}}
         deleted = self._mem.delete(memory_id)
         if deleted:
-            return {"status": "success", "data": {"message": f"已删除记忆 #{memory_id}"}}
-        return {"status": "error", "data": {"message": f"记忆 #{memory_id} 不存在"}}
+            return {"status": "success", "data": {"message": t("tool.memory.msg.deleted", memory_id=memory_id)}}
+        return {"status": "error", "data": {"message": t("tool.memory.msg.not_found", memory_id=memory_id)}}

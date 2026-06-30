@@ -14,6 +14,7 @@ from typing import Any
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Num, Str, tool_params
+from app.i18n import t
 
 # 默认最大读取字符数
 _MAX_DEFAULT = 50_000
@@ -28,14 +29,14 @@ class ReadFileTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "读取本地文本文件内容，支持 txt、md、py、json、csv 等格式"
+        return t("tool.read_file.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "file_path",  # file_path 是必填参数
-            file_path=Str("文件绝对路径，或以 ~/ 开头的路径"),
-            max_chars=Num("最大读取字符数，默认 50000"),
+            file_path=Str(t("tool.read_file.param.file_path")),
+            max_chars=Num(t("tool.read_file.param.max_chars")),
         )
 
     @property
@@ -54,9 +55,9 @@ class ReadFileTool(BuiltinTool):
         path = Path(raw_path).expanduser()
 
         if not path.exists():
-            return {"status": "error", "data": {"message": f"文件不存在: {path}"}}
+            return {"status": "error", "data": {"message": t("tool.read_file.msg.not_found", path=path)}}
         if not path.is_file():
-            return {"status": "error", "data": {"message": f"路径不是文件: {path}"}}
+            return {"status": "error", "data": {"message": t("tool.read_file.msg.not_a_file", path=path)}}
 
         file_size = path.stat().st_size
 
@@ -70,7 +71,7 @@ class ReadFileTool(BuiltinTool):
                 continue
 
         if content is None:
-            return {"status": "error", "data": {"message": "无法解码文件，可能是二进制文件"}}
+            return {"status": "error", "data": {"message": t("tool.read_file.msg.decode_failed")}}
 
         # 超长截断
         truncated = len(content) > max_chars

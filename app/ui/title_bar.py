@@ -23,6 +23,7 @@ from qfluentwidgets import (
     Action,
 )
 from app.ui.components.context_menu import ContextMenu
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.ui.main_window import MainWindow
@@ -99,18 +100,18 @@ class TitleBar(QWidget):
         top_layout.addStretch()
 
         self._min_btn = self._make_tool_btn(
-            FluentIcon.MINIMIZE, "最小化", self._win._minimize
+            FluentIcon.MINIMIZE, t("titlebar.minimize"), self._win._minimize
         )
         top_layout.addWidget(self._min_btn)
 
         self._max_btn = self._make_tool_btn(
-            FluentIcon.FULL_SCREEN, "最大化", self._win._toggle_maximize
+            FluentIcon.FULL_SCREEN, t("titlebar.maximize"), self._win._toggle_maximize
         )
         top_layout.addWidget(self._max_btn)
 
 
         self._close_btn = self._make_tool_btn(
-            FluentIcon.CLOSE, "关闭到托盘", self._win._hide_to_tray
+            FluentIcon.CLOSE, t("titlebar.closeToTray"), self._win._hide_to_tray
         )
         top_layout.addWidget(self._close_btn)
 
@@ -126,37 +127,37 @@ class TitleBar(QWidget):
         # ── Left: toggle + search (view-specific) ─────────────────────
         # Chat controls
         self._chat_toggle = self._make_tool_btn(
-            FluentIcon.MENU, "显示/隐藏会话列表", self._win._toggle_session_panel
+            FluentIcon.MENU, t("titlebar.toggleSessionList"), self._win._toggle_session_panel
         )
         nav_layout.addWidget(self._chat_toggle)
         nav_layout.addSpacing(4)
 
-        self._chat_search = self._make_search("搜索会话...", self.session_search_changed)
+        self._chat_search = self._make_search(t("titlebar.searchSessions"), self.session_search_changed)
         self._chat_search.setFixedWidth(180)
         nav_layout.addWidget(self._chat_search)
 
         # Notes controls
         self._notes_toggle = self._make_tool_btn(
-            FluentIcon.MENU, "显示/隐藏笔记列表", lambda: self._win._notes_panel.toggle_list()
+            FluentIcon.MENU, t("titlebar.toggleNotesList"), lambda: self._win._notes_panel.toggle_list()
         )
         self._notes_toggle.hide()
         nav_layout.addWidget(self._notes_toggle)
         nav_layout.addSpacing(4)
 
-        self._notes_search = self._make_search("搜索笔记...", self.notes_search_changed)
+        self._notes_search = self._make_search(t("titlebar.searchNotes"), self.notes_search_changed)
         self._notes_search.setFixedWidth(180)
         self._notes_search.hide()
         nav_layout.addWidget(self._notes_search)
 
         # Workshop controls
         self._workshop_toggle = self._make_tool_btn(
-            FluentIcon.MENU, "显示/隐藏工具列表", lambda: self._win._toolbox_panel.toggle_list()
+            FluentIcon.MENU, t("titlebar.toggleToolList"), lambda: self._win._toolbox_panel.toggle_list()
         )
         self._workshop_toggle.hide()
         nav_layout.addWidget(self._workshop_toggle)
         nav_layout.addSpacing(4)
 
-        self._workshop_search = self._make_search("搜索工具...", self.workshop_search_changed)
+        self._workshop_search = self._make_search(t("titlebar.searchTools"), self.workshop_search_changed)
         self._workshop_search.setFixedWidth(180)
         self._workshop_search.hide()
         nav_layout.addWidget(self._workshop_search)
@@ -169,16 +170,16 @@ class TitleBar(QWidget):
         self._nav.setSizePolicy(
             QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         )
-        self._nav.addItem("chat", "聊天", icon=FluentIcon.CHAT)
-        self._nav.addItem("notes", "笔记", icon=FluentIcon.EDIT)
-        self._nav.addItem("workshop", "工坊", icon=FluentIcon.DEVELOPER_TOOLS)
+        self._nav.addItem("chat", t("nav.chat"), icon=FluentIcon.CHAT)
+        self._nav.addItem("notes", t("nav.notes"), icon=FluentIcon.EDIT)
+        self._nav.addItem("workshop", t("nav.workshop"), icon=FluentIcon.DEVELOPER_TOOLS)
         self._nav.setCurrentItem("chat")
         self._nav.currentItemChanged.connect(self._on_nav_changed)
         nav_layout.addWidget(self._nav)
 
         nav_layout.addSpacing(8)
         self._screenshot_btn = self._make_tool_btn(
-            FluentIcon.CLIPPING_TOOL, "截图", self._win._start_screenshot
+            FluentIcon.CLIPPING_TOOL, t("titlebar.screenshot"), self._win._start_screenshot
         )
         nav_layout.addWidget(self._screenshot_btn)
 
@@ -250,13 +251,13 @@ class TitleBar(QWidget):
     def _show_context_menu(self, global_pos):
         menu = ContextMenu(parent=self)
 
-        menu.addAction(Action(FluentIcon.CLIPPING_TOOL, "截图", triggered=self._win._start_screenshot))
-        menu.addAction(Action(FluentIcon.SETTING, "设置", triggered=self._win._open_settings))
+        menu.addAction(Action(FluentIcon.CLIPPING_TOOL, t("titlebar.menu.screenshot"), triggered=self._win._start_screenshot))
+        menu.addAction(Action(FluentIcon.SETTING, t("titlebar.menu.settings"), triggered=self._win._open_settings))
         menu.addSeparator()
 
-        menu.addAction(Action(FluentIcon.MINIMIZE, "最小化到托盘", triggered=self._win._hide_to_tray))
+        menu.addAction(Action(FluentIcon.MINIMIZE, t("titlebar.menu.minimizeToTray"), triggered=self._win._hide_to_tray))
         menu.addSeparator()
-        menu.addAction(Action(FluentIcon.CLOSE, "退出", triggered=self._win._on_quit))
+        menu.addAction(Action(FluentIcon.CLOSE, t("titlebar.menu.quit"), triggered=self._win._on_quit))
 
         menu.exec(global_pos)
 
@@ -264,10 +265,10 @@ class TitleBar(QWidget):
         """Update the maximize/restore button icon and tooltip."""
         if is_maximized:
             self._max_btn.setIcon(FluentIcon.BACK_TO_WINDOW)
-            self._max_btn.setToolTip("还原")
+            self._max_btn.setToolTip(t("titlebar.restore"))
         else:
             self._max_btn.setIcon(FluentIcon.FULL_SCREEN)
-            self._max_btn.setToolTip("最大化")
+            self._max_btn.setToolTip(t("titlebar.maximize"))
 
     def mouseDoubleClickEvent(self, e: QMouseEvent):
         """双击标题栏切换最大化/还原"""

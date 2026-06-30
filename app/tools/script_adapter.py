@@ -31,6 +31,7 @@ from typing import Any
 from app.tools.base import BuiltinTool
 from app.core.tool_deps import ToolDependencyManager
 from app.tools.registry import ToolErrorType
+from app.i18n import t
 
 # 脚本执行超时时间（秒）
 _TOOL_TIMEOUT = 60
@@ -152,7 +153,7 @@ class ScriptToolAdapter(BuiltinTool):
                 return {
                     "status": "error",
                     "data": {
-                        "message": f"依赖安装失败: {err}",
+                        "message": t("tool.script_adapter.msg.deps_install_failed", error=err),
                         "error_type": ToolErrorType.RUNTIME.value,
                         "retryable": False,
                     },
@@ -185,7 +186,7 @@ class ScriptToolAdapter(BuiltinTool):
             return {
                 "status": "error",
                 "data": {
-                    "message": f"执行超时 ({_TOOL_TIMEOUT}s)",
+                    "message": t("tool.script_adapter.msg.timeout", timeout=_TOOL_TIMEOUT),
                     "error_type": ToolErrorType.TIMEOUT.value,
                     "retryable": True,
                 },
@@ -277,7 +278,7 @@ class ScriptToolAdapter(BuiltinTool):
         script_resolved = (tool_dir / manifest.get("script", "tool.py")).resolve()
         if not script_resolved.is_relative_to(tool_dir):
             raise ValueError(
-                f"script 路径越界，必须在工具目录内: {manifest.get('script')!r}"
+                t("tool.script_adapter.msg.script_out_of_bounds", script=manifest.get('script'))
             )
         script_path = str(script_resolved)
 

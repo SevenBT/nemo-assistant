@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.config import cfg
+from app.i18n import t
 
 
 class LiteLLMModelEditDialog(QDialog):
@@ -20,7 +21,7 @@ class LiteLLMModelEditDialog(QDialog):
         self._model_id = model_id  # None 表示添加，否则表示编辑
         self._is_edit_mode = model_id is not None
 
-        self.setWindowTitle("编辑模型" if self._is_edit_mode else "添加自定义模型")
+        self.setWindowTitle(t("litellm.model.title_edit") if self._is_edit_mode else t("litellm.model.title_add"))
         self.setMinimumWidth(400)
         self._build()
         if self._is_edit_mode:
@@ -32,18 +33,18 @@ class LiteLLMModelEditDialog(QDialog):
 
         # Model ID
         self._model_id_input = QLineEdit()
-        self._model_id_input.setPlaceholderText("例如: gpt-4o, claude-3-opus")
+        self._model_id_input.setPlaceholderText(t("litellm.model.model_id_ph"))
         form.addRow("Model ID:", self._model_id_input)
 
         # 显示名称
         self._name_input = QLineEdit()
-        self._name_input.setPlaceholderText("例如: GPT-4o, Claude 3 Opus")
-        form.addRow("显示名称:", self._name_input)
+        self._name_input.setPlaceholderText(t("litellm.model.display_name_ph"))
+        form.addRow(t("litellm.model.display_name"), self._name_input)
 
         # Provider（可编辑下拉框）
         self._provider_combo = QComboBox()
         self._provider_combo.setEditable(True)
-        self._provider_combo.setPlaceholderText("选择或输入 provider")
+        self._provider_combo.setPlaceholderText(t("litellm.model.provider_ph"))
         # 添加常见的 provider
         for provider in ["openai", "anthropic", "google", "deepseek", "azure", "cohere"]:
             self._provider_combo.addItem(provider.capitalize(), provider)
@@ -51,11 +52,11 @@ class LiteLLMModelEditDialog(QDialog):
 
         # API 地址（可选）：自定义端点 / 中转 / 兼容服务，留空走该 provider 默认
         self._api_base_input = QLineEdit()
-        self._api_base_input.setPlaceholderText("可选，如 https://api.deepseek.com/v1")
-        form.addRow("API 地址:", self._api_base_input)
+        self._api_base_input.setPlaceholderText(t("litellm.model.api_base_ph"))
+        form.addRow(t("litellm.model.api_base"), self._api_base_input)
 
         # 启用状态
-        self._enabled_checkbox = QCheckBox("启用此模型用于多模型调用")
+        self._enabled_checkbox = QCheckBox(t("litellm.model.enable"))
         form.addRow("", self._enabled_checkbox)
 
         layout.addLayout(form)
@@ -73,7 +74,7 @@ class LiteLLMModelEditDialog(QDialog):
         models = cfg.get(cfg.litellmModels)
         model = next((m for m in models if m["id"] == self._model_id), None)
         if not model:
-            QMessageBox.critical(self, "错误", f"模型 {self._model_id} 不存在")
+            QMessageBox.critical(self, t("litellm.model.err_title"), t("litellm.model.err_not_exist", model_id=self._model_id))
             self.reject()
             return
 
@@ -101,13 +102,13 @@ class LiteLLMModelEditDialog(QDialog):
 
         # 验证输入
         if not model_id:
-            QMessageBox.warning(self, "输入错误", "Model ID 不能为空")
+            QMessageBox.warning(self, t("litellm.model.input_err_title"), t("litellm.model.err_no_id"))
             return
         if not name:
-            QMessageBox.warning(self, "输入错误", "显示名称不能为空")
+            QMessageBox.warning(self, t("litellm.model.input_err_title"), t("litellm.model.err_no_name"))
             return
         if not provider:
-            QMessageBox.warning(self, "输入错误", "Provider 不能为空")
+            QMessageBox.warning(self, t("litellm.model.input_err_title"), t("litellm.model.err_no_provider"))
             return
 
         try:
@@ -115,7 +116,7 @@ class LiteLLMModelEditDialog(QDialog):
             if self._is_edit_mode:
                 old_model_id = self._model_id or ""
                 if model_id != old_model_id and any(m["id"] == model_id for m in models):
-                    raise ValueError(f"模型 {model_id} 已存在")
+                    raise ValueError(t("litellm.model.err_exists", model_id=model_id))
 
                 for m in models:
                     if m["id"] == old_model_id:
@@ -128,11 +129,11 @@ class LiteLLMModelEditDialog(QDialog):
                 cfg.set(cfg.litellmModels, models)
                 if cfg.get(cfg.litellmDefaultModel) == old_model_id:
                     cfg.set(cfg.litellmDefaultModel, model_id)
-                QMessageBox.information(self, "成功", "模型更新成功")
+                QMessageBox.information(self, t("litellm.model.success_title"), t("litellm.model.update_ok"))
             else:
                 # 添加模式：检查重复
                 if any(m["id"] == model_id for m in models):
-                    raise ValueError(f"模型 {model_id} 已存在")
+                    raise ValueError(t("litellm.model.err_exists", model_id=model_id))
                 models.append({
                     "id": model_id,
                     "name": name,
@@ -141,9 +142,9 @@ class LiteLLMModelEditDialog(QDialog):
                     "enabled": enabled,
                 })
                 cfg.set(cfg.litellmModels, models)
-                QMessageBox.information(self, "成功", "模型添加成功")
+                QMessageBox.information(self, t("litellm.model.success_title"), t("litellm.model.add_ok"))
 
             self.accept()
 
         except ValueError as e:
-            QMessageBox.critical(self, "错误", str(e))
+            QMessageBox.critical(self, t("litellm.model.err_title"), str(e))

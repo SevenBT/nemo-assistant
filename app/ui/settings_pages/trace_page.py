@@ -39,19 +39,25 @@ from qfluentwidgets import (
     setFont,
 )
 
-# 状态 → (文案, 语义色)。语义色固定不随主题，对齐 InfoBadge 内部用色。
+from app.i18n import t
+
+# 状态 → (i18n key, 语义色)。语义色固定不随主题，对齐 InfoBadge 内部用色。
+# 文案存 key，在 _status_meta 运行时取（语言启动后才锁定）。
 _STATUS = {
-    "ok": ("成功", "#2e9e5b"),
-    "error": ("失败", "#d03050"),
-    "cancelled": ("已取消", "#9aa0a6"),
-    "running": ("运行中", "#5b8def"),
+    "ok": ("settings.trace.status_ok", "#2e9e5b"),
+    "error": ("settings.trace.status_error", "#d03050"),
+    "cancelled": ("settings.trace.status_cancelled", "#9aa0a6"),
+    "running": ("settings.trace.status_running", "#5b8def"),
 }
 
 _MAX_TURNS = 100
 
 
 def _status_meta(status: str) -> tuple[str, str]:
-    return _STATUS.get(status, (status or "?", "#9aa0a6"))
+    entry = _STATUS.get(status)
+    if entry is None:
+        return (status or "?", "#9aa0a6")
+    return (t(entry[0]), entry[1])
 
 
 class TracePage(QWidget):
@@ -71,33 +77,33 @@ class TracePage(QWidget):
         layout.setSpacing(10)
 
         header = QHBoxLayout()
-        header.addWidget(StrongBodyLabel("运行记录", self))
+        header.addWidget(StrongBodyLabel(t("settings.trace.title"), self))
         header.addStretch()
-        self._save_case_btn = PushButton(FluentIcon.HEART, "存为回归用例", self)
+        self._save_case_btn = PushButton(FluentIcon.HEART, t("settings.trace.save_case"), self)
         self._save_case_btn.setToolTip(
-            "把当前选中的这条运行存为回归用例，下次跑回归时重跑。"
+            t("settings.trace.save_case_tip")
         )
         self._save_case_btn.clicked.connect(self._on_save_case)
         self._save_case_btn.setEnabled(False)
         header.addWidget(self._save_case_btn)
-        self._score_btn = PushButton(FluentIcon.CERTIFICATE, "打分", self)
+        self._score_btn = PushButton(FluentIcon.CERTIFICATE, t("settings.trace.score"), self)
         self._score_btn.setToolTip(
-            "对所有未打分的评测样本做离线规则评测，把分数写回。"
+            t("settings.trace.score_tip")
         )
         self._score_btn.clicked.connect(self._on_score)
         header.addWidget(self._score_btn)
-        self._refresh_btn = PushButton(FluentIcon.SYNC, "刷新", self)
+        self._refresh_btn = PushButton(FluentIcon.SYNC, t("settings.trace.refresh"), self)
         self._refresh_btn.clicked.connect(self.reload)
         header.addWidget(self._refresh_btn)
         layout.addLayout(header)
 
         hint = CaptionLabel(
-            "每次对话运行的全链路记录。点击左侧条目查看详情。", self
+            t("settings.trace.hint"), self
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        self._empty = BodyLabel("暂无运行记录。", self)
+        self._empty = BodyLabel(t("settings.trace.empty"), self)
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty.setWordWrap(True)
         layout.addWidget(self._empty, 1)
@@ -123,7 +129,7 @@ class TracePage(QWidget):
         self._detail.clear()
         if self._store is None or not getattr(self._store, "enabled", False):
             self._turns = []
-            self._set_empty(True, "遥测未启用，无运行记录。")
+            self._set_empty(True, t("settings.trace.disabled"))
             return
         self._turns = self._store.list_turns(limit=_MAX_TURNS)
         self._set_empty(not self._turns)
@@ -139,11 +145,11 @@ class TracePage(QWidget):
         from app.eval import scorer
 
         self._score_btn.setEnabled(False)
-        self._score_btn.setText("打分中…")
+        self._score_btn.setText(t("settings.trace.scoring"))
         try:
             n = scorer.score_unscored_samples(self._store)
         finally:
-            self._score_btn.setText("打分")
+            self._score_btn.setText(t("settings.trace.score"))
             self._score_btn.setEnabled(True)
         # 重渲染当前选中详情，让新分数立即显示。
         row = self._list.currentRow()
@@ -151,10 +157,10 @@ class TracePage(QWidget):
             self._on_select(row)
         from app.ui.toast import show_toast
 
-        show_toast("评测打分", f"已为 {n} 条样本打分" if n else "没有待打分的样本")
+        show_toast(t("settings.trace.score_toast_title"), t("settings.trace.score_toast_done", n=n) if n else t("settings.trace.score_toast_none"))
 
-    def _set_empty(self, is_empty: bool, message: str = "暂无运行记录。"):
-        self._empty.setText(message)
+    def _set_empty(self, is_empty: bool, message: str = ""):
+        self._empty.setText(message or t("settings.trace.empty"))
         self._empty.setVisible(is_empty)
         self._body_container.setVisible(not is_empty)
 
@@ -194,7 +200,7 @@ class TracePage(QWidget):
         user_input = _first_user_input(self._session_mgr, session_id)
         if not user_input:
             from app.ui.toast import show_toast
-            show_toast("存为回归用例", "无法从会话中提取用户输入")
+            show_toast(t("settings.trace.save_case_toast_title"), t("settings.trace.save_case_no_input"))
             return
         from app.eval import cases
         from app.ui.toast import show_toast
@@ -203,9 +209,9 @@ class TracePage(QWidget):
             self._store, trace_id, user_input=user_input
         )
         if case_id:
-            show_toast("存为回归用例", "已加入回归集")
+            show_toast(t("settings.trace.save_case_toast_title"), t("settings.trace.save_case_done"))
         else:
-            show_toast("存为回归用例", "保存失败")
+            show_toast(t("settings.trace.save_case_toast_title"), t("settings.trace.save_case_failed"))
 
 
 # ── 列表行 ──────────────────────────────────────────────────────────────
@@ -259,11 +265,11 @@ class _TurnDetailView(QWidget):
     """单次运行详情：顶部概览卡，下方 SegmentedWidget 分页。"""
 
     _TABS = [
-        ("llm", "LLM 调用"),
-        ("tools", "工具调用"),
-        ("security", "安全审计"),
-        ("eval", "评测样本"),
-        ("state", "状态机"),
+        ("llm", "settings.trace.tab_llm"),
+        ("tools", "settings.trace.tab_tools"),
+        ("security", "settings.trace.tab_security"),
+        ("eval", "settings.trace.tab_eval"),
+        ("state", "settings.trace.tab_state"),
     ]
 
     def __init__(self, parent=None):
@@ -289,9 +295,9 @@ class _TurnDetailView(QWidget):
             page = _CardListPage(self)
             self._pages[key] = page
             self._stack.addWidget(page)
-            self._pivot.addItem(key, text, lambda *_, k=key: self._show(k))
+            self._pivot.addItem(key, t(text), lambda *_, k=key: self._show(k))
 
-        self._placeholder = BodyLabel("选择左侧记录查看详情。", self)
+        self._placeholder = BodyLabel(t("settings.trace.placeholder"), self)
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._placeholder.setWordWrap(True)
         layout.addWidget(self._placeholder, 1)
@@ -311,7 +317,7 @@ class _TurnDetailView(QWidget):
             self._overview.setVisible(False)
             self._pivot.setVisible(False)
             self._stack.setVisible(False)
-            self._placeholder.setText("（记录已不存在，可能已被清理）")
+            self._placeholder.setText(t("settings.trace.gone"))
             self._placeholder.setVisible(True)
             return
 
@@ -326,7 +332,8 @@ class _TurnDetailView(QWidget):
         first_key = None
         for key, text in self._TABS:
             n = counts.get(key, 0)
-            self._pivot.widget(key).setText(f"{text} {n}" if n else text)
+            label = t(text)
+            self._pivot.widget(key).setText(f"{label} {n}" if n else label)
             if first_key is None and n:
                 first_key = key
         first_key = first_key or self._TABS[0][0]
@@ -369,22 +376,23 @@ class _OverviewCard(SimpleCardWidget):
         self._badge.setCustomBackgroundColor(QColor(color), QColor(color))
 
         sid = turn.get("session_id") or "—"
-        self._title.setText(f"会话 {sid}")
+        self._title.setText(t("settings.trace.session", sid=sid))
 
-        bits = [f"{turn.get('turn_count', 0)} 轮"]
+        bits = [t("settings.trace.turns", n=turn.get('turn_count', 0))]
         if turn.get("duration_ms"):
             bits.append(f"{turn['duration_ms'] / 1000:.2f}s")
         total = turn.get("total_tokens") or 0
         if total:
             bits.append(
-                f"{total} tok（入 {turn.get('prompt_tokens', 0)} / "
-                f"出 {turn.get('completion_tokens', 0)}）"
+                t("settings.trace.tokens_io", total=total,
+                  prompt=turn.get('prompt_tokens', 0),
+                  completion=turn.get('completion_tokens', 0))
             )
-        bits.append(f"trace {turn.get('trace_id', '')[:12]}")
+        bits.append(t("settings.trace.trace_id", id=turn.get('trace_id', '')[:12]))
         self._metrics.setText("　·　".join(bits))
 
         err = turn.get("error")
-        self._error.setText(f"错误：{err}" if err else "")
+        self._error.setText(t("settings.trace.error", err=err) if err else "")
         self._error.setVisible(bool(err))
 
 
@@ -432,10 +440,10 @@ def _fill_pages(pages: dict, data: dict) -> dict[str, int]:
     states = data.get("state_trace") or []
 
     for key, items, builder, empty in [
-        ("llm", llm, _llm_card, "本次运行无 LLM 调用记录。"),
-        ("tools", tools, _tool_card, "本次运行未调用工具。"),
-        ("security", sec, _security_card, "本次运行无高风险工具调用。"),
-        ("eval", evals, _eval_card, "本次运行无评测样本。"),
+        ("llm", llm, _llm_card, t("settings.trace.empty_llm")),
+        ("tools", tools, _tool_card, t("settings.trace.empty_tools")),
+        ("security", sec, _security_card, t("settings.trace.empty_security")),
+        ("eval", evals, _eval_card, t("settings.trace.empty_eval")),
     ]:
         page = pages[key]
         page.clear()
@@ -453,7 +461,7 @@ def _fill_pages(pages: dict, data: dict) -> dict[str, int]:
     if states:
         state_page.add_card(_state_card(states, state_page))
     else:
-        state_page.add_empty("无状态机流转记录。")
+        state_page.add_empty(t("settings.trace.empty_state"))
     return counts
 
 
@@ -501,14 +509,14 @@ def _llm_card(c: dict, parent: QWidget) -> QWidget:
     return card
 
 
-def _tool_card(t: dict, parent: QWidget) -> QWidget:
+def _tool_card(tc: dict, parent: QWidget) -> QWidget:
     card, col = _row_card(parent)
-    ok = t.get("status") != "error"
-    right = f"{t['duration_ms']:.0f}ms" if t.get("duration_ms") else ""
+    ok = tc.get("status") != "error"
+    right = f"{tc['duration_ms']:.0f}ms" if tc.get("duration_ms") else ""
     _title_row(col, card, dot=("#2e9e5b" if ok else "#d03050"),
-               title=t.get("name", "?"), right=right)
-    if t.get("arguments"):
-        args = CaptionLabel(f"入参　{t['arguments']}", card)
+               title=tc.get("name", "?"), right=right)
+    if tc.get("arguments"):
+        args = CaptionLabel(t("settings.trace.tool_args", args=tc['arguments']), card)
         args.setWordWrap(True)
         col.addWidget(args)
     return card
@@ -517,7 +525,7 @@ def _tool_card(t: dict, parent: QWidget) -> QWidget:
 def _security_card(e: dict, parent: QWidget) -> QWidget:
     card, col = _row_card(parent)
     rejected = e.get("decision") == "reject"
-    right = "🚫 已拒绝" if rejected else "✓ 放行"
+    right = t("settings.trace.sec_rejected") if rejected else t("settings.trace.sec_allowed")
     _title_row(col, card, dot=("#d03050" if rejected else "#e0a400"),
                title=e.get("tool_name", "?"), right=right)
     if e.get("reason"):
@@ -529,12 +537,12 @@ def _security_card(e: dict, parent: QWidget) -> QWidget:
 
 def _eval_card(s: dict, parent: QWidget) -> QWidget:
     card, col = _row_card(parent)
-    right_bits = [f"工具 {s.get('tool_count', 0)}"]
+    right_bits = [t("settings.trace.eval_tools", n=s.get('tool_count', 0))]
     if s.get("error_count"):
-        right_bits.append(f"错误 {s['error_count']}")
+        right_bits.append(t("settings.trace.eval_errors", n=s['error_count']))
     if s.get("scores"):
-        right_bits.append(f"评分 {s['scores']}")
-    _title_row(col, card, dot=None, title=f"轮 {s.get('turn', 0)}",
+        right_bits.append(t("settings.trace.eval_scores", scores=s['scores']))
+    _title_row(col, card, dot=None, title=t("settings.trace.eval_turn", n=s.get('turn', 0)),
                right="　·　".join(right_bits))
     if s.get("answer"):
         ans = CaptionLabel(s["answer"], card)
@@ -546,7 +554,7 @@ def _eval_card(s: dict, parent: QWidget) -> QWidget:
 def _state_card(states: list, parent: QWidget) -> QWidget:
     card, col = _row_card(parent)
     flow = "  →  ".join(s.get("state", "") for s in states if s.get("state"))
-    _title_row(col, card, dot=None, title="状态机流转")
+    _title_row(col, card, dot=None, title=t("settings.trace.state_flow"))
     body = CaptionLabel(flow, card)
     body.setWordWrap(True)
     col.addWidget(body)

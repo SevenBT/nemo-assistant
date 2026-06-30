@@ -10,6 +10,7 @@ from typing import Any
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Str, tool_params
+from app.i18n import t
 
 
 class ClipboardTool(BuiltinTool):
@@ -21,14 +22,14 @@ class ClipboardTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "读取或写入系统剪贴板。action=get 读取当前内容，action=set 将 content 写入剪贴板"
+        return t("tool.clipboard.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "action",  # action 是必填参数
-            action=Str("操作类型：get（读取剪贴板）或 set（写入剪贴板）", enum=["get", "set"]),
-            content=Str("当 action=set 时，要写入剪贴板的文本内容"),
+            action=Str(t("tool.clipboard.param.action"), enum=["get", "set"]),
+            content=Str(t("tool.clipboard.param.content")),
         )
 
     def execute(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -41,6 +42,6 @@ class ClipboardTool(BuiltinTool):
                 return {"status": "success", "data": {"content": text, "length": len(text)}}
             else:
                 pyperclip.copy(content)
-                return {"status": "success", "data": {"message": f"已复制 {len(content)} 字符到剪贴板"}}
+                return {"status": "success", "data": {"message": t("tool.clipboard.msg.copied", count=len(content))}}
         except Exception as e:
             return {"status": "error", "data": {"message": str(e)}}

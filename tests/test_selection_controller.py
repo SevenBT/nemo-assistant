@@ -97,7 +97,8 @@ def test_get_text_falls_back_to_ctrl_c(qapp):
 def test_get_text_toasts_when_nothing_selected(qapp):
     controller, obs = _make_controller(qapp, captured="", capture_return="")
     assert controller._get_text() == ""
-    assert obs["toasts"] == [("划词", "未检测到选中的文字")]
+    from app.i18n import t
+    assert obs["toasts"] == [(t("selection.ctrl.title"), t("selection.ctrl.noSelection"))]
 
 
 def test_oneshot_action_shows_bubble(qapp):

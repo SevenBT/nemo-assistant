@@ -11,6 +11,7 @@ from qfluentwidgets import PrimaryPushButton, FluentIcon
 
 from app.ui.style import get_text_color
 from app.ui.pending_attachment_bar import PendingAttachmentBar
+from app.i18n import t
 
 _MAX_CONTENT_WIDTH = 760  # must match ChatWidget._MAX_CONTENT_WIDTH
 _SIDE_MIN = 16
@@ -47,7 +48,7 @@ class InputWidget(QWidget):
         row.setSpacing(8)
 
         self._edit = _TextEdit(self)
-        self._edit.setPlaceholderText("输入消息… (Enter 发送，Shift+Enter 换行)")
+        self._edit.setPlaceholderText(t("input.placeholder"))
         self._edit.setMinimumHeight(40)
         self._edit.setMaximumHeight(120)
         self._edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
@@ -55,7 +56,7 @@ class InputWidget(QWidget):
         self._edit.files_dropped.connect(self._on_files_dropped)
         row.addWidget(self._edit)
 
-        self._btn = PrimaryPushButton(FluentIcon.SEND, "发送")
+        self._btn = PrimaryPushButton(FluentIcon.SEND, t("input.send"))
         self._btn.setFixedWidth(80)
         self._btn.setFixedHeight(36)
         self._btn.clicked.connect(self._on_button_clicked)
@@ -103,10 +104,10 @@ class InputWidget(QWidget):
         self._edit.setEnabled(True)
         self._btn.setEnabled(True)
         if running:
-            self._btn.setText("取消")
+            self._btn.setText(t("input.cancel"))
             self._btn.setIcon(FluentIcon.CLOSE.icon())
         else:
-            self._btn.setText("发送")
+            self._btn.setText(t("input.send"))
             self._btn.setIcon(FluentIcon.SEND.icon())
 
     def set_enabled(self, enabled: bool):

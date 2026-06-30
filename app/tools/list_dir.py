@@ -15,6 +15,7 @@ from typing import Any, TYPE_CHECKING
 from app.tools.base import BuiltinTool
 from app.tools.schema import Bool, Int, Str, tool_params
 from app.tools._path_utils import IGNORE_DIRS, resolve_safe
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.tools.context import ToolContext
@@ -38,16 +39,16 @@ class ListDirTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "列出指定目录的文件和子目录，可递归展示目录结构"
+        return t("tool.list_dir.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "path",
-            path=Str("目录路径，相对于工作目录"),
-            recursive=Bool("是否递归列出子目录，默认 false"),
-            max_entries=Int("最大返回条目数，默认 200", maximum=500),
-            include_hidden=Bool("是否包含隐藏文件（.开头），默认 false"),
+            path=Str(t("tool.list_dir.param.path")),
+            recursive=Bool(t("tool.list_dir.param.recursive")),
+            max_entries=Int(t("tool.list_dir.param.max_entries"), maximum=500),
+            include_hidden=Bool(t("tool.list_dir.param.include_hidden")),
         )
 
     @property
@@ -64,9 +65,9 @@ class ListDirTool(BuiltinTool):
         if err:
             return {"status": "error", "data": {"message": err}}
         if not target.exists():
-            return {"status": "error", "data": {"message": f"目录不存在: {path_str}"}}
+            return {"status": "error", "data": {"message": t("tool.list_dir.msg.dir_not_found", path=path_str)}}
         if not target.is_dir():
-            return {"status": "error", "data": {"message": f"路径不是目录: {path_str}"}}
+            return {"status": "error", "data": {"message": t("tool.list_dir.msg.not_a_dir", path=path_str)}}
 
         entries = []
         if recursive:

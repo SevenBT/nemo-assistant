@@ -25,32 +25,27 @@ from typing import Any, TYPE_CHECKING
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Arr, Num, Str, tool_params
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.tools.context import ToolContext
 
 logger = logging.getLogger(__name__)
 
-# 预定义的分析视角，每个视角有独立的角色设定。
+# 预定义的分析视角标识。每个视角的名称与 system prompt 在运行时通过 t() 取，
+# 不能在模块加载时求值（语言此时可能尚未锁定，且需支持中英双语）。
 # 所有视角统一使用当前 LiteLLM 默认模型（跟随用户选择的供应商）。
-PERSPECTIVES = {
-    "architect": {
-        "name": "架构师",
-        "system_prompt": "你是一位经验丰富的系统架构师。关注可扩展性、模块化、技术选型、系统设计。提供具体的架构建议和技术方案。",
-    },
-    "security": {
-        "name": "安全专家",
-        "system_prompt": "你是一位安全专家。关注漏洞、权限控制、数据保护、OWASP Top 10。指出潜在的安全风险并提供加固建议。",
-    },
-    "performance": {
-        "name": "性能专家",
-        "system_prompt": "你是一位性能优化专家。关注响应时间、并发处理、资源占用、缓存策略。提供性能优化建议。",
-    },
-    "cost": {
-        "name": "成本优化",
-        "system_prompt": "你是一位成本优化专家。关注资源利用率、云服务成本、开发维护成本。提供成本优化建议。",
-    },
-}
+PERSPECTIVE_IDS = ("architect", "security", "performance", "cost")
+
+
+def _perspective_name(pid: str) -> str:
+    """取视角的本地化显示名称。"""
+    return t(f"tool.multi_model_consult.perspective.{pid}.name")
+
+
+def _perspective_system_prompt(pid: str) -> str:
+    """取视角的本地化 system prompt。"""
+    return t(f"tool.multi_model_consult.perspective.{pid}.system_prompt")
 
 
 class MultiModelConsultTool(BuiltinTool):
@@ -99,16 +94,16 @@ class MultiModelConsultTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "并行调用多个 AI 模型，从架构师、安全专家、性能专家等不同视角分析问题"
+        return t("tool.multi_model_consult.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "query",  # query 是唯一必填参数
-            query=Str("要咨询的问题"),
-            perspectives=Arr(Str(), "视角列表，可选: architect, security, performance, cost"),
-            context=Str("补充上下文信息"),
-            timeout=Num("单个模型超时秒数，默认 30"),
+            query=Str(t("tool.multi_model_consult.param.query")),
+            perspectives=Arr(Str(), t("tool.multi_model_consult.param.perspectives")),
+            context=Str(t("tool.multi_model_consult.param.context")),
+            timeout=Num(t("tool.multi_model_consult.param.timeout")),
         )
 
     @property
@@ -143,7 +138,7 @@ class MultiModelConsultTool(BuiltinTool):
         litellm = load_litellm()
 
         # 过滤无效的视角名称
-        valid = [p for p in perspectives if p in PERSPECTIVES]
+        valid = [p for p in perspectives if p in PERSPECTIVE_IDS]
         if not valid:
             valid = ["architect", "security", "performance"]
 
@@ -151,12 +146,17 @@ class MultiModelConsultTool(BuiltinTool):
 
         async def call_one(pid: str) -> dict:
             """调用单个模型视角。"""
-            p = PERSPECTIVES[pid]
-            user_content = f"问题：{query}\n\n上下文：{context}" if context else f"问题：{query}"
+            name = _perspective_name(pid)
+            system_prompt = _perspective_system_prompt(pid)
+            user_content = (
+                t("tool.multi_model_consult.user_content_with_context", query=query, context=context)
+                if context
+                else t("tool.multi_model_consult.user_content", query=query)
+            )
             kwargs: dict[str, Any] = {
                 "model": model_label,
                 "messages": [
-                    {"role": "system", "content": p["system_prompt"]},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
                 "max_tokens": self._max_tokens,
@@ -170,17 +170,20 @@ class MultiModelConsultTool(BuiltinTool):
                     litellm.acompletion(**kwargs),
                     timeout=timeout,
                 )
-                return {"id": pid, "name": p["name"], "model": self._model, "status": "success",
+                return {"id": pid, "name": name, "model": self._model, "status": "success",
                         "content": resp.choices[0].message.content}
             except Exception as e:
-                return {"id": pid, "name": p["name"], "model": self._model, "status": "error", "error": str(e)}
+                return {"id": pid, "name": name, "model": self._model, "status": "error", "error": str(e)}
 
         # 并行调用所有选中的视角
         results = await asyncio.gather(*[call_one(p) for p in valid], return_exceptions=True)
 
         # 格式化为 Markdown 输出
-        output = f"# 多模型咨询结果\n\n**问题**: {query}\n\n"
-        output += f"**咨询时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n"
+        output = t("tool.multi_model_consult.output_header", query=query) + "\n\n"
+        output += t(
+            "tool.multi_model_consult.output_time",
+            time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        ) + "\n\n---\n\n"
 
         success_count = 0
         for r in results:
@@ -193,9 +196,14 @@ class MultiModelConsultTool(BuiltinTool):
         # 汇总失败的调用
         failed = [r for r in results if not isinstance(r, Exception) and r["status"] != "success"]
         if failed:
-            output += "## 调用失败\n\n"
+            output += "## " + t("tool.multi_model_consult.output_failed_title") + "\n\n"
             for r in failed:
-                output += f"- **{r['name']}** ({r['model']}): {r.get('error', '未知错误')}\n"
+                error_msg = r.get('error') or t("tool.multi_model_consult.unknown_error")
+                output += f"- **{r['name']}** ({r['model']}): {error_msg}\n"
 
-        output += f"\n**统计**: 成功 {success_count}/{len(valid)} 个模型\n"
+        output += "\n" + t(
+            "tool.multi_model_consult.output_stats",
+            success=success_count,
+            total=len(valid),
+        ) + "\n"
         return output

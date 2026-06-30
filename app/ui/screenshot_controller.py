@@ -7,6 +7,7 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QApplication, QFileDialog, QWidget
 
 from app.core.config import SCREENSHOTS_DIR
+from app.i18n import t
 from app.models.attachment import Attachment
 from app.ui.pin_window import PinWindow
 from app.ui.screenshot_overlay import ScreenshotOverlay
@@ -137,7 +138,7 @@ class ScreenshotController(QObject):
     def _save_screenshot(self, pixmap: QPixmap):
         path, _ = QFileDialog.getSaveFileName(
             self._window,
-            "保存截图",
+            t("screenshot.saveDialogTitle"),
             "screenshot.png",
             "PNG (*.png)",
         )

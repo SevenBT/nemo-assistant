@@ -6,11 +6,12 @@ from typing import Any
 
 from app.core.config import cfg
 from app.core.constants import (
-    BUILTIN_TOOLS_INSTRUCTION,
-    DEFAULT_USER_PROMPT,
+    get_builtin_tools_instruction,
+    get_default_user_prompt,
     get_current_datetime_info,
     get_current_time_hint,
 )
+from app.i18n import t
 from app.models.message import Message, MessageRole
 
 
@@ -70,7 +71,7 @@ class ConversationPromptBuilder:
 
     def _build_system_prompt(self, session_id: str | None) -> str:
         user_prompt = self._resolve_user_prompt(session_id)
-        full_system_prompt = user_prompt + "\n" + BUILTIN_TOOLS_INSTRUCTION
+        full_system_prompt = user_prompt + "\n" + get_builtin_tools_instruction()
 
         if session_id and self._memory_mgr is not None:
             memory_context = self._memory_mgr.build_memory_context(session_id)
@@ -89,7 +90,7 @@ class ConversationPromptBuilder:
         if configured_prompt:
             return configured_prompt
 
-        return DEFAULT_USER_PROMPT
+        return get_default_user_prompt()
 
     def _all_tool_calls_done(self, message: Message) -> bool:
         return all(tool_call.result is not None for tool_call in message.tool_calls)
@@ -159,7 +160,7 @@ def _build_text_block(
     vision_enabled: bool,
 ) -> str:
     """Compose the textual portion: text-file contents, image OCR fallback, user text."""
-    parts = [f"[文件: {att.file_name}]\n{att.parsed_content}" for att in text_atts]
+    parts = [t("prompt.fileLabel", name=att.file_name, content=att.parsed_content) for att in text_atts]
 
     # When vision can't carry the pixels, fall back to image OCR text so the
     # model still gets *something*. OCR is computed lazily here (not at intake)
@@ -169,7 +170,7 @@ def _build_text_block(
         for att in image_atts:
             text = att.parsed_content or _ocr_image_text(att)
             if text:
-                parts.append(f"[图片: {att.file_name}]\n{text}")
+                parts.append(t("prompt.imageLabel", name=att.file_name, content=text))
 
     merged = "\n\n".join(parts)
     if msg.content:

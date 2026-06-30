@@ -38,6 +38,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.i18n import t
 from app.ui import style
 
 OVERLAY_ALPHA = 80
@@ -441,11 +442,11 @@ class ScreenshotOverlay(QWidget):
         ]
         # 本地行：不走 AI 的动作（贴图 / 本地 OCR 识字 / 复制 / 保存 / 取消）
         local_actions = [
-            ("pin",  "📌 贴图"),
-            ("ocr",  "📝 识字"),
-            ("copy", "📋 复制"),
-            ("save", "💾 保存"),
-            ("cancel", "✕"),
+            ("pin",  t("screenshot.pin")),
+            ("ocr",  t("screenshot.ocr")),
+            ("copy", t("screenshot.copy")),
+            ("save", t("screenshot.save")),
+            ("cancel", t("screenshot.cancel")),
         ]
 
         def _add_row(actions):
@@ -550,13 +551,13 @@ class ScreenshotOverlay(QWidget):
 
         self._hide_toolbar()
         self._state = "OCR_EDIT"
-        self._show_ocr_panel("[识别中...]")
+        self._show_ocr_panel(t("screenshot.ocr.recognizing"))
 
         def _worker():
             try:
                 text = self._run_ocr_from_array(bgr)
             except Exception as e:
-                text = f"[OCR 错误: {e}]"
+                text = t("screenshot.ocr.error", error=e)
             self._ocr_done.emit(text)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -567,10 +568,10 @@ class ScreenshotOverlay(QWidget):
             engine = _get_rapid_ocr()
             result, _ = engine(bgr)
             if result:
-                return _reconstruct_layout(result).strip() or "[未识别到文字]"
-            return "[未识别到文字]"
+                return _reconstruct_layout(result).strip() or t("screenshot.ocr.empty")
+            return t("screenshot.ocr.empty")
         except Exception as e:
-            return f"[OCR 错误: {e}]"
+            return t("screenshot.ocr.error", error=e)
 
     def _on_ocr_ready(self, text: str):
         if self._ocr_edit is not None:
@@ -598,7 +599,7 @@ class ScreenshotOverlay(QWidget):
 
         # Header
         header = QHBoxLayout()
-        title = QLabel("OCR 识别结果（可编辑）")
+        title = QLabel(t("screenshot.ocr.panelTitle"))
         title.setStyleSheet(
             f"color: {self._theme['text_secondary']}; font-size: 12px;"
             "background: transparent; border: none;"
@@ -606,7 +607,7 @@ class ScreenshotOverlay(QWidget):
         header.addWidget(title)
         header.addStretch()
 
-        cancel_btn = QPushButton("✕")
+        cancel_btn = QPushButton(t("screenshot.cancel"))
         cancel_btn.setObjectName("snipCloseBtn")
         cancel_btn.setFixedSize(28, 28)
         cancel_btn.clicked.connect(lambda: (self.captured.emit(QPixmap(), "cancel", "", QPoint()), self.close()))
@@ -633,11 +634,11 @@ class ScreenshotOverlay(QWidget):
         # Footer: close and confirm buttons
         footer = QHBoxLayout()
         footer.addStretch()
-        close_btn = QPushButton("关闭")
+        close_btn = QPushButton(t("common.close"))
         close_btn.setObjectName("ocrCloseBtn")
         close_btn.clicked.connect(lambda: (self.captured.emit(QPixmap(), "cancel", "", QPoint()), self.close()))
         footer.addWidget(close_btn)
-        confirm_btn = QPushButton("复制并关闭")
+        confirm_btn = QPushButton(t("screenshot.ocr.copyAndClose"))
         confirm_btn.setObjectName("ocrConfirmBtn")
         confirm_btn.clicked.connect(self._on_ocr_confirm)
         footer.addWidget(confirm_btn)
@@ -700,7 +701,7 @@ class ScreenshotOverlay(QWidget):
                 p.drawText(
                     self.rect(),
                     Qt.AlignmentFlag.AlignCenter,
-                    "拖拽鼠标框选截图区域 · 右键或 Esc 取消",
+                    t("screenshot.selectHint"),
                 )
             return
 

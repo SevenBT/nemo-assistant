@@ -5,6 +5,7 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 from app.core.config import ASSETS_DIR
+from app.i18n import t
 
 _ICON_PATH = str(ASSETS_DIR / "app_icon.png")
 
@@ -49,23 +50,23 @@ class TrayManager(QObject):
             }
         """)
         menu = self._menu
-        show_act = QAction("显示窗口", menu)
+        show_act = QAction(t("tray.show"), menu)
         show_act.triggered.connect(self.show_requested)
         menu.addAction(show_act)
 
-        snap_act = QAction("截图", menu)
+        snap_act = QAction(t("tray.screenshot"), menu)
         snap_act.triggered.connect(self.screenshot_requested)
         menu.addAction(snap_act)
 
         menu.addSeparator()
 
-        settings_act = QAction("设置", menu)
+        settings_act = QAction(t("tray.settings"), menu)
         settings_act.triggered.connect(self.settings_requested)
         menu.addAction(settings_act)
 
         menu.addSeparator()
 
-        quit_act = QAction("退出", menu)
+        quit_act = QAction(t("tray.quit"), menu)
         quit_act.triggered.connect(self.quit_requested)
         menu.addAction(quit_act)
 

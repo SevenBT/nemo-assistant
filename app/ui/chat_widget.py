@@ -2,6 +2,8 @@ import re
 
 import markdown as _md
 
+from app.i18n import t as _t
+
 from PyQt6.QtCore import Qt, QEvent, QPoint, QSize, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
@@ -302,7 +304,7 @@ class ChatWidget(QWidget):
         anchors = self._anchor_rail.anchors()
         if not anchors:
             return
-        texts = [(t.strip() or "（空消息）") for _, t in anchors]
+        texts = [(t.strip() or _t("chat.emptyMessage")) for _, t in anchors]
         texts = [" ".join(t.split()) for t in texts]
         # 面板宽度受限于「对话内容右边缘」与轨道之间的空隙，留固定间隙不遮盖对话
         vp = self._scroll.viewport()

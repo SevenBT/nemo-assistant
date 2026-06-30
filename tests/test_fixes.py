@@ -47,14 +47,14 @@ def test_sticky_note_menu():
     sticky_file = _PROJECT_ROOT / "app" / "ui" / "sticky_note_window.py"
     content = sticky_file.read_text(encoding="utf-8")
 
-    # Check for required menu items
+    # Check for required menu items (now via i18n keys instead of literals)
     required_items = [
-        "撤销",
-        "重做",
-        "剪切",
-        "复制",
-        "粘贴",
-        "全选",
+        "edit.undo",
+        "edit.redo",
+        "edit.cut",
+        "edit.copy",
+        "edit.paste",
+        "edit.selectAll",
     ]
 
     # Check for required methods

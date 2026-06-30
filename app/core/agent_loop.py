@@ -374,6 +374,53 @@ class AgentLoop(QThread):
         self.new_turn.emit(ctx.turn_count)
         return "continue"
 
+    def _state_wrap_up(self, ctx: TurnContext) -> str:
+        """强制收尾轮：达到 max_turns 后，去掉 tools 再调一次 LLM，
+
+        让模型基于已有工具结果产出纯文本最终答复，避免「工具跑完却无输出」。
+        本轮不提供 tools，模型只能输出文本；忽略任何残留的 tool_call。
+        """
+        ctx.reset_turn()
+        # 独立成一条收尾消息：重置 UI 气泡，避免与上一轮调工具前的半截文字混淆。
+        self.new_turn.emit(ctx.turn_count)
+
+        seq = self._llm_seq
+        self._llm_seq += 1
+        # 关键：tools=None → 网关不下发 tools/tool_choice，模型只能纯文本收尾。
+        for chunk in self._llm.chat_stream(
+            ctx.messages,
+            None,
+            cancel_token=self._cancel_token,
+            trace_id=self._trace_id,
+            seq=seq,
+        ):
+            if self._cancelled:
+                return "cancelled"
+
+            if chunk["type"] == "text":
+                ctx.full_text += chunk["delta"]
+                self.text_chunk.emit(chunk["delta"])
+            elif chunk["type"] == "tool_call":
+                # 收尾轮不执行工具，丢弃。
+                continue
+            elif chunk["type"] == "error":
+                ctx.error_message = chunk["message"]
+                self._fire_after_iteration(ctx, [])
+                return "error"
+            elif chunk["type"] == "done":
+                ctx.reasoning_content = chunk.get("reasoning_content")
+                break
+
+        self._fire_after_iteration(ctx, [])
+        if not ctx.full_text.strip():
+            # 收尾轮仍无文字：给出明确提示，避免回到「静默无输出」。
+            ctx.error_message = (
+                f"已达到最大工具调用轮数（{ctx.max_turns} 轮），任务尚未完成。"
+                f"可继续追问以推进。"
+            )
+            return "error"
+        return "ok"
+
     def _state_finalize(self, ctx: TurnContext) -> str:
         trace_data = self._serialize_trace(ctx)
         if ctx.error_message:

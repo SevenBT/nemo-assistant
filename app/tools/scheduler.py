@@ -17,6 +17,7 @@ from typing import Any, TYPE_CHECKING
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Obj, Str, tool_params
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.core.scheduler import SchedulerManager
@@ -39,24 +40,24 @@ class CreateScheduledTaskTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "创建一个定时任务，定期执行某个工具脚本或提醒用户"
+        return t("tool.create_scheduled_task.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "name", "tool_name", "trigger_type", "trigger_config",
-            name=Str("任务名称"),
-            tool_name=Str("要执行的工具名称"),
-            params=Obj("工具参数，JSON对象"),
-            trigger_type=Str("触发器类型", enum=["cron", "interval", "date"]),
-            trigger_config=Obj("触发器配置，如 {hour:9, minute:0} 或 {hours:1}"),
-            description=Str("任务描述"),
+            name=Str(t("tool.create_scheduled_task.param.name")),
+            tool_name=Str(t("tool.create_scheduled_task.param.tool_name")),
+            params=Obj(t("tool.create_scheduled_task.param.params")),
+            trigger_type=Str(t("tool.create_scheduled_task.param.trigger_type"), enum=["cron", "interval", "date"]),
+            trigger_config=Obj(t("tool.create_scheduled_task.param.trigger_config")),
+            description=Str(t("tool.create_scheduled_task.param.description")),
         )
 
     def execute(self, params: dict[str, Any]) -> dict[str, Any]:
         try:
             job_id = self._scheduler.add_job(
-                name=params.get("name", "未命名任务"),
+                name=params.get("name", t("tool.create_scheduled_task.msg.unnamed")),
                 tool_name=params.get("tool_name", ""),
                 params=params.get("params", {}),
                 trigger_type=params["trigger_type"],
@@ -84,7 +85,7 @@ class ListScheduledTasksTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "列出所有当前定时任务"
+        return t("tool.list_scheduled_tasks.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -125,13 +126,13 @@ class DeleteScheduledTaskTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "删除一个定时任务"
+        return t("tool.delete_scheduled_task.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "job_id",
-            job_id=Str("任务ID"),
+            job_id=Str(t("tool.delete_scheduled_task.param.job_id")),
         )
 
     def execute(self, params: dict[str, Any]) -> dict[str, Any]:

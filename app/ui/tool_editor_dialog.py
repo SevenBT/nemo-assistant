@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.config import USER_TOOLS_DIR
+from app.i18n import t
 from app.tools.registry import ToolRegistry
 from app.tools.script_adapter import ScriptToolAdapter
 
@@ -62,7 +63,7 @@ class ToolEditorDialog(QDialog):
         super().__init__(parent)
         self._registry = registry
         self._editing = tool  # None = create mode
-        self.setWindowTitle("编辑工具" if tool else "新建工具")
+        self.setWindowTitle(t("tooldlg.editor.title_edit") if tool else t("tooldlg.editor.title_new"))
         self.setMinimumSize(600, 700)
         self._build()
         if tool:
@@ -73,14 +74,14 @@ class ToolEditorDialog(QDialog):
         layout.setSpacing(10)
 
         # ── Basic info ───────────────────────────────────────────────
-        info_section = QLabel("基本信息")
+        info_section = QLabel(t("tooldlg.editor.basic_info"))
         info_section.setStyleSheet("font-size: 13px; font-weight: 700;")
         layout.addWidget(info_section)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("名称:"))
+        row.addWidget(QLabel(t("tooldlg.editor.name")))
         self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("tool_name (英文、下划线)")
+        self._name_edit.setPlaceholderText(t("tooldlg.editor.name_ph"))
         if self._editing:
             self._name_edit.setText(self._editing.name)
             self._name_edit.setReadOnly(True)
@@ -88,26 +89,26 @@ class ToolEditorDialog(QDialog):
         layout.addLayout(row)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("描述:"))
+        row.addWidget(QLabel(t("tooldlg.editor.desc")))
         self._desc_edit = QLineEdit()
-        self._desc_edit.setPlaceholderText("简要描述工具功能")
+        self._desc_edit.setPlaceholderText(t("tooldlg.editor.desc_ph"))
         row.addWidget(self._desc_edit)
         layout.addLayout(row)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("版本:"))
+        row.addWidget(QLabel(t("tooldlg.editor.version")))
         self._ver_edit = QLineEdit()
         self._ver_edit.setPlaceholderText("1.0.0")
         self._ver_edit.setMaximumWidth(100)
         row.addWidget(self._ver_edit)
-        row.addWidget(QLabel("作者:"))
+        row.addWidget(QLabel(t("tooldlg.editor.author")))
         self._author_edit = QLineEdit()
-        self._author_edit.setPlaceholderText("可选")
+        self._author_edit.setPlaceholderText(t("tooldlg.editor.author_ph"))
         row.addWidget(self._author_edit)
         layout.addLayout(row)
 
         # ── Dependencies ─────────────────────────────────────────────
-        dep_section = QLabel("依赖 (每行一个 pip 包名)")
+        dep_section = QLabel(t("tooldlg.editor.deps"))
         dep_section.setStyleSheet("font-size: 13px; font-weight: 700; margin-top: 8px;")
         layout.addWidget(dep_section)
 
@@ -118,15 +119,15 @@ class ToolEditorDialog(QDialog):
 
         # ── Parameters ───────────────────────────────────────────────
         param_header = QHBoxLayout()
-        param_section = QLabel("参数")
+        param_section = QLabel(t("tooldlg.editor.params"))
         param_section.setStyleSheet("font-size: 13px; font-weight: 700; margin-top: 8px;")
         param_header.addWidget(param_section)
         param_header.addStretch()
-        add_param_btn = QPushButton("+ 添加参数")
+        add_param_btn = QPushButton(t("tooldlg.editor.add_param"))
         add_param_btn.setObjectName("noteToolBtn")
         add_param_btn.clicked.connect(self._add_param_row)
         param_header.addWidget(add_param_btn)
-        remove_param_btn = QPushButton("- 删除选中")
+        remove_param_btn = QPushButton(t("tooldlg.editor.remove_param"))
         remove_param_btn.setObjectName("noteToolBtn")
         remove_param_btn.clicked.connect(self._remove_param_row)
         param_header.addWidget(remove_param_btn)
@@ -134,7 +135,14 @@ class ToolEditorDialog(QDialog):
 
         self._param_table = QTableWidget(0, 6)
         self._param_table.setHorizontalHeaderLabels(
-            ["名称", "类型", "描述", "来源", "必填", "默认值"]
+            [
+                t("tooldlg.editor.col.name"),
+                t("tooldlg.editor.col.type"),
+                t("tooldlg.editor.col.desc"),
+                t("tooldlg.editor.col.source"),
+                t("tooldlg.editor.col.required"),
+                t("tooldlg.editor.col.default"),
+            ]
         )
         hh = self._param_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
@@ -150,12 +158,12 @@ class ToolEditorDialog(QDialog):
         layout.addWidget(self._param_table)
 
         # ── Script editor ────────────────────────────────────────────
-        script_section = QLabel("脚本 (tool.py)")
+        script_section = QLabel(t("tooldlg.editor.script"))
         script_section.setStyleSheet("font-size: 13px; font-weight: 700; margin-top: 8px;")
         layout.addWidget(script_section)
 
         self._script_edit = QPlainTextEdit()
-        self._script_edit.setPlaceholderText("# Python 脚本...")
+        self._script_edit.setPlaceholderText(t("tooldlg.editor.script_ph"))
         self._script_edit.setStyleSheet(
             "font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 12px;"
         )
@@ -187,7 +195,7 @@ class ToolEditorDialog(QDialog):
         self._param_table.setCellWidget(row, 3, src_combo)
         # Required combo
         req_combo = QComboBox()
-        req_combo.addItems(["是", "否"])
+        req_combo.addItems([t("tooldlg.editor.yes"), t("tooldlg.editor.no")])
         self._param_table.setCellWidget(row, 4, req_combo)
         self._param_table.setItem(row, 5, QTableWidgetItem(""))
 
@@ -237,18 +245,18 @@ class ToolEditorDialog(QDialog):
 
         # Validate name
         if not name:
-            QMessageBox.warning(self, "错误", "请输入工具名称")
+            QMessageBox.warning(self, t("tooldlg.editor.err_title"), t("tooldlg.editor.err_no_name"))
             return
         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name):
-            QMessageBox.warning(self, "错误", "工具名称只能包含英文字母、数字和下划线，且不能以数字开头")
+            QMessageBox.warning(self, t("tooldlg.editor.err_title"), t("tooldlg.editor.err_bad_name"))
             return
         if not desc:
-            QMessageBox.warning(self, "错误", "请输入工具描述")
+            QMessageBox.warning(self, t("tooldlg.editor.err_title"), t("tooldlg.editor.err_no_desc"))
             return
 
         # Check duplicate name (create mode only)
         if not self._editing and self._registry.get(name):
-            QMessageBox.warning(self, "错误", f"工具「{name}」已存在")
+            QMessageBox.warning(self, t("tooldlg.editor.err_title"), t("tooldlg.editor.err_exists", name=name))
             return
 
         # Collect parameters
@@ -265,7 +273,7 @@ class ToolEditorDialog(QDialog):
                 "type": type_combo.currentText(),
                 "description": (self._param_table.item(row, 2).text() or "").strip(),
                 "source": src_combo.currentText(),
-                "required": req_combo.currentText() == "是",
+                "required": req_combo.currentIndex() == 0,
             }
             if default_val:
                 p["default"] = default_val

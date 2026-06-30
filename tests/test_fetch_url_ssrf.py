@@ -69,6 +69,7 @@ class RedirectSsrfTest(unittest.TestCase):
         self.assertEqual(fake.requested, ["http://8.8.8.8"])
 
     def test_too_many_redirects(self):
+        from app.i18n import t
         # 始终重定向到另一个公网地址，超过上限应报错。
         responses = [
             _FakeResp(is_redirect=True, location="http://8.8.8.8/next")
@@ -78,7 +79,7 @@ class RedirectSsrfTest(unittest.TestCase):
         with mock.patch.object(httpx, "Client", return_value=fake):
             result = FetchUrlTool(timeout=5).execute({"url": "http://8.8.8.8"})
         self.assertEqual(result["status"], "error")
-        self.assertIn("重定向", result["data"]["message"])
+        self.assertIn(t("tool.fetch_url.msg.too_many_redirects").split("{")[0], result["data"]["message"])
 
 
 if __name__ == "__main__":

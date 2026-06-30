@@ -21,6 +21,7 @@ from typing import Any, TYPE_CHECKING
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Bool, Num, Str, tool_params
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.tools.context import ToolContext
@@ -50,18 +51,18 @@ class WebSearchTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "搜索互联网，返回相关网页列表（标题、链接、摘要）。支持 DuckDuckGo（免费）、Bing、Tavily、Brave、博查 AI 搜索引擎"
+        return t("tool.web_search.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "query",  # query 是唯一必填参数
-            query=Str("搜索关键词或问题"),
-            count=Num("返回结果数量，默认 5，最多 10"),
-            summary=Bool("是否返回 AI 生成的文本摘要（默认 false）。仅当用户明确说'总结'、'摘要'时设为 true（仅博查支持）"),
-            freshness=Str("搜索时间范围。'今天'→oneDay，'本周'→oneWeek，'本月'→oneMonth，'今年'→oneYear，默认 noLimit（仅博查支持）"),
-            include=Str("仅搜索指定网站，多个用|分隔（仅博查支持）"),
-            exclude=Str("排除指定网站，多个用|分隔（仅博查支持）"),
+            query=Str(t("tool.web_search.param.query")),
+            count=Num(t("tool.web_search.param.count")),
+            summary=Bool(t("tool.web_search.param.summary")),
+            freshness=Str(t("tool.web_search.param.freshness")),
+            include=Str(t("tool.web_search.param.include")),
+            exclude=Str(t("tool.web_search.param.exclude")),
         )
 
     @property
@@ -176,17 +177,17 @@ class WebSearchTool(BuiltinTool):
 
         # 博查特有的错误码处理
         if resp.status_code == 403:
-            raise Exception("博查余额不足，请前往 https://open.bocha.cn 充值")
+            raise Exception(t("tool.web_search.msg.bocha_insufficient_balance"))
         elif resp.status_code == 401:
-            raise Exception("博查 API Key 无效，请检查配置")
+            raise Exception(t("tool.web_search.msg.bocha_invalid_key"))
         elif resp.status_code == 429:
-            raise Exception("请求频率达到限制，请稍后重试")
+            raise Exception(t("tool.web_search.msg.bocha_rate_limit"))
         elif not resp.is_success:
-            raise Exception(f"博查 API HTTP 错误 {resp.status_code}: {resp.text}")
+            raise Exception(t("tool.web_search.msg.bocha_http_error", code=resp.status_code, text=resp.text))
 
         data = resp.json()
         if data.get("code") != 200:
-            raise Exception(f"博查 API 错误: {data.get('msg', '未知错误')}")
+            raise Exception(t("tool.web_search.msg.bocha_api_error", msg=data.get('msg', t("tool.web_search.msg.unknown_error"))))
 
         web_pages = data.get("data", {}).get("webPages", {}).get("value", [])
         return [
@@ -218,8 +219,8 @@ class WebSearchTool(BuiltinTool):
         try:
             from bs4 import BeautifulSoup
         except ImportError:
-            return [{"title": f"搜索: {query}", "url": f"https://duckduckgo.com/?q={urllib.parse.quote(query)}",
-                     "snippet": "请安装 beautifulsoup4: pip install beautifulsoup4"}]
+            return [{"title": t("tool.web_search.msg.ddg_search", query=query), "url": f"https://duckduckgo.com/?q={urllib.parse.quote(query)}",
+                     "snippet": t("tool.web_search.msg.install_bs4")}]
 
         # 解析 DuckDuckGo HTML 搜索结果页
         soup = BeautifulSoup(resp.text, "html.parser")

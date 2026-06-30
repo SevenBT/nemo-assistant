@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import QApplication
 from app.core.selection_capture import capture_selection
 from app.core.selection_inject import replace_selection
 from app.core.config import cfg
+from app.i18n import t
 from app.ui.result_bubble import ResultBubble
 from app.ui.text_action_popup import TextActionPopup
 from app.ui.text_actions import get_text_action
@@ -127,7 +128,7 @@ class SelectionController(QObject):
         """获取选中文字：优先 UIA 预取，兜底 Ctrl+C。"""
         text = self._captured or capture_selection()
         if not text:
-            self._toast("划词", "未检测到选中的文字")
+            self._toast(t("selection.ctrl.title"), t("selection.ctrl.noSelection"))
         return text
 
     # ── 单击 → 气泡快查 ────────────────────────────────────────────────
@@ -190,7 +191,7 @@ class SelectionController(QObject):
         # 复制时通知，告知去哪儿找结果、要手动粘贴。
         if not ok:
             self._copy_to_clipboard(result)
-            self._toast("无法替换", "已复制改写结果，可手动粘贴")
+            self._toast(t("selection.ctrl.replaceFailed"), t("selection.ctrl.replaceFailedBody"))
 
     def _on_copy_requested(self, result: str):
         """气泡「复制」：把改写结果复制到剪贴板，关闭气泡。"""
@@ -198,7 +199,7 @@ class SelectionController(QObject):
             return
         self._copy_to_clipboard(result)
         self._bubble.hide()
-        self._toast("已复制", "改写结果已复制到剪贴板")
+        self._toast(t("selection.ctrl.copied"), t("selection.ctrl.copiedBody"))
 
     def _copy_to_clipboard(self, text: str):
         try:
@@ -236,15 +237,15 @@ class SelectionController(QObject):
 
     def _save_as_note(self, text: str):
         try:
-            title = text[:_NOTE_TITLE_MAX].strip() or "划词便签"
+            title = text[:_NOTE_TITLE_MAX].strip() or t("selection.ctrl.noteTitleFallback")
             self._notes.create(title=title, content=text, note_type="note")
-            self._toast("已存便签", title)
+            self._toast(t("selection.ctrl.noteSaved"), title)
             # 立即刷新笔记列表，否则要等下次无关刷新才出现（表现为延迟十几秒）。
             if self._on_note_saved is not None:
                 self._on_note_saved()
         except Exception as e:  # pragma: no cover - 防御性
             logger.error("划词存便签失败：%s", e)
-            self._toast("划词", "存便签失败")
+            self._toast(t("selection.ctrl.title"), t("selection.ctrl.noteSaveFailed"))
 
     def _toast(self, title: str, body: str):
         if self._notify is not None:

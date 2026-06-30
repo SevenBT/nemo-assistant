@@ -177,5 +177,65 @@ class BeforeToolsHookTest(unittest.TestCase):
         self.assertTrue(all(d.is_reject for d in rejections.values()))
 
 
+class _FakeGateway:
+    """按预设 chunk 序列驱动 chat_stream 的假网关，记录收到的 tools 参数。"""
+
+    def __init__(self, chunks):
+        self._chunks = chunks
+        self.received_tools = "unset"
+
+    def chat_stream(self, messages, tools, **kwargs):
+        self.received_tools = tools
+        yield from self._chunks
+
+
+class WrapUpStateTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _make_loop(self, chunks):
+        gw = _FakeGateway(chunks)
+        loop = AgentLoop(
+            llm_gateway=gw, registry=_FakeRegistry({}),
+            api_messages=[], session_id="s1",
+        )
+        return loop, gw
+
+    def test_wrap_up_emits_text_and_returns_ok(self):
+        chunks = [
+            {"type": "text", "delta": "最终答复"},
+            {"type": "done"},
+        ]
+        loop, gw = self._make_loop(chunks)
+        ctx = TurnContext(messages=[], tools=[{"x": 1}], max_turns=10)
+        event = loop._state_wrap_up(ctx)
+        self.assertEqual(event, "ok")
+        self.assertEqual(ctx.full_text, "最终答复")
+        self.assertIsNone(ctx.error_message)
+        # 收尾轮必须不下发 tools，模型才能纯文本收尾
+        self.assertIsNone(gw.received_tools)
+
+    def test_wrap_up_empty_text_sets_error(self):
+        chunks = [{"type": "done"}]  # 模型无任何文字
+        loop, _ = self._make_loop(chunks)
+        ctx = TurnContext(messages=[], tools=None, max_turns=10)
+        event = loop._state_wrap_up(ctx)
+        self.assertEqual(event, "error")
+        self.assertIn("最大工具调用轮数", ctx.error_message)
+
+    def test_wrap_up_discards_tool_calls(self):
+        chunks = [
+            {"type": "tool_call", "id": "t1", "name": "x", "arguments": {}},
+            {"type": "text", "delta": "收尾"},
+            {"type": "done"},
+        ]
+        loop, _ = self._make_loop(chunks)
+        ctx = TurnContext(messages=[], tools=[{"x": 1}], max_turns=10)
+        event = loop._state_wrap_up(ctx)
+        self.assertEqual(event, "ok")
+        self.assertEqual(ctx.tool_calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

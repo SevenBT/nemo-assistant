@@ -11,6 +11,7 @@ from qfluentwidgets import (
     TransparentPushButton,
 )
 
+from app.i18n import t
 from app.ui import style
 
 
@@ -42,7 +43,7 @@ class ToolSummaryWidget(QFrame):
         header.addWidget(self._summary_label)
         header.addStretch()
 
-        self._toggle_btn = TransparentPushButton("展开")
+        self._toggle_btn = TransparentPushButton(t("toolcard.expand"))
         self._toggle_btn.setFixedSize(52, 22)
         self._toggle_btn.clicked.connect(self._toggle)
         self._toggle_btn.hide()
@@ -86,11 +87,11 @@ class ToolSummaryWidget(QFrame):
         pending = sum(1 for t in self._tools if t["status"] == "pending")
         errors = sum(1 for t in self._tools if t["status"] == "error")
         if pending > 0:
-            text = f'<span style="color:{theme["warning"]}">⟳</span> 正在调用工具... ({n})'
+            text = f'<span style="color:{theme["warning"]}">⟳</span> {t("toolcard.calling", n=n)}'
         elif errors > 0:
-            text = f'<span style="color:{theme["error"]}">⚠</span> 已调用 {n} 个工具（{errors} 个失败）'
+            text = f'<span style="color:{theme["error"]}">⚠</span> {t("toolcard.called_with_errors", n=n, errors=errors)}'
         else:
-            text = f'<span style="color:{theme["success"]}">✓</span> 已调用 {n} 个工具'
+            text = f'<span style="color:{theme["success"]}">✓</span> {t("toolcard.called", n=n)}'
         self._summary_label.setText(text)
 
     def _rebuild_detail(self):
@@ -115,4 +116,4 @@ class ToolSummaryWidget(QFrame):
     def _toggle(self):
         self._expanded = not self._expanded
         self._detail.setVisible(self._expanded)
-        self._toggle_btn.setText("收起" if self._expanded else "展开")
+        self._toggle_btn.setText(t("toolcard.collapse") if self._expanded else t("toolcard.expand"))

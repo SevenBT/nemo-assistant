@@ -45,6 +45,7 @@ from enum import Enum
 from typing import Any
 
 from app.tools.base import BuiltinTool
+from app.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +73,15 @@ _RETRY_CONFIG: dict[ToolErrorType, tuple[int, float]] = {
     ToolErrorType.RUNTIME:  (2, 0.5),
 }
 
-# 各错误类型回传给 LLM 的提示语
-_ERROR_HINTS: dict[ToolErrorType, str] = {
-    ToolErrorType.TOOL_NOT_FOUND: "\n\n[工具不存在，请检查工具名称。]",
-    ToolErrorType.PARAM_INVALID:  "\n\n[参数有误，请检查参数格式和必填项后重新调用。]",
-    ToolErrorType.TIMEOUT:        "\n\n[工具执行超时，外部服务暂时不可用，可稍后重试或换用其他方式。]",
-    ToolErrorType.NETWORK:        "\n\n[网络或外部服务错误，可稍后重试或换用其他方式。]",
-    ToolErrorType.PERMISSION:     "\n\n[权限不足，请勿重试此操作。]",
-    ToolErrorType.RUNTIME:        "\n\n[工具执行出错，请分析错误原因，尝试不同的参数或方法。]",
+# 各错误类型回传给 LLM 的提示语 key。文案在 format_result 运行时通过 t() 取，
+# 不在模块加载时求值（语言此时可能尚未锁定，且需支持中英双语）。
+_ERROR_HINT_KEYS: dict[ToolErrorType, str] = {
+    ToolErrorType.TOOL_NOT_FOUND: "tool.common.hint.tool_not_found",
+    ToolErrorType.PARAM_INVALID:  "tool.common.hint.param_invalid",
+    ToolErrorType.TIMEOUT:        "tool.common.hint.timeout",
+    ToolErrorType.NETWORK:        "tool.common.hint.network",
+    ToolErrorType.PERMISSION:     "tool.common.hint.permission",
+    ToolErrorType.RUNTIME:        "tool.common.hint.runtime",
 }
 
 
@@ -215,7 +217,10 @@ class ToolRegistry:
         params = tool.cast_params(params)
         errors = tool.validate_params(params)
         if errors:
-            return _make_error(ToolErrorType.PARAM_INVALID, f"参数校验失败: {'; '.join(errors)}")
+            return _make_error(
+                ToolErrorType.PARAM_INVALID,
+                t("tool.common.param_validation_failed", errors='; '.join(errors)),
+            )
 
         return self._execute_with_retry(tool, params)
 
@@ -284,11 +289,15 @@ class ToolRegistry:
                 error_type = ToolErrorType(error_type_val)
             except ValueError:
                 error_type = ToolErrorType.RUNTIME
-            content += _ERROR_HINTS[error_type]
+            content += t(_ERROR_HINT_KEYS[error_type])
 
         if len(content) > _MAX_RESULT_CHARS:
             original_len = len(content)
             content = content[:_MAX_RESULT_CHARS]
-            content += f"\n\n[结果已截断，原始长度 {original_len} 字符，显示前 {_MAX_RESULT_CHARS} 字符]"
+            content += t(
+                "tool.common.result_truncated",
+                original=original_len,
+                shown=_MAX_RESULT_CHARS,
+            )
 
         return content

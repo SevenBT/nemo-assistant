@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.i18n import t
+
 # 文件遍历时跳过的目录
 IGNORE_DIRS = frozenset({
     ".git", "__pycache__", "node_modules", ".venv",
@@ -35,10 +37,10 @@ def resolve_safe(path_str: str, workspace: Path) -> tuple[Path | None, str]:
     try:
         target = (ws / path_str).resolve()
     except (OSError, ValueError) as e:
-        return None, f"路径无效: {e}"
+        return None, t("tool.path.msg.invalid_path", error=e)
 
     if not str(target).startswith(str(ws)):
-        return None, "路径超出 workspace 范围"
+        return None, t("tool.path.msg.out_of_workspace")
 
     return target, ""
 

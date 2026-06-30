@@ -25,6 +25,7 @@ from qfluentwidgets import (
 )
 
 from app.core.config import cfg
+from app.i18n import t
 from app.ui.text_actions import get_text_action
 
 # 解释提示词编辑器高度（px）。
@@ -62,9 +63,7 @@ class _PromptCard(CardWidget):
 
         self._edit = TextEdit(self)
         self._edit.setFixedHeight(_PROMPT_EDIT_HEIGHT)
-        self._edit.setPlaceholderText(
-            "用 {text} 表示选中的文字；若不含 {text}，选中文字会自动附在末尾。"
-        )
+        self._edit.setPlaceholderText(t("settings.selection.promptPlaceholder"))
         # 失焦写回，避免每次按键都落盘
         self._edit.focusOutEvent = self._wrap_focus_out(self._edit.focusOutEvent)
         layout.addWidget(self._edit)
@@ -72,7 +71,7 @@ class _PromptCard(CardWidget):
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, 0, 0, 0)
         btn_row.addStretch()
-        self._reset_btn = PrimaryPushButton("恢复默认", self)
+        self._reset_btn = PrimaryPushButton(t("settings.selection.restoreDefault"), self)
         self._reset_btn.clicked.connect(self._restore_default)
         btn_row.addWidget(self._reset_btn)
         layout.addLayout(btn_row)
@@ -113,13 +112,13 @@ class SelectionPage(QScrollArea):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        group = SettingCardGroup("划词", container)
+        group = SettingCardGroup(t("settings.selection.group"), container)
 
         group.addSettingCard(
             SwitchSettingCard(
                 FluentIcon.QUICK_NOTE,
-                "划词浮标",
-                "在任意应用选中文字后，光标旁自动弹出动作条",
+                t("settings.selection.float"),
+                t("settings.selection.float.desc"),
                 configItem=cfg.selectionFloatEnabled,
                 parent=self,
             )
@@ -127,8 +126,8 @@ class SelectionPage(QScrollArea):
         group.addSettingCard(
             SwitchSettingCard(
                 FluentIcon.DICTIONARY,
-                "显示「解释」",
-                "浮标上显示解释动作（就地解释选中文字的含义）",
+                t("settings.selection.explain"),
+                t("settings.selection.explain.desc"),
                 configItem=cfg.selectionExplainEnabled,
                 parent=self,
             )
@@ -136,8 +135,8 @@ class SelectionPage(QScrollArea):
         group.addSettingCard(
             SwitchSettingCard(
                 FluentIcon.CHAT,
-                "显示「续入会话」",
-                "浮标上显示续入会话与新建会话（把选中文填进快速会话，自己补指令再发）",
+                t("settings.selection.continue"),
+                t("settings.selection.continue.desc"),
                 configItem=cfg.selectionContinueExplainEnabled,
                 parent=self,
             )
@@ -145,8 +144,8 @@ class SelectionPage(QScrollArea):
         group.addSettingCard(
             SwitchSettingCard(
                 FluentIcon.QUICK_NOTE,
-                "显示「存便签」",
-                "浮标上显示存便签动作（把选中文字直接存入笔记库）",
+                t("settings.selection.note"),
+                t("settings.selection.note.desc"),
                 configItem=cfg.selectionNoteEnabled,
                 parent=self,
             )
@@ -154,8 +153,8 @@ class SelectionPage(QScrollArea):
         group.addSettingCard(
             SwitchSettingCard(
                 FluentIcon.EDIT,
-                "显示「改写回填」",
-                "浮标上显示润色 / 翻译 / 订正（AI 改写后写回原应用，覆盖选中文字）",
+                t("settings.selection.rewrite"),
+                t("settings.selection.rewrite.desc"),
                 configItem=cfg.selectionRewriteEnabled,
                 parent=self,
             )
@@ -163,8 +162,8 @@ class SelectionPage(QScrollArea):
         group.addSettingCard(
             SwitchSettingCard(
                 FluentIcon.ACCEPT,
-                "回填前校验选区",
-                "替换原文前先确认选区未变，避免等 AI 期间点走后粘到错误位置（多一次取词）",
+                t("settings.selection.verify"),
+                t("settings.selection.verify.desc"),
                 configItem=cfg.selectionRewriteVerify,
                 parent=self,
             )
@@ -177,15 +176,14 @@ class SelectionPage(QScrollArea):
         # 导致编辑框只剩一条线（之前的显示问题就是这么来的）。
         self._prompt_cards = []
         for title, action_key, config_attr, hint in (
-            ("解释提示词", "explain", "selectionExplainPrompt",
-             "解释动作发给 AI 的提示词，留空使用内置默认。"),
-            ("润色提示词", "polish", "selectionPolishPrompt",
-             "润色动作发给 AI 的提示词，留空使用内置默认。建议保留「只输出结果」约束，"
-             "否则改写结果会带解释，回填会污染原文。"),
-            ("翻译提示词", "translate_inplace", "selectionTranslatePrompt",
-             "翻译动作发给 AI 的提示词，留空使用内置默认（中英互译）。"),
-            ("订正提示词", "fix_grammar", "selectionFixGrammarPrompt",
-             "订正动作发给 AI 的提示词，留空使用内置默认。"),
+            (t("settings.selection.prompt.explain"), "explain", "selectionExplainPrompt",
+             t("settings.selection.prompt.explain.hint")),
+            (t("settings.selection.prompt.polish"), "polish", "selectionPolishPrompt",
+             t("settings.selection.prompt.polish.hint")),
+            (t("settings.selection.prompt.translate"), "translate_inplace", "selectionTranslatePrompt",
+             t("settings.selection.prompt.translate.hint")),
+            (t("settings.selection.prompt.fix"), "fix_grammar", "selectionFixGrammarPrompt",
+             t("settings.selection.prompt.fix.hint")),
         ):
             label = StrongBodyLabel(title, container)
             layout.addWidget(label)

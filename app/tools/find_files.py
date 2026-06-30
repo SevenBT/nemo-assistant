@@ -15,6 +15,7 @@ from typing import Any, TYPE_CHECKING
 from app.tools.base import BuiltinTool
 from app.tools.schema import Int, Str, tool_params
 from app.tools._path_utils import IGNORE_DIRS, resolve_safe
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.tools.context import ToolContext
@@ -39,15 +40,15 @@ class FindFilesTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return "按文件名关键词或 glob 模式搜索文件，如 '*.py' 或 'config'"
+        return t("tool.find_files.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "query",
-            query=Str("文件名关键词或 glob 模式，如 '*.py' 或 'config'"),
-            root=Str("搜索起始目录，相对于工作目录，默认根目录"),
-            max_results=Int("最大返回数量，默认 100", maximum=200),
+            query=Str(t("tool.find_files.param.query")),
+            root=Str(t("tool.find_files.param.root")),
+            max_results=Int(t("tool.find_files.param.max_results"), maximum=200),
         )
 
     @property
@@ -60,13 +61,13 @@ class FindFilesTool(BuiltinTool):
         max_results = params.get("max_results", _DEFAULT_MAX)
 
         if not query:
-            return {"status": "error", "data": {"message": "query 不能为空"}}
+            return {"status": "error", "data": {"message": t("tool.find_files.msg.query_empty")}}
 
         root, err = resolve_safe(root_str, self._workspace)
         if err:
             return {"status": "error", "data": {"message": err}}
         if not root.exists() or not root.is_dir():
-            return {"status": "error", "data": {"message": f"目录不存在: {root_str}"}}
+            return {"status": "error", "data": {"message": t("tool.find_files.msg.dir_not_found", path=root_str)}}
 
         is_glob = bool(_GLOB_CHARS & set(query))
         matches = []

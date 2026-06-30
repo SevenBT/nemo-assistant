@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 
 from app.ui.components.markdown_highlighter import MarkdownHighlighter
 from app.core.wiki_links import parse_wiki_links
+from app.i18n import t
 
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
@@ -41,7 +42,7 @@ class MarkdownEditor(QPlainTextEdit):
         super().__init__(parent)
         self._images_dir = images_dir
         self._find_replace_dialog = None
-        self.setPlaceholderText("在此输入 Markdown 内容…")
+        self.setPlaceholderText(t("md.placeholder"))
         self.setAcceptDrops(True)
 
         # Syntax highlighter (adapted from noteration, MIT)
@@ -171,16 +172,16 @@ class MarkdownEditor(QPlainTextEdit):
 
         if mods == ctrl:
             if key == Qt.Key.Key_B:
-                self._wrap_selection("**", "**", "加粗文字")
+                self._wrap_selection("**", "**", t("md.text.bold"))
                 return
             if key == Qt.Key.Key_I:
-                self._wrap_selection("*", "*", "斜体文字")
+                self._wrap_selection("*", "*", t("md.text.italic"))
                 return
             if key == Qt.Key.Key_K:
                 self._insert_link()
                 return
             if key == Qt.Key.Key_QuoteLeft:
-                self._wrap_selection("`", "`", "代码")
+                self._wrap_selection("`", "`", t("md.text.code"))
                 return
             if key == Qt.Key.Key_F:
                 self._open_find_replace()
@@ -292,7 +293,7 @@ class MarkdownEditor(QPlainTextEdit):
         dest = self._images_dir / filename
         image.save(str(dest), "PNG")
         rel = f"images/{filename}"
-        self.textCursor().insertText(f"![图片]({rel})")
+        self.textCursor().insertText(f"![{t('md.text.image')}]({rel})")
 
     def _drop_image_file(self, file_path: Path):
         """Copy dropped image file to images dir and insert markdown."""
@@ -409,71 +410,71 @@ class MarkdownEditor(QPlainTextEdit):
             f"QMenu::item:selected {{ background: {hover_bg}; }}"
         )
 
-        menu.addAction("新增链接").triggered.connect(self._insert_link)
+        menu.addAction(t("md.menu.insertLink")).triggered.connect(self._insert_link)
         menu.addSeparator()
 
         # Text format submenu
-        fmt_menu = menu.addMenu("文本格式")
-        fmt_menu.addAction("加粗").triggered.connect(lambda: self._wrap_selection("**", "**", "加粗文字"))
-        fmt_menu.addAction("倾斜").triggered.connect(lambda: self._wrap_selection("*", "*", "斜体文字"))
-        fmt_menu.addAction("删除线").triggered.connect(lambda: self._wrap_selection("~~", "~~", "删除线文字"))
-        fmt_menu.addAction("高亮").triggered.connect(lambda: self._wrap_selection("==", "==", "高亮文字"))
-        fmt_menu.addAction("代码").triggered.connect(lambda: self._wrap_selection("`", "`", "代码"))
-        fmt_menu.addAction("数学").triggered.connect(lambda: self._wrap_selection("$", "$", "公式"))
-        fmt_menu.addAction("注释").triggered.connect(lambda: self._wrap_selection("<!-- ", " -->", "注释"))
+        fmt_menu = menu.addMenu(t("md.menu.textFormat"))
+        fmt_menu.addAction(t("md.menu.bold")).triggered.connect(lambda: self._wrap_selection("**", "**", t("md.text.bold")))
+        fmt_menu.addAction(t("md.menu.italic")).triggered.connect(lambda: self._wrap_selection("*", "*", t("md.text.italic")))
+        fmt_menu.addAction(t("md.menu.strike")).triggered.connect(lambda: self._wrap_selection("~~", "~~", t("md.text.strike")))
+        fmt_menu.addAction(t("md.menu.highlight")).triggered.connect(lambda: self._wrap_selection("==", "==", t("md.text.highlight")))
+        fmt_menu.addAction(t("md.menu.code")).triggered.connect(lambda: self._wrap_selection("`", "`", t("md.text.code")))
+        fmt_menu.addAction(t("md.menu.math")).triggered.connect(lambda: self._wrap_selection("$", "$", t("md.text.formula")))
+        fmt_menu.addAction(t("md.menu.comment")).triggered.connect(lambda: self._wrap_selection("<!-- ", " -->", t("md.text.comment")))
         fmt_menu.addSeparator()
-        fmt_menu.addAction("清除格式").triggered.connect(self._clear_inline_format)
+        fmt_menu.addAction(t("md.menu.clearFormat")).triggered.connect(self._clear_inline_format)
 
         # Paragraph submenu
-        para_menu = menu.addMenu("段落设置")
-        para_menu.addAction("无序列表").triggered.connect(lambda: self._set_line_prefix("- "))
-        para_menu.addAction("有序列表").triggered.connect(lambda: self._set_line_prefix("1. "))
-        para_menu.addAction("任务列表").triggered.connect(lambda: self._set_line_prefix("- [ ] "))
+        para_menu = menu.addMenu(t("md.menu.paragraph"))
+        para_menu.addAction(t("md.menu.bulletList")).triggered.connect(lambda: self._set_line_prefix("- "))
+        para_menu.addAction(t("md.menu.numberedList")).triggered.connect(lambda: self._set_line_prefix("1. "))
+        para_menu.addAction(t("md.menu.taskList")).triggered.connect(lambda: self._set_line_prefix("- [ ] "))
         para_menu.addSeparator()
-        para_menu.addAction("H1 一级标题").triggered.connect(lambda: self._set_heading(1))
-        para_menu.addAction("H2 二级标题").triggered.connect(lambda: self._set_heading(2))
-        para_menu.addAction("H3 三级标题").triggered.connect(lambda: self._set_heading(3))
-        para_menu.addAction("H4 四级标题").triggered.connect(lambda: self._set_heading(4))
-        para_menu.addAction("H5 五级标题").triggered.connect(lambda: self._set_heading(5))
-        para_menu.addAction("H6 六级标题").triggered.connect(lambda: self._set_heading(6))
-        para_menu.addAction("正文").triggered.connect(self._clear_block_prefix)
-        para_menu.addAction("引用").triggered.connect(lambda: self._set_line_prefix("> "))
+        para_menu.addAction(t("md.menu.h1")).triggered.connect(lambda: self._set_heading(1))
+        para_menu.addAction(t("md.menu.h2")).triggered.connect(lambda: self._set_heading(2))
+        para_menu.addAction(t("md.menu.h3")).triggered.connect(lambda: self._set_heading(3))
+        para_menu.addAction(t("md.menu.h4")).triggered.connect(lambda: self._set_heading(4))
+        para_menu.addAction(t("md.menu.h5")).triggered.connect(lambda: self._set_heading(5))
+        para_menu.addAction(t("md.menu.h6")).triggered.connect(lambda: self._set_heading(6))
+        para_menu.addAction(t("md.menu.body")).triggered.connect(self._clear_block_prefix)
+        para_menu.addAction(t("md.menu.quote")).triggered.connect(lambda: self._set_line_prefix("> "))
 
         # Insert submenu
-        ins_menu = menu.addMenu("插入")
-        ins_menu.addAction("图片").triggered.connect(self._insert_image)
-        ins_menu.addAction("表格").triggered.connect(self._insert_table)
-        ins_menu.addAction("标注").triggered.connect(self._insert_callout)
-        ins_menu.addAction("分隔线").triggered.connect(self._insert_hr)
-        ins_menu.addAction("代码块").triggered.connect(self._insert_code_block)
-        ins_menu.addAction("数学块").triggered.connect(self._insert_math_block)
+        ins_menu = menu.addMenu(t("md.menu.insert"))
+        ins_menu.addAction(t("md.menu.image")).triggered.connect(self._insert_image)
+        ins_menu.addAction(t("md.menu.table")).triggered.connect(self._insert_table)
+        ins_menu.addAction(t("md.menu.callout")).triggered.connect(self._insert_callout)
+        ins_menu.addAction(t("md.menu.hr")).triggered.connect(self._insert_hr)
+        ins_menu.addAction(t("md.menu.codeBlock")).triggered.connect(self._insert_code_block)
+        ins_menu.addAction(t("md.menu.mathBlock")).triggered.connect(self._insert_math_block)
 
         menu.addSeparator()
 
-        cut_act = menu.addAction("剪切")
+        cut_act = menu.addAction(t("edit.cut"))
         cut_act.setShortcut(QKeySequence.StandardKey.Cut)
         cut_act.triggered.connect(self.cut)
-        copy_act = menu.addAction("复制")
+        copy_act = menu.addAction(t("edit.copy"))
         copy_act.setShortcut(QKeySequence.StandardKey.Copy)
         copy_act.triggered.connect(self.copy)
-        paste_act = menu.addAction("粘贴")
+        paste_act = menu.addAction(t("edit.paste"))
         paste_act.setShortcut(QKeySequence.StandardKey.Paste)
         paste_act.triggered.connect(self.paste)
-        # Detect image in clipboard and show "粘贴图片" option
+        # Detect image in clipboard and show paste-image option
         clipboard = QApplication.clipboard()
         clip_image = clipboard.image()
         if clip_image and not clip_image.isNull():
-            paste_img_act = menu.addAction("粘贴图片")
+            paste_img_act = menu.addAction(t("md.menu.pasteImage"))
             paste_img_act.triggered.connect(lambda: self._paste_image(clip_image))
-        paste_plain_act = menu.addAction("以纯文本形式粘贴")
+        paste_plain_act = menu.addAction(t("md.menu.pastePlain"))
         paste_plain_act.setShortcut(QKeySequence("Ctrl+Shift+V"))
         paste_plain_act.triggered.connect(self._paste_plain_text)
         menu.addSeparator()
-        select_all_act = menu.addAction("全选")
+        select_all_act = menu.addAction(t("edit.selectAll"))
         select_all_act.setShortcut(QKeySequence.StandardKey.SelectAll)
         select_all_act.triggered.connect(self.selectAll)
         menu.addSeparator()
-        menu.addAction("查找替换").triggered.connect(self._open_find_replace)
+        menu.addAction(t("md.menu.findReplace")).triggered.connect(self._open_find_replace)
 
         has_selection = self.textCursor().hasSelection()
         cut_act.setEnabled(has_selection)
@@ -576,10 +577,10 @@ class MarkdownEditor(QPlainTextEdit):
     def _insert_link(self):
         saved_cursor = self.textCursor()
         selected = saved_cursor.selectedText()
-        text, ok = QInputDialog.getText(self, "新增链接", "链接文字:", text=selected or "")
+        text, ok = QInputDialog.getText(self, t("md.link.title"), t("md.link.textLabel"), text=selected or "")
         if not ok:
             return
-        url, ok2 = QInputDialog.getText(self, "新增链接", "URL:")
+        url, ok2 = QInputDialog.getText(self, t("md.link.title"), t("md.link.urlLabel"))
         if not ok2:
             return
         self.setTextCursor(saved_cursor)
@@ -590,7 +591,7 @@ class MarkdownEditor(QPlainTextEdit):
             return
         saved_cursor = self.textCursor()
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择图片", "", "图片文件 (*.png *.jpg *.jpeg *.gif *.webp *.svg)"
+            self, t("md.image.title"), "", t("md.image.filter")
         )
         if not path:
             return
@@ -601,15 +602,13 @@ class MarkdownEditor(QPlainTextEdit):
         dest = self._images_dir / filename
         shutil.copy2(path, dest)
         rel = f"images/{filename}"
-        self.textCursor().insertText(f"![图片]({rel})")
+        self.textCursor().insertText(f"![{t('md.text.image')}]({rel})")
 
     def _insert_table(self):
-        self._insert_block(
-            "| 列1 | 列2 | 列3 |\n| --- | --- | --- |\n| 内容 | 内容 | 内容 |"
-        )
+        self._insert_block(t("md.text.table"))
 
     def _insert_callout(self):
-        self._insert_block("> [!NOTE]\n> 标注内容")
+        self._insert_block(t("md.text.callout"))
 
     def _insert_hr(self):
         self._insert_block("---")
@@ -617,7 +616,7 @@ class MarkdownEditor(QPlainTextEdit):
     def _insert_code_block(self):
         # Save cursor position before dialog steals focus
         saved_cursor = self.textCursor()
-        lang, ok = QInputDialog.getText(self, "代码块", "语言（如 python、js，可留空）:")
+        lang, ok = QInputDialog.getText(self, t("md.codeBlock.title"), t("md.codeBlock.label"))
         if not ok:
             return
         self.setTextCursor(saved_cursor)

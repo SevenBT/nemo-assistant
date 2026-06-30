@@ -49,7 +49,7 @@ class AutoSettingPage(QScrollArea):
         ])
     """
 
-    def __init__(self, title: str, specs: list[CardSpec], parent=None):
+    def __init__(self, title: str, specs: list, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -62,7 +62,13 @@ class AutoSettingPage(QScrollArea):
         group = SettingCardGroup(title, container)
 
         for spec in specs:
-            card = self._create_card(spec)
+            # specs 可以是 CardSpec，也可以是一个返回 SettingCard 的工厂
+            # （callable，接收 parent），用于无法由 ConfigItem 自动生成的
+            # 自定义卡片（如主题卡的「模式 + 主题」组合）。
+            if isinstance(spec, CardSpec):
+                card = self._create_card(spec)
+            else:
+                card = spec(self)
             if card:
                 group.addSettingCard(card)
 

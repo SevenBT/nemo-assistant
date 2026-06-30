@@ -22,21 +22,23 @@ from app.core.config import (
     get_search_api_key,
     set_search_api_key,
 )
+from app.i18n import t
 
+# (data, i18n key)；label/说明文字在运行时按当前语言取，避免在 init_language 之前定型
 _SEARCH_PROVIDERS = [
-    ("ddg", "DuckDuckGo（免费，无需 Key）"),
-    ("bing", "Bing Search"),
-    ("tavily", "Tavily"),
-    ("brave", "Brave Search"),
-    ("bocha", "博查 AI 搜索"),
+    ("ddg", "settings.tools.providerDdg"),
+    ("bing", "settings.tools.providerBing"),
+    ("tavily", "settings.tools.providerTavily"),
+    ("brave", "settings.tools.providerBrave"),
+    ("bocha", "settings.tools.providerBocha"),
 ]
 
-_KEY_HINTS = {
-    "ddg": "DuckDuckGo 无需 API Key",
-    "bing": "Azure Bing Search API Key（portal.azure.com）",
-    "tavily": "Tavily API Key（tavily.com）",
-    "brave": "Brave Search API Key（api.search.brave.com）",
-    "bocha": "博查 API Key（bocha.ai）",
+_KEY_HINT_KEYS = {
+    "ddg": "settings.tools.keyHintDdg",
+    "bing": "settings.tools.keyHintBing",
+    "tavily": "settings.tools.keyHintTavily",
+    "brave": "settings.tools.keyHintBrave",
+    "bocha": "settings.tools.keyHintBocha",
 }
 
 
@@ -56,13 +58,13 @@ class ToolsPage(QScrollArea):
         # Search provider
         form = QFormLayout()
         self._search_provider = QComboBox()
-        for data, label in _SEARCH_PROVIDERS:
-            self._search_provider.addItem(label, data)
+        for data, label_key in _SEARCH_PROVIDERS:
+            self._search_provider.addItem(t(label_key), data)
         current = cfg.get(cfg.searchProvider)
         idx = next((i for i, (d, _) in enumerate(_SEARCH_PROVIDERS) if d == current), 0)
         self._search_provider.setCurrentIndex(idx)
         self._search_provider.currentIndexChanged.connect(self._on_provider_changed)
-        form.addRow("搜索引擎:", self._search_provider)
+        form.addRow(t("settings.tools.searchEngine"), self._search_provider)
 
         # Search API key
         self._search_key = QLineEdit()
@@ -70,7 +72,7 @@ class ToolsPage(QScrollArea):
         self._search_key.setText(get_search_api_key())
         self._search_key.editingFinished.connect(self._save_search_key)
         self._on_provider_changed(idx)
-        form.addRow("搜索 API Key:", self._search_key)
+        form.addRow(t("settings.tools.searchApiKey"), self._search_key)
 
         # Save directory
         save_row = QWidget()
@@ -80,12 +82,12 @@ class ToolsPage(QScrollArea):
         self._save_dir.setPlaceholderText(str(Path.home() / "Downloads"))
         self._save_dir.setText(cfg.get(cfg.saveDir))
         self._save_dir.editingFinished.connect(self._save_dir_changed)
-        browse_btn = QPushButton("浏览…")
+        browse_btn = QPushButton(t("settings.tools.browse"))
         browse_btn.setFixedWidth(60)
         browse_btn.clicked.connect(self._browse_save_dir)
         save_layout.addWidget(self._save_dir)
         save_layout.addWidget(browse_btn)
-        form.addRow("文件保存目录:", save_row)
+        form.addRow(t("settings.tools.saveDir"), save_row)
 
         layout.addLayout(form)
 
@@ -96,7 +98,7 @@ class ToolsPage(QScrollArea):
         provider = self._search_provider.itemData(index)
         is_free = provider == "ddg"
         self._search_key.setEnabled(not is_free)
-        self._search_key.setPlaceholderText(_KEY_HINTS.get(provider, "API Key"))
+        self._search_key.setPlaceholderText(t(_KEY_HINT_KEYS.get(provider, "settings.tools.keyHintDefault")))
         cfg.set(cfg.searchProvider, provider)
 
     def _save_search_key(self):
@@ -107,7 +109,7 @@ class ToolsPage(QScrollArea):
 
     def _browse_save_dir(self):
         current = self._save_dir.text().strip() or str(Path.home() / "Downloads")
-        path = QFileDialog.getExistingDirectory(self, "选择文件保存目录", current)
+        path = QFileDialog.getExistingDirectory(self, t("settings.tools.chooseSaveDir"), current)
         if path:
             self._save_dir.setText(path)
             cfg.set(cfg.saveDir, path)

@@ -14,6 +14,7 @@ from typing import Any, Callable, TYPE_CHECKING
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Str, tool_params
+from app.i18n import t
 
 if TYPE_CHECKING:
     from app.core.note_manager import NoteManager
@@ -39,20 +40,15 @@ class NoteTool(BuiltinTool):
 
     @property
     def description(self) -> str:
-        return (
-            "管理用户笔记。\n"
-            "- action=list：读取所有笔记列表（标题、内容预览、更新时间），无需其他参数\n"
-            "- action=create：创建一条新笔记，需 title + content；"
-            "若要把当前对话总结成笔记，自己生成总结文本作为 content 传入"
-        )
+        return t("tool.note.description")
 
     @property
     def parameters(self) -> dict[str, Any]:
         return tool_params(
             "action",
-            action=Str("操作类型：list（读取列表）或 create（创建笔记）", enum=["list", "create"]),
-            title=Str("action=create 时必填，笔记标题，简明扼要"),
-            content=Str("action=create 时必填，笔记正文内容"),
+            action=Str(t("tool.note.param.action"), enum=["list", "create"]),
+            title=Str(t("tool.note.param.title")),
+            content=Str(t("tool.note.param.content")),
         )
 
     def execute(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -63,7 +59,7 @@ class NoteTool(BuiltinTool):
             return self._create(params)
         return {
             "status": "error",
-            "data": {"message": f"未知 action: {action}，应为 list/create"},
+            "data": {"message": t("tool.note.msg.unknown_action", action=action)},
         }
 
     def _list(self) -> dict[str, Any]:
@@ -74,7 +70,7 @@ class NoteTool(BuiltinTool):
         title = params.get("title")
         content = params.get("content")
         if not title or content is None:
-            return {"status": "error", "data": {"message": "action=create 需要 title + content"}}
+            return {"status": "error", "data": {"message": t("tool.note.msg.create_needs_title_content")}}
         try:
             note = self._notes.create(title=title, content=content)
             # 触发 UI 刷新（通过 Qt 信号机制）

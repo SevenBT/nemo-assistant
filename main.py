@@ -67,8 +67,9 @@ def _setup_crash_log():
         # 弹窗提示（在有 QApplication 之前可能失败，所以用 try）
         try:
             from PyQt6.QtWidgets import QApplication, QMessageBox
+            from app.i18n import t
             _app = QApplication.instance() or QApplication(sys.argv)
-            QMessageBox.critical(None, "启动错误", msg[:2000])
+            QMessageBox.critical(None, t("app.startupError"), msg[:2000])
         except Exception:
             pass
 
@@ -104,6 +105,10 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("AI Agent")
     app.setQuitOnLastWindowClosed(False)  # 保持托盘常驻
+
+    # 锁定本次运行的界面语言（切换语言需重启才生效）。
+    from app.i18n import init_language
+    init_language(cfg.get(cfg.language))
 
     from app.core.config import ASSETS_DIR
     icon_path = ASSETS_DIR / "app_icon.png"

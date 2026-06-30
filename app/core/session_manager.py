@@ -14,7 +14,7 @@ from typing import Optional
 
 from app.core.config import SESSIONS_DIR
 from app.models.message import Message
-from app.models.session import DEFAULT_SESSION_TITLE, SOURCE_MANUAL, Session
+from app.models.session import is_default_session_title, SOURCE_MANUAL, Session
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +104,8 @@ class SessionManager:
     def get(self, session_id: str) -> Optional[Session]:
         return self._sessions.get(session_id)
 
-    def create(self, title: str = "新会话", source: str = SOURCE_MANUAL) -> Session:
-        session = Session(title=title, source=source)
+    def create(self, title: str | None = None, source: str = SOURCE_MANUAL) -> Session:
+        session = Session(source=source) if title is None else Session(title=title, source=source)
         self._sessions[session.id] = session
         self._save(session)
         return session
@@ -154,7 +154,7 @@ class SessionManager:
             len(session.messages) == 1
             and message.role == "user"
             and message.content
-            and session.title == DEFAULT_SESSION_TITLE
+            and is_default_session_title(session.title)
         ):
             session.title = message.content[:25].strip()
         self._save(session)

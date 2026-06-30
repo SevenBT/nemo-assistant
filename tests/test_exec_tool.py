@@ -26,24 +26,27 @@ class ExecToolValidationTest(unittest.TestCase):
         self.assertIn("workspace", result["data"]["message"])
 
     def test_nonexistent_working_dir_rejected(self):
+        from app.i18n import t
         tool = ExecTool(workspace=self.ws)
         result = tool.execute({"command": "echo hi", "working_dir": "nope"})
         self.assertEqual(result["status"], "error")
-        self.assertIn("工作目录不存在", result["data"]["message"])
+        self.assertIn(t("tool.exec.msg.working_dir_not_found").split("{")[0], result["data"]["message"])
 
     def test_dangerous_command_without_confirm_blocked(self):
+        from app.i18n import t
         # 无 confirm_action 时危险命令直接拦截，不执行
         tool = ExecTool(workspace=self.ws, confirm_action=None)
         result = tool.execute({"command": "rm -rf /"})
         self.assertEqual(result["status"], "error")
-        self.assertIn("危险命令", result["data"]["message"])
+        self.assertIn(t("tool.exec.msg.dangerous_blocked").split("（")[0].split("(")[0], result["data"]["message"])
 
     def test_dangerous_command_user_declines(self):
+        from app.i18n import t
         # confirm_action 返回 False → 用户取消，不执行
         tool = ExecTool(workspace=self.ws, confirm_action=lambda title, msg: False)
         result = tool.execute({"command": "shutdown -h now"})
         self.assertEqual(result["status"], "error")
-        self.assertIn("用户取消", result["data"]["message"])
+        self.assertEqual(t("tool.exec.msg.user_cancelled"), result["data"]["message"])
 
     def test_safe_command_executes(self):
         # 安全命令应真正执行并返回 success（echo 跨平台可用）

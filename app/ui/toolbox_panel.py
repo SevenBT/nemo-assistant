@@ -38,6 +38,7 @@ from qfluentwidgets import (
 if TYPE_CHECKING:
     from app.tools.registry import ToolRegistry
 
+from app.i18n import t
 from app.tools.registry import HIGH_RISK_TOOLS
 from app.tools.script_adapter import ScriptToolAdapter
 
@@ -166,9 +167,9 @@ class _DetailPane(QWidget):
         self._info_layout = QVBoxLayout(info_widget)
         self._info_layout.setContentsMargins(0, 10, 0, 0)
         self._info_layout.setSpacing(14)
-        self._params_section = self._make_section("参数")
+        self._params_section = self._make_section(t("workshop.detail.params"))
         self._info_layout.addWidget(self._params_section)
-        self._deps_section = self._make_section("依赖")
+        self._deps_section = self._make_section(t("workshop.detail.deps"))
         self._info_layout.addWidget(self._deps_section)
         self._info_layout.addStretch()
         scroll.setWidget(info_widget)
@@ -183,17 +184,17 @@ class _DetailPane(QWidget):
         act_root.addSpacing(10)
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-        self._edit_btn = PushButton(FluentIcon.EDIT, "编辑")
+        self._edit_btn = PushButton(FluentIcon.EDIT, t("workshop.action.edit"))
         self._edit_btn.clicked.connect(self.edit_requested)
         btn_row.addWidget(self._edit_btn)
-        self._test_btn = PushButton(FluentIcon.PLAY, "测试")
+        self._test_btn = PushButton(FluentIcon.PLAY, t("workshop.action.test"))
         self._test_btn.clicked.connect(self.test_requested)
         btn_row.addWidget(self._test_btn)
-        self._folder_btn = PushButton(FluentIcon.FOLDER, "目录")
+        self._folder_btn = PushButton(FluentIcon.FOLDER, t("workshop.action.folder"))
         self._folder_btn.clicked.connect(self.folder_requested)
         btn_row.addWidget(self._folder_btn)
         btn_row.addStretch()
-        self._delete_btn = PushButton(FluentIcon.DELETE, "删除")
+        self._delete_btn = PushButton(FluentIcon.DELETE, t("workshop.action.delete"))
         self._delete_btn.clicked.connect(self.delete_requested)
         btn_row.addWidget(self._delete_btn)
         act_root.addLayout(btn_row)
@@ -230,11 +231,11 @@ class _DetailPane(QWidget):
                 meta.append(f"v{tool.version}")
             if tool.author:
                 meta.append(f"by {tool.author}")
-            self._meta_lbl.setText("  ·  ".join(meta) if meta else "我的工具")
+            self._meta_lbl.setText("  ·  ".join(meta) if meta else t("workshop.meta.my_tool"))
         elif tool.name in HIGH_RISK_TOOLS:
-            self._meta_lbl.setText("内置工具  ·  高风险,可关闭")
+            self._meta_lbl.setText(t("workshop.meta.builtin_highrisk"))
         else:
-            self._meta_lbl.setText("内置工具")
+            self._meta_lbl.setText(t("workshop.meta.builtin"))
 
         self._desc_lbl.setText(tool.description)
 
@@ -254,7 +255,7 @@ class _DetailPane(QWidget):
             params_lbl.setText("<br>".join(lines))
             params_lbl.setTextFormat(Qt.TextFormat.RichText)
         else:
-            params_lbl.setText("无参数")
+            params_lbl.setText(t("workshop.detail.no_params"))
 
         # 依赖区仅对脚本工具有意义
         deps_lbl = self._deps_section.findChildren(BodyLabel)[0]
@@ -267,7 +268,7 @@ class _DetailPane(QWidget):
                 ))
                 deps_lbl.setTextFormat(Qt.TextFormat.RichText)
             else:
-                deps_lbl.setText("无外部依赖")
+                deps_lbl.setText(t("workshop.detail.no_deps"))
         else:
             self._deps_section.hide()
 
@@ -328,23 +329,23 @@ class ToolboxPanel(QWidget):
 
         header = QHBoxLayout()
         header.setSpacing(6)
-        title = CaptionLabel("能力")
+        title = CaptionLabel(t("workshop.title"))
         title.setObjectName("panelTitle")
         header.addWidget(title)
         header.addStretch()
         new_btn = TransparentToolButton(FluentIcon.ADD)
         new_btn.setFixedSize(30, 30)
-        new_btn.setToolTip("新建工具")
+        new_btn.setToolTip(t("workshop.tip.new"))
         new_btn.clicked.connect(self._on_new_tool)
         header.addWidget(new_btn)
         gen_btn = TransparentToolButton(FluentIcon.ROBOT)
         gen_btn.setFixedSize(30, 30)
-        gen_btn.setToolTip("AI 生成工具")
+        gen_btn.setToolTip(t("workshop.tip.generate"))
         gen_btn.clicked.connect(self._on_generate_tool)
         header.addWidget(gen_btn)
         refresh_btn = TransparentToolButton(FluentIcon.SYNC)
         refresh_btn.setFixedSize(30, 30)
-        refresh_btn.setToolTip("刷新")
+        refresh_btn.setToolTip(t("workshop.tip.refresh"))
         refresh_btn.clicked.connect(self.refresh)
         header.addWidget(refresh_btn)
         left_layout.addLayout(header)
@@ -421,17 +422,17 @@ class ToolboxPanel(QWidget):
         )
 
         if builtin:
-            self._add_group_header("内置能力")
+            self._add_group_header(t("workshop.group.builtin"))
             for tool in builtin:
                 # 仅高风险内置工具可开关,其余只读展示
                 self._add_tool_item(tool, switchable=tool.name in HIGH_RISK_TOOLS)
 
-        self._add_group_header("我的工具")
+        self._add_group_header(t("workshop.group.mine"))
         if scripts:
             for tool in scripts:
                 self._add_tool_item(tool, switchable=True)
         else:
-            hint = QListWidgetItem("还没有自定义工具 — 点上方 + 或 🤖 添加")
+            hint = QListWidgetItem(t("workshop.empty_hint"))
             hint.setFlags(Qt.ItemFlag.NoItemFlags)
             self._list.addItem(hint)
 
@@ -507,8 +508,8 @@ class ToolboxPanel(QWidget):
         if not isinstance(self._current_tool, ScriptToolAdapter):
             return
         w = MessageBox(
-            "确认删除",
-            f"确定要删除工具「{self._current_tool.name}」吗？\n此操作将删除工具目录及所有文件。",
+            t("workshop.delete.title"),
+            t("workshop.delete.body", name=self._current_tool.name),
             self.window(),
         )
         if w.exec():
