@@ -4,7 +4,9 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
-_ICON_PATH = str(Path(__file__).parent.parent.parent / "assets" / "app_icon.png")
+from app.core.config import ASSETS_DIR
+
+_ICON_PATH = str(ASSETS_DIR / "app_icon.png")
 
 
 class TrayManager(QObject):

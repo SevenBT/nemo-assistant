@@ -43,7 +43,9 @@ def discover_builtin_tools() -> list[type[BuiltinTool]]:
     扫描 app/tools/ 包，自动发现所有 BuiltinTool 子类。
 
     发现逻辑：
-      1. 用 pkgutil.iter_modules 遍历包内所有模块
+      1. 用 pkgutil.iter_modules 遍历包内所有模块（PyInstaller 6.x 的
+         PyiFrozenLoader 同样支持，故源码/打包共用一套逻辑；打包时由
+         AI_Agent.spec 的 collect_submodules('app.tools') 确保模块入包）
       2. 跳过基础设施模块和下划线开头的私有模块
       3. 导入模块后遍历其所有属性
       4. 筛选条件：是类 + 是 BuiltinTool 子类 + 不是 BuiltinTool 本身 + 非抽象类
@@ -109,6 +111,7 @@ def load_builtin_tools(ctx: ToolContext, registry: ToolRegistry) -> list[str]:
             registered.append(tool.name)
         except Exception:
             logger.exception("Failed to create tool: %s", tool_cls.__name__)
+    logger.info("Loaded %d builtin tools: %s", len(registered), ", ".join(sorted(registered)))
     return registered
 
 

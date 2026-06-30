@@ -1,9 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 openai_datas, openai_binaries, openai_hiddenimports = collect_all('openai')
 httpx_datas, httpx_binaries, httpx_hiddenimports = collect_all('httpx')
 httpcore_datas, httpcore_binaries, httpcore_hiddenimports = collect_all('httpcore')
+
+# Built-in tools are discovered dynamically at runtime (pkgutil), so PyInstaller's
+# static analysis won't see them. Force-collect every app.tools.* submodule.
+tool_hiddenimports = collect_submodules('app.tools')
 
 a = Analysis(
     ['main.py'],
@@ -13,15 +17,18 @@ a = Analysis(
         *openai_datas,
         *httpx_datas,
         *httpcore_datas,
-        # Ship the tools directory next to the exe so users can add/edit scripts
-        # without repackaging.  At runtime TOOLS_DIR resolves to
-        # Path(sys.executable).parent / "tools".
-        ('tools', 'tools'),
+        # Bundle app assets. In onefile mode the bootloader unpacks these into
+        # sys._MEIPASS at runtime; config.py resolves ASSETS_DIR against that
+        # dir. Built-in tools live in the app.tools package (collected
+        # automatically); user-added tools live in data/user_tools next to the
+        # exe and are unaffected.
+        ('assets', 'assets'),
     ],
     hiddenimports=[
         *openai_hiddenimports,
         *httpx_hiddenimports,
         *httpcore_hiddenimports,
+        *tool_hiddenimports,
         'apscheduler',
         'apscheduler.schedulers.background',
         'apscheduler.executors.pool',
@@ -48,30 +55,25 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+# Onefile build: pack binaries + datas into a single self-extracting exe.
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='AI Agent',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='AI Agent',
+    icon='assets/app_icon.ico',
 )

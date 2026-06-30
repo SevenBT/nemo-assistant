@@ -151,7 +151,7 @@ def _convert_old_to_new(old: dict) -> dict:
     new["Window"]["EdgeSnap"] = window.get("edge_snap", True)
     threshold = window.get("edge_snap_width_threshold", 0.4)
     new["Window"]["EdgeSnapThreshold"] = int(threshold * 100)
-    new["Window"]["MinimizeTo"] = window.get("minimize_to", "tray")
+    new["Window"]["MinimizeTo"] = window.get("minimize_to", "taskbar")
     new["Window"]["Width"] = window.get("width", 440)
     new["Window"]["Height"] = window.get("height", 700)
 

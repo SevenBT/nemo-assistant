@@ -12,6 +12,12 @@ import sys
 import traceback
 from pathlib import Path
 
+# PyInstaller onefile guard: a frozen child process re-executes this exe.
+# freeze_support() makes multiprocessing children exit cleanly here instead of
+# falling through and launching another full app instance.
+import multiprocessing
+multiprocessing.freeze_support()
+
 # ── 依赖自动安装 ──────────────────────────────────────────────────────────
 # 每个元组: (import名, pip包名)
 _REQUIRED_PACKAGES = [
@@ -31,6 +37,12 @@ def _can_import(name: str) -> bool:
         return False
 
 def _ensure_deps():
+    # When frozen (PyInstaller), dependencies are bundled into the exe — never
+    # shell out to pip. Critically, in onefile mode sys.executable IS this app,
+    # so "sys.executable -m pip ..." would relaunch the whole app instead of
+    # pip, spawning runaway processes. Only auto-install from source checkouts.
+    if getattr(sys, "frozen", False):
+        return
     missing = [pkg for imp, pkg in _REQUIRED_PACKAGES if not _can_import(imp)]
     if missing:
         print(f"[startup] 安装缺失依赖: {missing}")
@@ -78,11 +90,23 @@ from app.ui.style import apply_theme
 
 def main():
     """初始化各管理器并启动主窗口。"""
+    # Windows: set an explicit AppUserModelID so the taskbar groups this app
+    # under its own window icon instead of the default Python/PyInstaller icon.
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "captain.ai-agent"
+            )
+        except Exception:
+            pass
+
     app = QApplication(sys.argv)
     app.setApplicationName("AI Agent")
     app.setQuitOnLastWindowClosed(False)  # 保持托盘常驻
 
-    icon_path = Path(__file__).parent / "assets" / "app_icon.png"
+    from app.core.config import ASSETS_DIR
+    icon_path = ASSETS_DIR / "app_icon.png"
     icon = QIcon(str(icon_path))
     app.setWindowIcon(icon)
 
