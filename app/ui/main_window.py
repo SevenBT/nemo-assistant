@@ -286,6 +286,44 @@ class MainWindow(FluentWindow):
             from app.ui.tray_manager import _ICON_PATH
             from PyQt6.QtGui import QIcon
             self.setWindowIcon(QIcon(_ICON_PATH))
+            # 恢复任务栏最小化/还原的原生动画（genie 吸入/弹出效果）。
+            # 详见 _restore_taskbar_animation 的说明。
+            self._restore_taskbar_animation()
+
+    def _restore_taskbar_animation(self):
+        """恢复任务栏最小化/还原的 Windows 原生动画（genie 效果）。
+
+        genie 动画依赖窗口保留 WS_CAPTION 样式。qframelesswindow 的
+        addWindowAnimation() 本会把 WS_CAPTION 加回，但本类在其之后调用
+        setWindowFlag(FramelessWindowHint, True) 抑制 Qt 6.10+ 的系统关闭按钮，
+        这会让 Qt 把窗口重建为 WS_POPUP 并再次剥掉 WS_CAPTION，导致动画消失
+        （实测：MIN/MAX 样式在，但 CAPTION=False、POPUP=True，无动画）。
+
+        修复：重新加回 WS_CAPTION。可视边框由 qframelesswindow 的
+        WM_NCCALCSIZE 处理器裁成 0，所以外观仍是无边框（实测加回后窗口尺寸
+        不变）。只加 WS_CAPTION，不加 WS_THICKFRAME——后者会重新引入原生
+        调整大小与幽灵边框（本项目已禁用原生 resize，改用 ResizeFilter）。
+        """
+        import sys
+        if sys.platform != "win32":
+            return
+        try:
+            import win32con
+            import win32gui
+        except ImportError:
+            return
+        hwnd = int(self.winId())
+        style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+        if style & win32con.WS_CAPTION:
+            return
+        win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style | win32con.WS_CAPTION)
+        # SWP_FRAMECHANGED 让样式变更立即生效并重算非客户区。
+        win32gui.SetWindowPos(
+            hwnd, None, 0, 0, 0, 0,
+            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+            | win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED,
+        )
+
 
     def _build_ui(self):
         # 隐藏左侧导航栏 — 导航已集成到标题栏中
