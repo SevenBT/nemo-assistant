@@ -106,6 +106,10 @@ def main():
     app.setApplicationName("AI Agent")
     app.setQuitOnLastWindowClosed(False)  # 保持托盘常驻
 
+    # 加载打包字体并设为全局字体（须在应用主题/样式表之前）。
+    from app.ui.fonts import apply_app_font
+    apply_app_font()
+
     # 锁定本次运行的界面语言（切换语言需重启才生效）。
     from app.i18n import init_language
     init_language(cfg.get(cfg.language))
