@@ -5,8 +5,19 @@
 """
 
 import datetime
+from collections.abc import Iterable
 
 from app.i18n import t
+
+
+# 需要在 system prompt 里附带专门使用说明的工具 → 对应的 i18n 段落 key。
+# 仅这些工具有额外用法说明；其余工具靠 function schema 的 description 即可，
+# 不在 system prompt 里重复。段落按此表顺序拼接，保证输出稳定。
+_TOOL_PROMPT_KEYS: list[tuple[str, str]] = [
+    ("scheduled_task", "prompt.tool.scheduled_task"),
+    ("note", "prompt.tool.note"),
+    ("memory", "prompt.tool.memory"),
+]
 
 
 def get_current_datetime_info() -> str:
@@ -44,7 +55,22 @@ def get_default_user_prompt() -> str:
     return t("prompt.defaultUser")
 
 
-def get_builtin_tools_instruction() -> str:
-    """内置工具说明（不可编辑，自动追加），按当前语言取。"""
-    return t("prompt.builtinTools")
+def get_builtin_tools_instruction(enabled_tools: Iterable[str] | None = None) -> str:
+    """内置工具说明（不可编辑，自动追加），按当前语言取。
+
+    只拼接**已启用**且有专门用法说明的工具段落，使 system prompt 的能力描述
+    与实际可用工具保持一致——用户在能力面板关掉某工具后，模型不应再声称具备
+    该能力（详见记忆 tool-disable-must-sync-prompt-and-functions）。
+
+    Args:
+        enabled_tools: 已启用工具名的集合。传 None 时拼接全部段落（向后兼容，
+            用于无法拿到 registry 的调用点）。
+    """
+    names = None if enabled_tools is None else set(enabled_tools)
+    segments = [
+        t(key)
+        for tool_name, key in _TOOL_PROMPT_KEYS
+        if names is None or tool_name in names
+    ]
+    return "".join(segments)
 

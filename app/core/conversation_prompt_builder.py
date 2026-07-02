@@ -25,12 +25,15 @@ class ConversationPromptBuilder:
         config=cfg,
         datetime_info_provider: Callable[[], str] = get_current_datetime_info,
         time_hint_provider: Callable[[], str] = get_current_time_hint,
+        enabled_tools_provider: Callable[[], list[str]] | None = None,
     ):
         self._sessions = session_mgr
         self._memory_mgr = memory_mgr
         self._config = config
         self._datetime_info_provider = datetime_info_provider
         self._time_hint_provider = time_hint_provider
+        # 返回当前已启用工具名列表；None 表示不做过滤（拼全部工具说明）。
+        self._enabled_tools_provider = enabled_tools_provider
 
     def build(self, messages: list[Message], session_id: str | None) -> list[dict]:
         system_prompt = self._build_system_prompt(session_id)
@@ -71,7 +74,14 @@ class ConversationPromptBuilder:
 
     def _build_system_prompt(self, session_id: str | None) -> str:
         user_prompt = self._resolve_user_prompt(session_id)
-        full_system_prompt = user_prompt + "\n" + get_builtin_tools_instruction()
+        enabled_tools = (
+            self._enabled_tools_provider() if self._enabled_tools_provider else None
+        )
+        tools_instruction = get_builtin_tools_instruction(enabled_tools)
+        # 全部工具关闭时 tools_instruction 为空，避免拼出多余换行。
+        full_system_prompt = user_prompt
+        if tools_instruction:
+            full_system_prompt += "\n" + tools_instruction
 
         if session_id and self._memory_mgr is not None:
             memory_context = self._memory_mgr.build_memory_context(session_id)

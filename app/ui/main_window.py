@@ -120,6 +120,7 @@ class MainWindow(FluentWindow):
         self._prompt_builder = ConversationPromptBuilder(
             session_mgr=self._sessions,
             memory_mgr=self._memory_mgr,
+            enabled_tools_provider=lambda: [tool.name for tool in self._registry.get_enabled()],
         )
         self._chat_session_controller = ChatSessionController(
             parent=self,

@@ -687,7 +687,9 @@ ZH: dict[str, str] = {
     "prompt.fileLabel": "[文件: {name}]\n{content}",
     "prompt.imageLabel": "[图片: {name}]\n{content}",
     "prompt.defaultUser": "你是一个智能AI助手。你可以调用工具来帮助用户完成任务。\n\n请用中文回复。",
-    "prompt.builtinTools": "\n【定时任务】\n如果用户想创建定时任务，使用 create_scheduled_task 工具。触发器配置示例：\n- 每天9点: {\"trigger_type\": \"cron\", \"trigger_config\": {\"hour\": 9, \"minute\": 0}}\n- 每小时: {\"trigger_type\": \"interval\", \"trigger_config\": {\"hours\": 1}}\n- 一次性: {\"trigger_type\": \"date\", \"trigger_config\": {\"run_date\": \"2025-12-31 09:00:00\"}}\n\n【列出定时任务】使用 list_scheduled_tasks 工具。\n【删除定时任务】使用 delete_scheduled_task 工具，提供 job_id 参数。\n\n【笔记】使用 note 工具：\n- action=list 查看用户的笔记列表和内容预览。\n- action=create 新建笔记（需 title + content）。\n- 需要把当前对话总结成笔记时，自己生成总结文本作为 content，用 action=create 保存。\n\n【记忆】使用 memory 工具：\n- action=save 保存记忆（需 content + category），用于记住用户偏好、项目决策、重要事实。\n- action=recall 查看已记住的信息（可按 category/scope 过滤）。\n- action=forget 删除一条记忆（需 memory_id）。\n- 分类：user（用户偏好）、project（项目决策）、fact（具体事实）、personality（AI行为风格）。\n- 范围：global（所有会话可见）、session（仅当前会话可见）。\n",
+    "prompt.tool.scheduled_task": "\n【定时任务】统一用 scheduled_task 工具，通过 action 区分操作：\n- 创建：action=create。触发器配置示例：\n  · 每天9点: {\"trigger_type\": \"cron\", \"trigger_config\": {\"hour\": 9, \"minute\": 0}}\n  · 每小时: {\"trigger_type\": \"interval\", \"trigger_config\": {\"hours\": 1}}\n  · 一次性: {\"trigger_type\": \"date\", \"trigger_config\": {\"run_date\": \"2025-12-31 09:00:00\"}}\n- 列出：action=list。\n- 删除：action=delete，提供 job_id 参数。\n",
+    "prompt.tool.note": "\n【笔记】使用 note 工具：\n- action=list 查看用户的笔记列表和内容预览。\n- action=create 新建笔记（需 title + content）。\n- 需要把当前对话总结成笔记时，自己生成总结文本作为 content，用 action=create 保存。\n",
+    "prompt.tool.memory": "\n【记忆】使用 memory 工具：\n- action=save 保存记忆（需 content + category），用于记住用户偏好、项目决策、重要事实。\n- action=recall 查看已记住的信息（可按 category/scope 过滤）。\n- action=forget 删除一条记忆（需 memory_id）。\n- 分类：user（用户偏好）、project（项目决策）、fact（具体事实）、personality（AI行为风格）。\n- 范围：global（所有会话可见）、session（仅当前会话可见）。\n",
 
     # ── 划词动作（选中文字 → LLM）──
     "textaction.explain.label": "解释",
