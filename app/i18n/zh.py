@@ -641,7 +641,7 @@ ZH: dict[str, str] = {
     "litellm.model.display_name_ph": "例如: GPT-4o, Claude 3 Opus",
     "litellm.model.provider_ph": "选择或输入 provider",
     "litellm.model.api_base": "API 地址:",
-    "litellm.model.api_base_ph": "可选，如 https://api.deepseek.com/v1",
+    "litellm.model.api_base_ph": "留空则用该 provider 官方地址；填写可覆盖为中转/自建端点",
     "litellm.model.enable": "启用此模型用于多模型调用",
     "litellm.model.err_title": "错误",
     "litellm.model.err_not_exist": "模型 {model_id} 不存在",

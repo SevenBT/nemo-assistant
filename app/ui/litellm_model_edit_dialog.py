@@ -45,8 +45,11 @@ class LiteLLMModelEditDialog(QDialog):
         self._provider_combo = QComboBox()
         self._provider_combo.setEditable(True)
         self._provider_combo.setPlaceholderText(t("litellm.model.provider_ph"))
-        # 添加常见的 provider
-        for provider in ["openai", "anthropic", "google", "deepseek", "azure", "cohere"]:
+        # 添加常见的 provider（值即 LiteLLM 路由前缀）
+        for provider in [
+            "openai", "anthropic", "gemini", "deepseek",
+            "meta_llama", "dashscope", "zai", "azure", "cohere",
+        ]:
             self._provider_combo.addItem(provider.capitalize(), provider)
         form.addRow("Provider:", self._provider_combo)
 

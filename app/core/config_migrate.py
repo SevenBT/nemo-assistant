@@ -49,6 +49,11 @@ def migrate_config(config_dir: Path) -> None:
     # Idempotent: a no-op once consolidation has already run.
     _consolidate_to_litellm(data)
 
+    # Seed the current default model set for existing users whose model list is
+    # still empty (e.g. upgraded from a build that shipped no defaults). Users
+    # with their own models are untouched. Idempotent: only acts when empty.
+    _seed_default_models(data)
+
     # Write (possibly) migrated config
     _atomic_write(app_config_path, data)
 
@@ -123,6 +128,26 @@ def _consolidate_to_litellm(data: dict) -> None:
             keyring.set_password(_SERVICE_NAME, "litellm_openai_api_key", old_key)
     except Exception:
         pass
+
+
+def _seed_default_models(data: dict) -> None:
+    """Seed current default models when an existing user's list is empty.
+
+    Fresh installs (no config file) never reach here — QConfig defaults cover
+    them. This only helps users who have a config on disk but ended up with an
+    empty LiteLLM model list. Idempotent: acts only when the list is empty, so
+    users with their own models keep them untouched.
+    """
+    litellm = data.setdefault("LiteLLM", {})
+    if litellm.get("Models"):
+        return
+
+    from app.core.config import DEFAULT_LITELLM_MODEL, DEFAULT_LITELLM_MODELS
+
+    # Copy so later in-place edits can't mutate the shared default template.
+    litellm["Models"] = [dict(m) for m in DEFAULT_LITELLM_MODELS]
+    if not litellm.get("DefaultModel"):
+        litellm["DefaultModel"] = DEFAULT_LITELLM_MODEL
 
 
 def _is_old_format(data: dict) -> bool:

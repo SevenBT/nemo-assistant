@@ -641,7 +641,7 @@ EN: dict[str, str] = {
     "litellm.model.display_name_ph": "e.g. GPT-4o, Claude 3 Opus",
     "litellm.model.provider_ph": "Select or enter a provider",
     "litellm.model.api_base": "API base:",
-    "litellm.model.api_base_ph": "Optional, e.g. https://api.deepseek.com/v1",
+    "litellm.model.api_base_ph": "Leave empty for the provider's official endpoint; set to override (proxy/self-hosted)",
     "litellm.model.enable": "Enable this model for multi-model calls",
     "litellm.model.err_title": "Error",
     "litellm.model.err_not_exist": "Model {model_id} does not exist",
