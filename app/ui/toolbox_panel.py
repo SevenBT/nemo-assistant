@@ -55,9 +55,7 @@ _TOOL_ICON_NAMES: dict[str, str] = {
     "note": "QUICK_NOTE",
     "memory": "LIBRARY",
     "reminder": "RINGER",
-    "create_scheduled_task": "DATE_TIME",
-    "list_scheduled_tasks": "DATE_TIME",
-    "delete_scheduled_task": "DATE_TIME",
+    "scheduled_task": "DATE_TIME",
     "exec": "COMMAND_PROMPT",
     "run_python": "CODE",
     "multi_model_consult": "ROBOT",
@@ -76,8 +74,8 @@ def _icon_for(name: str) -> FluentIcon:
 class _ToolCard(QWidget):
     """工具列表项卡片:图标 + 名字 + 描述,可选开关。
 
-    通过 setItemWidget 渲染进 QListWidget。内置只读工具不显示开关;
-    高风险内置工具和用户脚本工具显示开关。
+    通过 setItemWidget 渲染进 QListWidget。所有内置工具与用户脚本工具
+    均显示开关;高风险内置工具仅在详情页 meta 标签上额外警示。
     """
 
     toggled = pyqtSignal(str, bool)
@@ -110,9 +108,16 @@ class _ToolCard(QWidget):
         if switchable:
             self._toggle = SwitchButton()
             self._toggle.setChecked(tool.enabled)
-            self._toggle.checkedChanged.connect(
-                lambda checked: self.toggled.emit(self._name, checked)
-            )
+            reason = tool.unavailable_reason
+            if reason:
+                # 前置条件缺失（如未配 API Key）：置灰开关并说明原因，
+                # 避免用户"拨了没反应"的困惑。
+                self._toggle.setEnabled(False)
+                self._toggle.setToolTip(reason)
+            else:
+                self._toggle.checkedChanged.connect(
+                    lambda checked: self.toggled.emit(self._name, checked)
+                )
             layout.addWidget(self._toggle)
         else:
             self._toggle = None
@@ -424,8 +429,8 @@ class ToolboxPanel(QWidget):
         if builtin:
             self._add_group_header(t("workshop.group.builtin"))
             for tool in builtin:
-                # 仅高风险内置工具可开关,其余只读展示
-                self._add_tool_item(tool, switchable=tool.name in HIGH_RISK_TOOLS)
+                # 所有内置工具均可开关;高风险工具仅在详情页 meta 标签上额外警示
+                self._add_tool_item(tool, switchable=True)
 
         self._add_group_header(t("workshop.group.mine"))
         if scripts:

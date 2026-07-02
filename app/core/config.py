@@ -222,6 +222,8 @@ class AppConfig(QConfig):
     toolWorkspace = ConfigItem("Tools", "Workspace", "")
     saveDir = ConfigItem("Tools", "SaveDir", "")
     toolStates = ConfigItem("Tools", "ToolStates", {})
+    # 是否已对全新用户播种过高风险工具的默认关闭状态（只播种一次，之后尊重用户选择）。
+    toolDefaultsSeeded = ConfigItem("Tools", "DefaultsSeeded", False, BoolValidator())
 
     # -- Hotkeys --
     hotkeyScreenshot = ConfigItem(

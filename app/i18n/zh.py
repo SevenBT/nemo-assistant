@@ -784,6 +784,7 @@ ZH: dict[str, str] = {
     "tool.read_file.param.file_path": "文件绝对路径，或以 ~/ 开头的路径",
     "tool.read_file.param.max_chars": "最大读取字符数，默认 50000",
     "tool.multi_model_consult.description": "并行调用多个 AI 模型，从架构师、安全专家、性能专家等不同视角分析问题",
+    "tool.multi_model_consult.unavailable.no_key": "请先在设置中为默认模型配置 API Key",
     "tool.multi_model_consult.param.query": "要咨询的问题",
     "tool.multi_model_consult.param.perspectives": "视角列表，可选: architect, security, performance, cost",
     "tool.multi_model_consult.param.context": "补充上下文信息",

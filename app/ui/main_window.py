@@ -38,7 +38,7 @@ from app.core.trace_store import TraceStore
 from app.models.session import SOURCE_MANUAL
 from app.tools.context import ToolContext, ToolEvents
 from app.tools.loader import load_builtin_tools, load_user_script_tools
-from app.tools.registry import ToolRegistry
+from app.tools.registry import DEFAULT_OFF_TOOLS, ToolRegistry
 from app.ui.chat_session_controller import ChatSessionController
 from app.ui.chat_widget import ChatWidget
 from app.ui.edge_snap import EdgeSnapManager
@@ -192,8 +192,16 @@ class MainWindow(FluentWindow):
         )
         load_builtin_tools(ctx, self._registry)
         load_user_script_tools(USER_TOOLS_DIR, self._registry)
-        # 应用上次持久化的工具开关状态（启动即生效，不必等打开能力面板）
-        self._registry.apply_saved_states(cfg.get(cfg.toolStates))
+        # 全新用户首次启动：把高风险/有成本工具播种为默认关闭（只播一次，
+        # 之后尊重用户在能力面板的选择）。必须在 apply_saved_states 之前，
+        # 让播种的默认值一并生效。
+        states = cfg.get(cfg.toolStates)
+        if not cfg.get(cfg.toolDefaultsSeeded):
+            states = self._registry.seed_default_off(DEFAULT_OFF_TOOLS, states)
+            cfg.set(cfg.toolStates, states)
+            cfg.set(cfg.toolDefaultsSeeded, True)
+        # 应用持久化的工具开关状态（启动即生效，不必等打开能力面板）
+        self._registry.apply_saved_states(states)
 
     def _init_memory(self):
         """初始化记忆系统：Consolidator + Dream 定时器。"""

@@ -192,6 +192,9 @@ def _convert_old_to_new(old: dict) -> dict:
     # Tools (tool_states from old format)
     new.setdefault("Tools", {})
     new["Tools"]["ToolStates"] = old.get("tool_states", {})
+    # 老用户从旧格式迁移而来：视为已播种，跳过"高风险工具默认关"逻辑，
+    # 避免升级后突然关掉他们一直在用的工具。
+    new["Tools"]["DefaultsSeeded"] = True
     new["Tools"]["SearchProvider"] = "bocha"
     new["Tools"]["SaveDir"] = ""
 

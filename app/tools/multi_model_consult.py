@@ -113,8 +113,21 @@ class MultiModelConsultTool(BuiltinTool):
 
     @property
     def enabled(self) -> bool:
-        """无 API Key 时自动禁用，不出现在 LLM 可用工具列表中。"""
-        return bool(self._api_key)
+        """两级闸门：无 API Key 时永远禁用（硬约束）；有 key 时听用户在能力
+        面板的开关（默认开）。故须同时满足才出现在 LLM 可用工具列表中。"""
+        return bool(self._api_key) and getattr(self, "_enabled", True)
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        # 仅记录用户意图；有无 key 的硬约束在 getter 中叠加，用户开关无法绕过。
+        self._enabled = bool(value)
+
+    @property
+    def unavailable_reason(self) -> str | None:
+        """无 API Key 时不可用，能力面板据此把开关置灰并提示。"""
+        if not self._api_key:
+            return t("tool.multi_model_consult.unavailable.no_key")
+        return None
 
     def execute(self, params: dict[str, Any]) -> dict[str, Any]:
         query = params.get("query", "").strip()

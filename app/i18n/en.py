@@ -784,6 +784,7 @@ EN: dict[str, str] = {
     "tool.read_file.param.file_path": "Absolute file path, or a path starting with ~/",
     "tool.read_file.param.max_chars": "Maximum number of characters to read, default 50000",
     "tool.multi_model_consult.description": "Call multiple AI models in parallel to analyze a problem from different perspectives such as architect, security expert, and performance expert",
+    "tool.multi_model_consult.unavailable.no_key": "Configure an API key for the default model in Settings first",
     "tool.multi_model_consult.param.query": "The question to consult on",
     "tool.multi_model_consult.param.perspectives": "List of perspectives; options: architect, security, performance, cost",
     "tool.multi_model_consult.param.context": "Additional context information",

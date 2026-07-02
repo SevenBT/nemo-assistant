@@ -125,6 +125,17 @@ class BuiltinTool(ABC):
     def enabled(self, value: bool) -> None:
         self._enabled = bool(value)
 
+    @property
+    def unavailable_reason(self) -> str | None:
+        """工具因外部前置条件缺失而不可用时，返回一条**已翻译**的说明文案；
+        条件齐备时返回 None。
+
+        与 enabled（用户开关）正交：unavailable 是硬约束（如未配置 API Key），
+        用户开关无法绕过。能力面板据此把开关置灰并显示原因，避免用户"开了没用"
+        的困惑。默认无前置条件，返回 None。
+        """
+        return None
+
     @classmethod
     def create(cls, ctx: "ToolContext") -> "BuiltinTool":
         """

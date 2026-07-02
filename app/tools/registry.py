@@ -49,9 +49,15 @@ from app.i18n import t
 
 logger = logging.getLogger(__name__)
 
-# 高风险内置工具：有副作用或安全影响（执行命令、运行代码、写文件），
-# 允许用户在能力面板中关闭。其余内置工具默认常驻、不提供开关。
+# 高风险内置工具：有副作用或安全影响（执行命令、运行代码、写文件）。
+# 所有内置工具现均可在能力面板中开关；此集合仅用于在工具详情页额外标注
+# "高风险"警示标签，提醒用户开启前留意副作用，不再作为开关的准入闸门。
 HIGH_RISK_TOOLS = frozenset({"exec", "run_python", "save_file"})
+
+# 对全新用户默认关闭的工具（一次性播种，见 ToolRegistry.seed_default_off）：
+# 高风险工具 + 会产生额外 API 费用的 multi_model_consult。用户可随时手动开启，
+# 之后不再被播种覆盖。
+DEFAULT_OFF_TOOLS = HIGH_RISK_TOOLS | frozenset({"multi_model_consult"})
 
 _MAX_RESULT_CHARS = 8000
 
@@ -196,6 +202,22 @@ class ToolRegistry:
             tool = self._tools.get(name)
             if tool is not None:
                 tool.enabled = enabled
+
+    def seed_default_off(self, names: frozenset[str], states: dict[str, bool]) -> dict[str, bool]:
+        """为全新用户把指定工具的默认关闭状态写入开关表（一次性播种）。
+
+        只对**已注册**且在 states 中**尚无显式状态**的工具补写 False，因此不会
+        覆盖用户已有的选择，也不会给未安装的工具留下孤儿状态。返回补写后的新
+        字典（不修改入参），由调用方决定是否持久化。
+
+        典型用途：exec / run_python / save_file / multi_model_consult 等高风险或
+        有成本的工具，首次启动默认关闭，用户按需开启。
+        """
+        seeded = dict(states)
+        for name in names:
+            if name in self._tools and name not in seeded:
+                seeded[name] = False
+        return seeded
 
     @property
     def tool_names(self) -> list[str]:
