@@ -8,7 +8,7 @@
 
 使用场景：
   用户说"每天早上9点提醒我喝水"
-  → LLM 调用 create_scheduled_task，tool_name="reminder"，
+  → LLM 调用 scheduled_task，action="create"，tool_name="reminder"，
     trigger_type="cron"，trigger_config={hour:9}
   → 每天9点 scheduler 自动执行 reminder 工具
 """
