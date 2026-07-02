@@ -121,7 +121,7 @@ MODEL_TEMPLATES: dict[str, list[dict]] = {
 THEME_OPTIONS = [
     # Dark
     "warm_night", "obsidian",
-    "mocha", "rose_pine", "nord", "everforest",
+    "mocha", "rose_pine", "nord", "everforest", "everforest_bright",
     "solarized", "gruvbox",
     # Light
     "almond", "misty", "sage", "morandi_clay",

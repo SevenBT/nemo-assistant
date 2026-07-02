@@ -43,6 +43,7 @@ ZH: dict[str, str] = {
     "theme.rose_pine": "玫瑰松",
     "theme.nord": "北欧极夜",
     "theme.everforest": "林间暮色",
+    "theme.everforest_bright": "林间晨光",
     "theme.solarized": "深海靛青",
     "theme.gruvbox": "复古琥珀",
     "theme.latte": "拿铁",

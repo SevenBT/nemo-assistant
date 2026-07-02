@@ -43,6 +43,7 @@ EN: dict[str, str] = {
     "theme.rose_pine": "Rosé Pine",
     "theme.nord": "Nord",
     "theme.everforest": "Everforest",
+    "theme.everforest_bright": "Everforest Bright",
     "theme.solarized": "Solarized Dark",
     "theme.gruvbox": "Gruvbox Amber",
     "theme.latte": "Latte",

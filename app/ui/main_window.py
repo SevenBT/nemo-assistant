@@ -344,6 +344,10 @@ class MainWindow(FluentWindow):
         self.widgetLayout.setContentsMargins(0, self._title_bar.height(), 0, 0)
         # 移除 FluentStyleSheet 添加的 stackedWidget 边框/背景
         self.stackedWidget.setStyleSheet("border: none; background: transparent;")
+        # 把默认的"从下往上滑入"动画换成淡入淡出：滑入动画归位时会 relayout
+        # 导致页面"一跳"，纯透明度渐变无位移则无跳动。须在 addSubInterface 前安装。
+        from app.ui.fade_stacked_widget import install_fade_transition
+        install_fade_transition(self)
 
         # ── page 0: chat view ─────────────────────────────────────────
         chat_page = QWidget()
@@ -581,6 +585,8 @@ class MainWindow(FluentWindow):
         # 笔记列表 delegate 缓存了主题色，需显式刷新，否则切换深浅后
         # 列表/便签文字色不变，必须点一下文件夹才更新。
         self._notes_panel.refresh_theme()
+        # 发送按钮图标色按 accent 亮度重算（浅色强调色下白箭头看不清）。
+        self._input.refresh_theme()
 
     def _switch_view(self, index: int):
         if 0 <= index < len(self._pages):

@@ -7,9 +7,15 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import PrimaryPushButton, FluentIcon
+from qfluentwidgets import PrimaryToolButton, FluentIcon
 
-from app.ui.style import get_text_color
+from app.ui.style import (
+    get_text_color,
+    get_accent_text_color,
+    get_accent_button_bg,
+    get_accent_button_bg_hover,
+    get_accent_button_bg_pressed,
+)
 from app.ui.pending_attachment_bar import PendingAttachmentBar
 from app.i18n import t
 
@@ -56,11 +62,17 @@ class InputWidget(QWidget):
         self._edit.files_dropped.connect(self._on_files_dropped)
         row.addWidget(self._edit)
 
-        self._btn = PrimaryPushButton(FluentIcon.SEND, t("input.send"))
-        self._btn.setFixedWidth(80)
+        # 纯图标按钮：只留箭头，不显示文字。用 ToolButton 而非 PushButton——
+        # PrimaryPushButton.paintEvent 的图标 x 依赖 minimumSizeHint（约 83px，
+        # 为带文字预留），固定到 44px 宽时算出 x=-8 把箭头推到输入框那侧，首帧
+        # 错位、切主题重排才凑巧归位。ToolButton 图标恒居中 (w-iconw)/2，根治。
+        self._btn = PrimaryToolButton(FluentIcon.SEND, self)
+        self._btn.setFixedWidth(44)
         self._btn.setFixedHeight(36)
         self._btn.clicked.connect(self._on_button_clicked)
+        self._btn.setToolTip(t("input.send"))
         row.addWidget(self._btn)
+        self._apply_btn_ink()
 
         self._root.addLayout(row)
         self._side = _SIDE_MIN
@@ -103,12 +115,35 @@ class InputWidget(QWidget):
         self._running = running
         self._edit.setEnabled(True)
         self._btn.setEnabled(True)
-        if running:
-            self._btn.setText(t("input.cancel"))
-            self._btn.setIcon(FluentIcon.CLOSE.icon())
-        else:
-            self._btn.setText(t("input.send"))
-            self._btn.setIcon(FluentIcon.SEND.icon())
+        # 纯图标按钮：不设文本，仅切换图标（在 _apply_btn_ink 内按 _running 决定
+        # SEND/CLOSE）；文字提示放 tooltip 保留可达性。
+        self._btn.setToolTip(t("input.cancel") if running else t("input.send"))
+        self._apply_btn_ink()
+
+    def _apply_btn_ink(self):
+        """按主题给发送/取消按钮上色：背景用混淡后的强调色（不那么跳、
+        与主题协调），图标前景色按该背景的对比度取黑或白。
+
+        纯图标按钮，无文字。PrimaryToolButton 默认满饱和 accent 底 + 白图标，
+        浅色强调色（如 Everforest 的 #A7C080）既跳又看不清。混淡背景 +
+        对比前景一并解决。"""
+        ink = QColor(get_accent_text_color())
+        icon = FluentIcon.CLOSE if self._running else FluentIcon.SEND
+        self._btn.setIcon(icon.icon(color=ink))
+        bg = get_accent_button_bg()
+        hover = get_accent_button_bg_hover()
+        pressed = get_accent_button_bg_pressed()
+        self._btn.setStyleSheet(
+            "PrimaryToolButton {"
+            f" background-color: {bg};"
+            " border: none; border-radius: 6px; }"
+            f" PrimaryToolButton:hover {{ background-color: {hover}; }}"
+            f" PrimaryToolButton:pressed {{ background-color: {pressed}; }}"
+        )
+
+    def refresh_theme(self):
+        """主题切换后重算按钮前景色。"""
+        self._apply_btn_ink()
 
     def set_enabled(self, enabled: bool):
         self._edit.setEnabled(enabled)

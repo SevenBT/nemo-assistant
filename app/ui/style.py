@@ -386,6 +386,34 @@ THEMES: Dict[str, Dict[str, Any]] = {
         "error": "#E67E80",
         "warning": "#DBBC7F",
     },
+    "everforest_bright": {
+        "name": "林间晨光",
+        "mode": Theme.DARK,
+        "accent": "#B7CE8F",
+        "accent_light": "#45543E",
+        "accent_subtle": "rgba(183,206,143,0.12)",
+        "user_bubble": "#54606A",
+        "user_bubble_border": "#616D77",
+        "bg": "rgba(56,65,74,0.84)",
+        "bg_solid": "#38414A",
+        "surface": "rgba(66,77,86,0.90)",
+        "surface_solid": "#424D56",
+        "surface_raised": "#4D5962",
+        "border": "rgba(255,255,255,0.08)",
+        "border_solid": "#5C6872",
+        "text": "#E6DCC6",
+        "text_secondary": "#B4BEB4",
+        "text_muted": "#96A198",
+        "ai_bubble": "rgba(66,77,86,0.90)",
+        "ai_bubble_border": "rgba(255,255,255,0.08)",
+        "scrollbar": "rgba(255,255,255,0.12)",
+        "scrollbar_hover": "rgba(255,255,255,0.22)",
+        "selected": "rgba(255,255,255,0.07)",
+        "hover": "rgba(255,255,255,0.05)",
+        "success": "#8FCF9E",
+        "error": "#E88A8C",
+        "warning": "#E0C489",
+    },
     "solarized": {
         "name": "深海靛青",
         "mode": Theme.DARK,
@@ -565,6 +593,12 @@ DEFAULT_THEME = "almond"
 _current_dark_mode = False
 # 当前文本颜色，用于光标同步（QSS 不会传播到光标）
 _current_text_color: str = "#E8E0D6"
+# 当前主题强调色，用于按 accent 亮度推算前景色（如发送按钮图标）
+_current_accent: str = "#D4A574"
+# 当前主题表面色，用于把强调色混淡（发送按钮背景）
+_current_surface: str = "#2A2724"
+# 当前主题窗口底色，用于保证按钮与大背景有足够对比
+_current_bg: str = "#221F1C"
 
 
 class _DarkTitleBarFilter(QObject):
@@ -601,11 +635,14 @@ def apply_theme(
     editor_font_size: int = 15,
 ) -> str:
     """应用 Fluent 主题并返回应用特有元素的自定义 QSS。"""
-    global _current_dark_mode, _filter_instance, _current_text_color
+    global _current_dark_mode, _filter_instance, _current_text_color, _current_accent, _current_surface, _current_bg
     theme = THEMES.get(theme_name, THEMES[DEFAULT_THEME])
     dark = theme["mode"] == Theme.DARK
     _current_dark_mode = dark
     _current_text_color = theme["text"]
+    _current_accent = theme["accent"]
+    _current_surface = theme["surface_solid"]
+    _current_bg = theme["bg_solid"]
     setTheme(theme["mode"])
     setThemeColor(QColor(theme["accent"]))
     _apply_palette(theme)
@@ -711,6 +748,90 @@ def get_current_theme() -> Dict[str, Any]:
 def get_text_color() -> str:
     """返回当前主题的文本颜色十六进制字符串。"""
     return _current_text_color
+
+
+_BTN_BLEND = 0.4          # 常态：往 surface 混多少（黯淡强度）
+_BTN_MIN_CONTRAST = 2.4   # 按钮与窗口背景的最低对比度（保证能区分）
+
+
+def _resolve_btn_blend() -> float:
+    """决定按钮背景往 surface 混的比例。
+
+    暗色主题混淡＝压暗，越混与背景差异越小；浅色主题混淡＝提亮，同样越混
+    越贴近浅背景。故从目标比例起，若混出的底色与窗口背景对比低于阈值，
+    逐步回退（少混、更接近纯 accent）直到拉开差距。
+    """
+    bg_lum = _relative_luminance(QColor(_current_bg))
+    t = _BTN_BLEND
+    while t > 0.0:
+        cand = _blend(_current_accent, _current_surface, t)
+        if _contrast_ratio(_relative_luminance(QColor(cand)), bg_lum) >= _BTN_MIN_CONTRAST:
+            return t
+        t -= 0.05
+    return 0.0
+
+
+def get_accent_button_bg() -> str:
+    """发送按钮背景色：把强调色往主题表面色混淡。
+
+    满饱和的 accent 作按钮底色太跳、与主题不协调。往 surface 混降低饱和/
+    亮度让它黯淡，但通过 _resolve_btn_blend 钳制，保证与大背景仍有足够
+    对比、不会糊进去。返回混合后的十六进制。
+    """
+    return _blend(_current_accent, _current_surface, _resolve_btn_blend())
+
+
+def get_accent_button_bg_hover() -> str:
+    """按钮 hover 态：比常态往 accent 拉回一点（更鲜明）。"""
+    t = max(0.0, _resolve_btn_blend() - 0.12)
+    return _blend(_current_accent, _current_surface, t)
+
+
+def get_accent_button_bg_pressed() -> str:
+    """按钮 pressed 态：比常态往 surface 多混一点（更暗沉）。"""
+    t = min(1.0, _resolve_btn_blend() + 0.12)
+    return _blend(_current_accent, _current_surface, t)
+
+
+def get_accent_text_color() -> str:
+    """返回叠在（已混淡的）按钮背景上的前景色（黑或白），取对比度更高者。
+
+    qfluentwidgets 的 PrimaryPushButton 默认在 accent 底上画白色图标/文字，
+    浅色强调色（如 Everforest 的 #A7C080）白色对比度过低，发送箭头糊成一片。
+    按钮实际底色是 get_accent_button_bg()（混淡后），据此择优黑/白前景。
+    """
+    bg_lum = _relative_luminance(QColor(get_accent_button_bg()))
+    white_ratio = _contrast_ratio(bg_lum, 1.0)
+    dark_ratio = _contrast_ratio(bg_lum, _relative_luminance(QColor("#1A1A1A")))
+    return "#1A1A1A" if dark_ratio > white_ratio else "#FFFFFF"
+
+
+def _blend(fg: str, bg: str, t: float) -> str:
+    """按比例 t 把 fg 混向 bg（t=0 全 fg，t=1 全 bg），返回十六进制。"""
+    c1, c2 = QColor(fg), QColor(bg)
+    r = round(c1.red() * (1 - t) + c2.red() * t)
+    g = round(c1.green() * (1 - t) + c2.green() * t)
+    b = round(c1.blue() * (1 - t) + c2.blue() * t)
+    return "#%02X%02X%02X" % (r, g, b)
+
+
+def _relative_luminance(color: QColor) -> float:
+    """WCAG 相对亮度。"""
+    def _linear(c: int) -> float:
+        s = c / 255.0
+        return s / 12.92 if s <= 0.03928 else ((s + 0.055) / 1.055) ** 2.4
+
+    return (
+        0.2126 * _linear(color.red())
+        + 0.7152 * _linear(color.green())
+        + 0.0722 * _linear(color.blue())
+    )
+
+
+def _contrast_ratio(lum1: float, lum2: float) -> float:
+    """两个相对亮度之间的 WCAG 对比度（1:1 ~ 21:1）。"""
+    hi, lo = max(lum1, lum2), min(lum1, lum2)
+    return (hi + 0.05) / (lo + 0.05)
 
 
 def enable_mica(hwnd: int, dark: bool = False) -> bool:
