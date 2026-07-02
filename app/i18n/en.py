@@ -658,6 +658,7 @@ EN: dict[str, str] = {
     "litellm.template.title": "Add Models from Template",
     "litellm.template.select_provider": "Select provider:",
     "litellm.template.select_models": "Select models to add (multiple allowed):",
+    "litellm.template.all_added": "All template models for this provider are already added",
     "litellm.template.no_selection_title": "No model selected",
     "litellm.template.no_selection_body": "Please select at least one model",
     "litellm.template.err_exists": "Model {model_id} already exists",

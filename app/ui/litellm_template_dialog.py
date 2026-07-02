@@ -1,10 +1,12 @@
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QVBoxLayout,
 )
@@ -76,6 +78,13 @@ class LiteLLMTemplateDialog(QDialog):
                 # 将完整的模型数据存储在 item 的 data 中
                 item = self._model_list.item(self._model_list.count() - 1)
                 item.setData(Qt.ItemDataRole.UserRole, model)
+
+        # 全部已添加时给出占位提示，避免看起来像功能没做完
+        if self._model_list.count() == 0:
+            placeholder = QListWidgetItem(t("litellm.template.all_added"))
+            placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+            placeholder.setForeground(QColor(150, 150, 150))
+            self._model_list.addItem(placeholder)
 
     def _add_models(self):
         """批量添加选中的模型"""

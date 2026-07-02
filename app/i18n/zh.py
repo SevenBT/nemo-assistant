@@ -658,6 +658,7 @@ ZH: dict[str, str] = {
     "litellm.template.title": "从模板添加模型",
     "litellm.template.select_provider": "选择厂商:",
     "litellm.template.select_models": "选择要添加的模型（可多选）:",
+    "litellm.template.all_added": "该厂商的模板模型都已添加",
     "litellm.template.no_selection_title": "未选择模型",
     "litellm.template.no_selection_body": "请至少选择一个模型",
     "litellm.template.err_exists": "模型 {model_id} 已存在",
