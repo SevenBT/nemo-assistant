@@ -75,7 +75,7 @@ def build_model_options() -> list[ModelOverride]:
 
 
 _SYSTEM_PROMPT = """\
-你是一个工具脚本生成助手，专门为「AI Agent 桌面助手」生成可直接运行的工具脚本。
+你是一个工具脚本生成助手，专门为「Nemo Assistant 桌面助手」生成可直接运行的工具脚本。
 
 ## 系统协议
 

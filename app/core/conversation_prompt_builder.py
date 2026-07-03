@@ -127,7 +127,7 @@ def merge_attachments_to_content(
     - 否则 → 退回纯文本，用图片的 OCR 文字（parsed_content）占位。
 
     注意：这条"图片像素通道"只服务多模态识图，与用户主动点 OCR 识字
-    是两条独立路径（见 docs/TODO_SCREENSHOT_AI.md）。
+    是两条独立路径（见 docs/screenshot-ai.md）。
     """
     api_messages = []
     for msg in messages:

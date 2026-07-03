@@ -5,10 +5,24 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nemo-assistant"
 version = "0.1.0"
-description = "桌面浮窗助手：划词翻译、截图取词、便签、Markdown 笔记与 AI 对话，收进一个常驻桌面的轻量浮窗。"
+description = "A local-first floating desktop AI assistant for selection actions, OCR screenshots, Markdown notes, stickies, tool calling, and chat."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+authors = [{ name = "SevenBT" }]
+keywords = ["desktop-assistant", "pyqt6", "ai", "ocr", "markdown-notes", "litellm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Desktop Environment",
+]
 
 # 运行依赖：跑起来这个应用必须安装的包。
 dependencies = [
@@ -25,6 +39,7 @@ dependencies = [
     "keyboard>=0.13.5",
     "mouse>=0.7.1",
     "uiautomation>=2.0.18",
+    "pywin32>=306; platform_system == 'Windows'",
     "PyPDF2>=3.0.0",
     "Markdown>=3.4.0",
     "Pygments>=2.15.0",
@@ -32,11 +47,17 @@ dependencies = [
     "litellm>=1.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/SevenBT/nemo-assistant"
+Repository = "https://github.com/SevenBT/nemo-assistant"
+Issues = "https://github.com/SevenBT/nemo-assistant/issues"
+
 [project.optional-dependencies]
 # 开发 / 测试依赖：改代码、跑测试才需要，终端用户无需安装。
 dev = [
     "pytest>=8.0.0",
     "pytest-qt>=4.4.0",
+    "pytest-cov>=5.0.0",
 ]
 
 [tool.setuptools.packages.find]

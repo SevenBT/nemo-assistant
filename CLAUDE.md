@@ -1,4 +1,4 @@
-# AI Agent Desktop Assistant
+# Nemo Assistant Desktop Assistant
 
 PyQt6 无边框透明浮窗桌面应用。
 

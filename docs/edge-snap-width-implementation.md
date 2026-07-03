@@ -2,7 +2,7 @@
 
 ## 实现内容
 
-已成功为 AI Agent Desktop Assistant 实现基于窗口宽度的边缘吸附触发条件。
+已成功为 Nemo Assistant 实现基于窗口宽度的边缘吸附触发条件。
 
 ## 修改的文件
 

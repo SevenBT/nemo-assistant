@@ -77,7 +77,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='AI Agent',
+    name='Nemo Assistant',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -7,7 +7,6 @@ initialize the Qt application -> create the main window.
 应用程序入口。
 启动流程：检查依赖 → 配置崩溃日志 → 初始化 Qt 应用 → 创建主窗口。
 """
-import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -45,9 +44,10 @@ def _ensure_deps():
         return
     missing = [pkg for imp, pkg in _REQUIRED_PACKAGES if not _can_import(imp)]
     if missing:
-        print(f"[startup] 安装缺失依赖: {missing}")
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--quiet"] + missing
+        missing_text = ", ".join(missing)
+        raise SystemExit(
+            "[startup] Missing runtime dependencies: "
+            f"{missing_text}\nInstall them with: python -m pip install ."
         )
 
 _ensure_deps()
@@ -97,13 +97,13 @@ def main():
         try:
             import ctypes
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-                "captain.ai-agent"
+                "sevenbt.nemo-assistant"
             )
         except Exception:
             pass
 
     app = QApplication(sys.argv)
-    app.setApplicationName("AI Agent")
+    app.setApplicationName("Nemo Assistant")
     app.setQuitOnLastWindowClosed(False)  # 保持托盘常驻
 
     # 加载打包字体并设为全局字体（须在应用主题/样式表之前）。

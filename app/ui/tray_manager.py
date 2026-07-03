@@ -20,7 +20,7 @@ class TrayManager(QObject):
         super().__init__(parent)
         self._tray = QSystemTrayIcon(parent)
         self._tray.setIcon(QIcon(_ICON_PATH))
-        self._tray.setToolTip("AI Agent")
+        self._tray.setToolTip("Nemo Assistant")
         self._build_menu()
         self._tray.activated.connect(self._on_activated)
         self._tray.show()

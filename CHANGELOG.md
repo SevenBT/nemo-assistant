@@ -1,0 +1,27 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+This project follows a lightweight changelog format inspired by Keep a Changelog, and uses semantic versioning once stable releases begin.
+
+## [Unreleased]
+
+### Added
+
+- Security policy for responsible vulnerability reporting.
+- Public development notes for frameless window, selection capture, theme, and dialog implementation trade-offs.
+- Dependency license notes for source and binary release preparation.
+- Dependabot configuration for Python dependencies and GitHub Actions.
+
+### Changed
+
+- Aligned public documentation with the `SevenBT/nemo-assistant` repository URL.
+- Renamed the PyInstaller spec and packaged executable branding to Nemo Assistant.
+- Replaced placeholder-style default model templates with conservative starter examples.
+- Documented web search provider configuration.
+
+### Fixed
+
+- Corrected the show/hide shortcut in English and Chinese README files.
+- Added the missing `pytest-cov` development dependency used by the contribution guide.
+- Replaced references to an untracked screenshot AI TODO document with public documentation.

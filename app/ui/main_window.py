@@ -3,7 +3,7 @@ Main floating window.
 
 Layout:
   ┌─ TitleBar ───────────────────────────────────────────────────┐
-  │ [≡] AI Agent ── [聊天] [笔记] [工坊] ── [截图] [─] [□] [✕]  │
+  │ [≡] Nemo Assistant ── [聊天] [笔记] [工坊] ── [截图] [─] [□] [✕]  │
   ├──────────────────────────────────────────────────────────────┤
   │ FluentWindow stackedWidget                                   │
   │  page 0: SessionPanel | ChatWidget + InputWidget             │

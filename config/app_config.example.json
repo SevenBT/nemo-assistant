@@ -14,7 +14,7 @@
   },
   "API": {
     "ApiType": "litellm",
-    "MaxTokens": 3328,
+    "MaxTokens": 4096,
     "SystemPrompt": "",
     "Temperature": 0.7,
     "TopP": 1.0,
@@ -23,7 +23,7 @@
   "Appearance": {
     "ContentFontSize": 16,
     "NavigationFontSize": 15,
-    "Theme": "everforest"
+    "Theme": "almond"
   },
   "Window": {
     "EdgeSnap": true,
@@ -42,7 +42,7 @@
       "PingFang SC"
     ],
     "ThemeColor": "#ffa7c080",
-    "ThemeMode": "Dark"
+    "ThemeMode": "Light"
   },
   "Hotkeys": {
     "NewNote": "ctrl+alt+n",

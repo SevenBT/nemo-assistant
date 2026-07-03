@@ -1,6 +1,6 @@
 # 记忆模块设计
 
-> 本文档梳理 AI Agent Desktop Assistant 当前的长期记忆实现。
+> 本文档梳理 Nemo Assistant 当前的长期记忆实现。
 > 涉及文件：`app/models/memory.py`、`app/core/memory_manager.py`、`app/tools/memory.py`、`app/core/consolidator.py`、`app/core/dream.py`，接线在 `app/ui/main_window.py`、`app/core/conversation_prompt_builder.py`、`app/core/agent_loop.py`、`app/ui/chat_session_controller.py`。
 
 ## 1. 总览

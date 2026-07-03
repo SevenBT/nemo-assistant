@@ -115,6 +115,8 @@ Models are connected through **LiteLLM**, with support for OpenAI, Anthropic, De
 
 After the first launch, open **Settings → API**, add a model, and set it as the default to enable AI features across chat and desktop actions.
 
+Web search tools can use DuckDuckGo without an API key. Bing, Tavily, Brave, and Bocha search can be enabled from **Settings → Tools** by selecting a provider and saving its API key in the system keyring.
+
 <p align="center">
   <img src="assets/screenshots/api.png" alt="API and model settings" width="760">
 </p>
@@ -130,7 +132,7 @@ After the first launch, open **Settings → API**, add a model, and set it as th
 | `Ctrl+Alt+Q` | Open quick ask |
 | `Ctrl+Alt+A` | Screenshot + OCR |
 | `Ctrl+Alt+N` | Create desktop sticky note |
-| `Ctrl+Alt+H` | Show / hide main window |
+| `Ctrl+Alt+Space` | Show / hide main window |
 
 Shortcuts can be changed in **Settings → Hotkeys**. The selection action bar appears automatically after text is selected.
 
@@ -141,8 +143,8 @@ Shortcuts can be changed in **Settings → Hotkeys**. The selection action bar a
 Requires Python 3.10+.
 
 ```bash
-git clone <repo-url>
-cd assistant
+git clone https://github.com/SevenBT/nemo-assistant.git
+cd nemo-assistant
 pip install .
 python main.py
 ```
@@ -232,13 +234,13 @@ All tools inherit from `BuiltinTool`, declare `name / description / parameters /
 build.bat
 ```
 
-The script invokes PyInstaller and uses `AI_Agent.spec` to build the desktop app.
+The script invokes PyInstaller and uses `Nemo_Assistant.spec` to build the desktop app.
 
 ---
 
 ## Design Notes
 
-Some implementation trade-offs from building a frameless floating window and cross-app desktop workflows are documented in [`CLAUDE.md`](CLAUDE.md):
+Some implementation trade-offs from building a frameless floating window and cross-app desktop workflows are documented in [`docs/development-notes.md`](docs/development-notes.md):
 
 - Dragging uses `startSystemMove()`; resizing uses a QApplication event filter + `setGeometry` to avoid ghost borders from `startSystemResize()`.
 - Selection capture may inject `Ctrl+C`, which can accidentally trigger SIGINT in terminals, so the outer layer handles `KeyboardInterrupt` and restores the clipboard.

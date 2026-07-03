@@ -2,7 +2,7 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 echo ============================================================
-echo  AI Agent  ^—  打包构建脚本
+echo  Nemo Assistant  ^—  打包构建脚本
 echo ============================================================
 
 REM 优先使用虚拟环境
@@ -21,12 +21,12 @@ echo [2/3] 安装项目依赖...
 if errorlevel 1 ( echo [错误] 依赖安装失败 & pause & exit /b 1 )
 
 echo [3/3] 打包中，请稍候...
-%PYTHON% -m PyInstaller --clean --noconfirm AI_Agent.spec
+%PYTHON% -m PyInstaller --clean --noconfirm Nemo_Assistant.spec
 if errorlevel 1 ( echo [错误] PyInstaller 打包失败 & pause & exit /b 1 )
 
 echo.
 echo ============================================================
-echo  构建完成！单文件可执行程序：dist\AI Agent.exe
+echo  构建完成！单文件可执行程序：dist\Nemo Assistant.exe
 echo  内置 tools/assets 已打包进 exe；用户自定义工具存于 data\user_tools
 echo ============================================================
 pause
