@@ -132,7 +132,10 @@ class _HotkeyRow(QWidget):
         self._combo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._btn = QPushButton(t("hotkeys.modify"))
-        self._btn.setFixedWidth(64)
+        # 不写死宽度：文案随语言变化（"修改" / "Change"），加上主题 QSS 的内边距后
+        # 固定宽度会裁掉文字。用最小宽度给下限——既保证文字完整，也避免录制中文案
+        # 变短（"…"）时按钮缩窄抖动。
+        self._btn.setMinimumWidth(self._btn.sizeHint().width())
         self._btn.clicked.connect(self._on_modify)
 
         layout.addWidget(self._combo_lbl, 1)

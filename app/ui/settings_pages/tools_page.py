@@ -83,7 +83,8 @@ class ToolsPage(QScrollArea):
         self._save_dir.setText(cfg.get(cfg.saveDir))
         self._save_dir.editingFinished.connect(self._save_dir_changed)
         browse_btn = QPushButton(t("settings.tools.browse"))
-        browse_btn.setFixedWidth(60)
+        # 不写死宽度：文案随语言变化（"浏览…" / "Browse…"），加上主题 QSS 的
+        # 内边距后固定宽度会裁掉文字。让按钮按 sizeHint 自适应内容。
         browse_btn.clicked.connect(self._browse_save_dir)
         save_layout.addWidget(self._save_dir)
         save_layout.addWidget(browse_btn)
