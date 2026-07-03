@@ -87,7 +87,7 @@
 ```bash
 git clone <repo-url>
 cd assistant
-pip install -r requirements.txt
+pip install .
 python main.py
 ```
 
