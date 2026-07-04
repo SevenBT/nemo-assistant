@@ -506,6 +506,10 @@ class StickyNoteWindow(QWidget):
             gpos = event.globalPosition().toPoint()
             top = QApplication.topLevelAt(gpos)
             if top is not None and top is not self and not self._resize_active:
+                # 指针离开本窗口进入其它顶层窗口时，清掉可能残留的 resize
+                # 覆盖光标——它是 QApplication 级全局覆盖，不清会盖住其它窗口
+                # 控件自己的光标（表现为在别处停留仍显示上下/斜向箭头）。
+                self._clear_resize_cursor()
                 return False
 
         if etype == QEvent.Type.MouseMove:

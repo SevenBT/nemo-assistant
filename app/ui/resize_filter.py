@@ -149,6 +149,11 @@ class ResizeFilter(QObject):
             gpos = event.globalPosition().toPoint()
             top = QApplication.topLevelAt(gpos)
             if top is not None and top is not self._win and not self._active:
+                # 指针离开主窗口进入其它顶层窗口（如划词浮标 / 对话框）时，
+                # 必须清掉可能残留的 resize 覆盖光标——它是 QApplication 级
+                # 的全局覆盖，不清就会盖住浮标按钮自己的 PointingHandCursor，
+                # 表现为浮标上停留显示上下箭头（SizeVerCursor）。
+                self._clear_cursor()
                 return False
 
         # Suppress resize while snapped or animating
