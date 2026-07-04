@@ -54,6 +54,8 @@ EN: dict[str, str] = {
     "theme.ivory_paper": "Ivory Paper",
     "theme.snow_white": "Snow White",
     "theme.pure_white": "Pure White",
+    "theme.warm_linen": "Warm Linen",
+    "theme.warm_almond": "Warm Almond",
     "settings.appearance.contentFont": "Content font size",
     "settings.appearance.contentFont.desc": "Text size in chat bubbles",
     "settings.appearance.navFont": "Navigation font size",

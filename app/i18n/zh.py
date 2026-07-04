@@ -54,6 +54,8 @@ ZH: dict[str, str] = {
     "theme.ivory_paper": "象牙白",
     "theme.snow_white": "雪白",
     "theme.pure_white": "纯白",
+    "theme.warm_linen": "暖亚麻",
+    "theme.warm_almond": "暖杏白",
     "settings.appearance.contentFont": "内容字体大小",
     "settings.appearance.contentFont.desc": "聊天气泡中的文字大小",
     "settings.appearance.navFont": "导航字体大小",
