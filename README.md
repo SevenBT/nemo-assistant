@@ -1,5 +1,13 @@
 # Nemo Assistant · Floating Desktop AI Assistant
 
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-blue.svg">
+  <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows-0078D6.svg">
+  <a href="https://github.com/SevenBT/nemo-assistant/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/SevenBT/nemo-assistant/actions/workflows/tests.yml/badge.svg"></a>
+  <img alt="GUI" src="https://img.shields.io/badge/GUI-PyQt6%20%2B%20Fluent-8A2BE2.svg">
+</p>
+
 Nemo Assistant is a lightweight desktop assistant that brings **selection actions, screenshot OCR, Markdown notes, sticky notes, tool calling, and AI chat** into one local-first workflow.
 
 It is not another chat window waiting for you to switch context. It is a set of small desktop actions that stay close to your work: translate while reading, polish while writing, capture and understand screen content, pin a quick sticky note, and let AI call tools, read notes, or save memories when needed.
@@ -139,6 +147,17 @@ Shortcuts can be changed in **Settings → Hotkeys**. The selection action bar a
 ---
 
 ## Quick Start
+
+> **Windows only for now.** Nemo Assistant relies on Windows-specific libraries
+> (`pywin32`, `uiautomation`, global hotkeys), and CI runs on Windows only.
+> macOS / Linux are not supported yet.
+
+### Download (recommended)
+
+Grab the latest packaged build from the [Releases](https://github.com/SevenBT/nemo-assistant/releases)
+page — no Python setup required. Unzip and run the executable.
+
+### Run from source
 
 Requires Python 3.10+.
 

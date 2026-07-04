@@ -6,6 +6,12 @@ This project follows a lightweight changelog format inspired by Keep a Changelog
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-04
+
+First public release: floating desktop AI assistant with selection actions,
+screenshot OCR, Markdown notes and stickies, a tool-calling agent, and
+observable agent runs. Windows only.
+
 ### Added
 
 - Security policy for responsible vulnerability reporting.
