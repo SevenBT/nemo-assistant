@@ -1,9 +1,5 @@
 # Third-Party Notices
 
-本项目包含从第三方开源项目移植/改编（ported / adapted）而来的代码。
-以下为这些第三方组件的版权与许可证声明。按各自许可证要求，
-版权声明与许可证文本在分发时一并保留。
-
 This project includes code ported / adapted from third-party open-source
 projects. The copyright and license notices for those components are
 reproduced below. As required by their licenses, the copyright notices and
@@ -13,10 +9,8 @@ permission notices are retained in this distribution.
 
 ## noteration
 
-- 项目主页 / Homepage: https://github.com/lilamr/noteration
-- 许可证 / License: MIT
-
-本项目以下文件移植或改编自 noteration（`noteration/editor/*`）：
+- Homepage: https://github.com/lilamr/noteration
+- License: MIT
 
 The following files in this project are ported or adapted from noteration
 (`noteration/editor/*`):
@@ -26,7 +20,8 @@ The following files in this project are ported or adapted from noteration
 - `app/ui/components/markdown_highlighter.py` — adapted from `noteration/editor/syntax_highlighter.py`
 - `app/ui/components/markdown_editor.py` — portions adapted from noteration
 
-> 注：以下条款要求保留原始版权声明与许可证文本：
+> Note: the following term requires retaining the original copyright notice
+> and license text:
 > The above copyright notice and this permission notice shall be included in
 > all copies or substantial portions of the Software.
 

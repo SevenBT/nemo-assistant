@@ -1,29 +1,29 @@
-## 改动说明
+## Summary
 
-<!-- 这个 PR 做了什么？为什么这么改？ -->
+<!-- What does this PR do, and why is it done this way? -->
 
-## 关联 issue
+## Related issue
 
-<!-- 如 Closes #12；没有可留空 -->
+<!-- e.g. Closes #12; leave empty if none -->
 
-## 改动类型
+## Type of change
 
-- [ ] Bug 修复
-- [ ] 新功能
-- [ ] 重构 / 代码质量
-- [ ] 文档
-- [ ] 其他
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Refactor / code quality
+- [ ] Documentation
+- [ ] Other
 
-## 验证方式
+## How it was verified
 
-<!-- 怎么确认改动有效？ -->
+<!-- How did you confirm the change works? -->
 
-- [ ] `pytest -q` 全部通过（已设置 `QT_QPA_PLATFORM=offscreen`）
-- [ ] 新增 / 修改的功能有对应测试
-- [ ] 手动验证过相关界面 / 交互
+- [ ] `pytest -q` passes (with `QT_QPA_PLATFORM=offscreen` set)
+- [ ] New / changed functionality has corresponding tests
+- [ ] Manually verified the related UI / interaction
 
-## 检查清单
+## Checklist
 
-- [ ] commit message 使用英文，遵循 Conventional Commits
-- [ ] 未提交个人配置（`config/app_config.json`）或任何密钥
-- [ ] 已阅读 [CONTRIBUTING.md](../CONTRIBUTING.md)
+- [ ] Commit messages are in English and follow Conventional Commits
+- [ ] No personal config (`config/app_config.json`) or secrets committed
+- [ ] Read [CONTRIBUTING.md](../CONTRIBUTING.md)

@@ -1,22 +1,26 @@
-# 应用字体 / Bundled Fonts
+# Bundled Fonts
 
-把中文字体文件放到本目录，应用启动时会自动扫描注册（支持 .ttf / .otf / .ttc）。
+Drop font files into this directory and the app will scan and register them
+automatically on startup (`.ttf` / `.otf` / `.ttc` are supported).
 
-## 当前首选：MiSans
+## Preferred: MiSans
 
-放入以下任一文件即可（文件名不限，识别的是字体内部 family 名 `MiSans`）：
+Add any of the following (the file name does not matter; recognition is based
+on the internal font family name `MiSans`):
 
 - `MiSans-Regular.ttf`
-- 或整套 MiSans 字重
+- or the full set of MiSans weights
 
-### 下载
+### Download
 
-MiSans 由小米开源、免费商用。官方下载：
+MiSans is open-sourced by Xiaomi and free for commercial use. Official download:
 https://hyperos.mi.com/font/download/
 
-下载后把 `MiSans-Regular.ttf`（以及需要的字重，如 Medium/Semibold）复制到本目录即可。
+After downloading, copy `MiSans-Regular.ttf` (and any weights you need, such as
+Medium/Semibold) into this directory.
 
-## 回退
+## Fallback
 
-若本目录为空或字体加载失败，应用会回退到系统已安装的
-`MiSans` → `Microsoft YaHei UI` → `Microsoft YaHei`（见 `app/ui/fonts.py`）。
+If this directory is empty or a font fails to load, the app falls back to the
+system-installed `MiSans` → `Microsoft YaHei UI` → `Microsoft YaHei`
+(see `app/ui/fonts.py`).

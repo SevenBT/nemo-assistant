@@ -6,7 +6,7 @@ It is not another chat window waiting for you to switch context. It is a set of 
 
 > Built with **PyQt6 + Fluent Design**. Notes, memories, configuration, and conversations are stored locally by default. API keys are saved through the system keyring instead of plaintext config files.
 
-[中文文档](docs/README.zh-CN.md)
+[Chinese documentation](docs/README.zh-CN.md)
 
 <p align="center">
   <img src="assets/screenshots/toke.png" alt="Nemo Assistant main window" width="860">
