@@ -13,6 +13,8 @@ Features:
 Follows the frameless window conventions from CLAUDE.md.
 """
 
+import logging
+
 from PyQt6.QtCore import (
     QEvent,
     QPoint,
@@ -36,6 +38,8 @@ from PyQt6.QtWidgets import (
 
 from app.ui import style
 from app.i18n import t
+
+logger = logging.getLogger(__name__)
 
 _RESIZE_BORDER = 6
 _MIN_W = 180
@@ -335,8 +339,8 @@ class StickyNoteWindow(QWidget):
         try:
             pos = self.pos()
             self._note_mgr.update_pin_position(self._note_id, pos.x(), pos.y())
-        except Exception as e:
-            print(f"Failed to save position: {e}")
+        except Exception:
+            logger.exception("Failed to save sticky note position for note %s", self._note_id)
 
     def update_content(self, title: str, content: str):
         """外部调用：更新浮窗内容（用于同步笔记面板的编辑）。"""

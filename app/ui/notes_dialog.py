@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,8 @@ from app.models.note import Folder
 from app.ui.components.markdown_editor import MarkdownEditor
 from app.ui.components.markdown_preview import MarkdownPreview
 from app.ui.components.context_menu import ContextMenu
+
+logger = logging.getLogger(__name__)
 
 
 # Note type tabs shown in the list header
@@ -1207,8 +1210,8 @@ class NotesPanel(QWidget):
 
         try:
             self._mgr.pin_note(note_id, x, y)
-        except Exception as e:
-            print(f"Failed to pin note: {e}")
+        except Exception:
+            logger.exception("Failed to pin note %s", note_id)
             return
 
         win = StickyNoteWindow(
@@ -1223,8 +1226,8 @@ class NotesPanel(QWidget):
     def _unpin_note(self, note_id: int):
         try:
             self._mgr.unpin_note(note_id)
-        except Exception as e:
-            print(f"Failed to unpin note: {e}")
+        except Exception:
+            logger.exception("Failed to unpin note %s", note_id)
             return
         for win in self._pin_windows[:]:
             if hasattr(win, '_note_id') and win._note_id == note_id:
