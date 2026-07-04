@@ -241,6 +241,45 @@ def _retry_after_from_headers(headers: Any) -> float | None:
     return max(0.1, (retry_at - datetime.now(retry_at.tzinfo)).total_seconds())
 
 
+# "目标计算机积极拒绝" / connection refused：目标端口拒绝握手，通常是本地代理
+# 未启动或 base_url 端口错配。重试毫无意义（每次都撞同一堵墙），单独归类且不重试。
+_CONNECTION_REFUSED_MARKERS = (
+    "winerror 10061",
+    "econnrefused",
+    "connection refused",
+    "actively refused",
+    "由于目标计算机积极拒绝",
+)
+
+
+def _looks_like_connection_refused(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in _CONNECTION_REFUSED_MARKERS)
+
+
+# LiteLLM 会在异常文本里附带固定的引导链接/提示行，对用户毫无信息量，反而
+# 淹没真正的原因（如"目标计算机积极拒绝"）。展示与日志前统一剥掉这些行。
+_LITELLM_BOILERPLATE_MARKERS = (
+    "give feedback / get help",
+    "litellm.info:",
+    "provider list:",
+    "if you need to debug this error",
+    "https://docs.litellm.ai",
+    "https://github.com/berriai/litellm",
+)
+
+
+def _strip_litellm_boilerplate(text: str) -> str:
+    lines = [
+        line
+        for line in text.splitlines()
+        if line.strip()
+        and not any(m in line.lower() for m in _LITELLM_BOILERPLATE_MARKERS)
+    ]
+    cleaned = "\n".join(lines).strip()
+    return cleaned or text.strip()
+
+
 def _error_event(exc: Exception, prefix: str = "") -> dict:
     """把 SDK/httpx 异常转换为网关可判断的结构化 error 事件。"""
     response = getattr(exc, "response", None)
@@ -251,6 +290,11 @@ def _error_event(exc: Exception, prefix: str = "") -> dict:
     payload = _get_error_payload(exc)
     err_type, err_code = _error_type_code(payload)
     headers = getattr(response, "headers", None)
+
+    body = payload if isinstance(payload, str) else ""
+    raw_message = body.strip() if body.strip() else str(exc)
+    message = _strip_litellm_boilerplate(raw_message)[:500]
+
     name = exc.__class__.__name__.lower()
     if "timeout" in name:
         error_kind = "timeout"
@@ -258,9 +302,10 @@ def _error_event(exc: Exception, prefix: str = "") -> dict:
         error_kind = "connection"
     else:
         error_kind = None
-
-    body = payload if isinstance(payload, str) else ""
-    message = body.strip()[:500] if body.strip() else str(exc)
+    # LiteLLM 常把底层 ConnectionRefusedError 包成 InternalServerError（类名无
+    # 关键字、状态码 500），只能靠错误文本兜底识别，否则会被当 5xx 反复重试。
+    if _looks_like_connection_refused(f"{message} {str(exc)}"):
+        error_kind = "connection_refused"
     if prefix:
         message = f"{prefix}: {message}"
 
@@ -528,6 +573,10 @@ class RetryPolicy:
 
     def is_retryable(self, event: dict) -> bool:
         """根据结构化错误字段判断是否值得重试。"""
+        # 连接被拒绝：端口拒握手，重试只会撞同一堵墙。优先于状态码判断，
+        # 因为 LiteLLM 会把它错包成 500，否则会被当 5xx 白白重试。
+        if (event.get("error_kind") or "").lower() == "connection_refused":
+            return False
         status = event.get("status_code")
         if status is not None:
             status = int(status)

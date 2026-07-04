@@ -165,6 +165,60 @@ def test_gateway_stops_stream_and_retry_after_cancellation():
     assert adapter.resource.closed is True
 
 
+def test_connection_refused_wrapped_as_500_is_not_retried():
+    # LiteLLM 把 ConnectionRefusedError 包成 InternalServerError(500)，
+    # 网关不应把它当 5xx 瞬态错误重试。
+    err = {
+        "type": "error",
+        "message": "LiteLLM 调用失败: litellm.InternalServerError: DeepseekException - [WinError 10061] 由于目标计算机积极拒绝，无法连接。",
+        "status_code": 500,
+        "error_kind": "connection_refused",
+    }
+    adapter = ScriptedAdapter([[err], [{"type": "done"}]])
+    gateway = LLMGateway(
+        config_proxy=StaticConfig(),
+        adapters={"litellm": adapter},
+        retry_policy=RetryPolicy(max_attempts=3, sleep=lambda _: None),
+        logger=GatewayLogger.disabled(),
+    )
+
+    events = list(gateway.chat_stream([{"role": "user", "content": "hi"}]))
+
+    assert adapter.calls == 1
+    assert events[-1]["type"] == "error"
+
+
+def test_error_event_classifies_winerror_10061_as_connection_refused():
+    exc = Exception(
+        "litellm.InternalServerError: InternalServerError: DeepseekException - "
+        "[WinError 10061] 由于目标计算机积极拒绝，无法连接。"
+    )
+
+    event = _error_event(exc, "LiteLLM 调用失败")
+
+    assert event["error_kind"] == "connection_refused"
+    assert RetryPolicy().is_retryable(event) is False
+
+
+def test_error_event_strips_litellm_boilerplate_from_message():
+    exc = Exception(
+        "litellm.InternalServerError: DeepseekException - [WinError 10061] "
+        "由于目标计算机积极拒绝，无法连接。\n"
+        "Give Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new\n"
+        "LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.\n"
+        "Provider List: https://docs.litellm.ai/docs/providers"
+    )
+
+    event = _error_event(exc, "LiteLLM 调用失败")
+
+    assert "由于目标计算机积极拒绝" in event["message"]
+    assert "Give Feedback" not in event["message"]
+    assert "Provider List" not in event["message"]
+    assert "docs.litellm.ai" not in event["message"]
+    # 样板行剥掉后仍能识别为连接被拒绝。
+    assert event["error_kind"] == "connection_refused"
+
+
 def test_error_event_handles_unread_streaming_httpx_response():
     request = httpx.Request("POST", "https://example.test/chat/completions")
     response = httpx.Response(
