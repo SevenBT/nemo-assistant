@@ -66,7 +66,7 @@ pytest --cov=app --cov-report=term-missing
 - 优先小而聚焦的文件与函数（单文件建议 <800 行，单函数 <50 行）。
 - 显式处理错误，不要静默吞掉异常。
 - 不要硬编码密钥。密钥一律走 keyring 或环境变量。
-- PyQt6 无边框窗口相关的实现约定见 [docs/development-notes.md](docs/development-notes.md)，其中记录了拖动、缩放、主题、FluentWindow 等踩过的坑与正确做法，改动 UI 前建议先读。
+- PyQt6 无边框窗口相关的实现约定见 [docs/zh/development-notes.md](docs/zh/development-notes.md)，其中记录了拖动、缩放、主题、FluentWindow 等踩过的坑与正确做法，改动 UI 前建议先读。
 
 ## 提交与 PR
 

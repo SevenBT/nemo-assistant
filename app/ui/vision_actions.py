@@ -3,7 +3,7 @@
 每个动作 = 一个发给多模态模型的预设：图标、标签、预填提示词。
 截图工具栏据此生成识图按钮；未来其他入口（如划词截图）可复用同一份。
 
-这条路径与本地 OCR 识字完全独立（见 docs/screenshot-ai.md）：
+这条路径与本地 OCR 识字完全独立（见 docs/zh/screenshot-ai.md）：
 识图发的是图片像素，OCR 识字走 _reconstruct_layout 提文字，互不为兜底。
 """
 from dataclasses import dataclass

@@ -243,13 +243,13 @@ build.bat
 ```
 
 The script invokes PyInstaller and uses `Nemo_Assistant.spec` to build the desktop app.
-Before publishing a binary release, review [docs/release-checklist.md](docs/release-checklist.md).
+Before publishing a binary release, review [docs/en/release-checklist.md](docs/en/release-checklist.md).
 
 ---
 
 ## Design Notes
 
-Some implementation trade-offs from building a frameless floating window and cross-app desktop workflows are documented in [`docs/development-notes.md`](docs/development-notes.md):
+Some implementation trade-offs from building a frameless floating window and cross-app desktop workflows are documented in [`docs/en/development-notes.md`](docs/en/development-notes.md):
 
 - Dragging uses `startSystemMove()`; resizing uses a QApplication event filter + `setGeometry` to avoid ghost borders from `startSystemResize()`.
 - Selection capture may inject `Ctrl+C`, which can accidentally trigger SIGINT in terminals, so the outer layer handles `KeyboardInterrupt` and restores the clipboard.

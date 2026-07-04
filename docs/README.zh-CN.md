@@ -241,13 +241,13 @@ build.bat
 ```
 
 该脚本调用 PyInstaller，并使用 `Nemo_Assistant.spec` 生成桌面应用。
-发布二进制前，请先检查 [docs/release-checklist.md](release-checklist.md)。
+发布二进制前，请先检查 [docs/zh/release-checklist.md](zh/release-checklist.md)。
 
 ---
 
 ## 设计取舍
 
-无边框浮窗、多工具融合和跨应用划词过程中踩过的一些坑，已经沉淀为当前实现方案（详见 [`docs/development-notes.md`](development-notes.md)）：
+无边框浮窗、多工具融合和跨应用划词过程中踩过的一些坑，已经沉淀为当前实现方案（详见 [`docs/zh/development-notes.md`](zh/development-notes.md)）：
 
 - 拖动使用 `startSystemMove()`；调整大小使用 QApplication 事件过滤器 + `setGeometry`，避免 `startSystemResize()` 的幽灵边框
 - 划词时注入 `Ctrl+C` 可能误触发控制台 SIGINT，需要在外层兜底 `KeyboardInterrupt` 并还原剪贴板

@@ -1,5 +1,7 @@
 # Development Notes
 
+> [中文](../zh/development-notes.md)
+
 These notes capture implementation trade-offs that are useful for contributors. They intentionally avoid local assistant rules or maintainer-only workflow preferences.
 
 ## Frameless Window

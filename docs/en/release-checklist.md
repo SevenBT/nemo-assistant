@@ -1,5 +1,7 @@
 # Release Checklist
 
+> [中文](../zh/release-checklist.md)
+
 Use this checklist before publishing a GitHub release or attaching a Windows executable.
 
 ## Source Release

@@ -1,5 +1,7 @@
 # Screenshot AI Flow
 
+> [中文](../zh/screenshot-ai.md)
+
 Nemo Assistant has two independent screenshot paths.
 
 ## Local OCR

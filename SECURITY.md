@@ -32,7 +32,7 @@ Security-sensitive areas include:
 - API key storage through the system keyring.
 - Trace, eval, note, memory, and session persistence.
 
-See [docs/security-model.md](docs/security-model.md) for the contributor-facing security model and release checklist.
+See [docs/en/security-model.md](docs/en/security-model.md) for the contributor-facing security model and release checklist.
 
 ## Maintainer Notes
 

@@ -1,5 +1,7 @@
 # Security Model
 
+> [中文](../zh/security-model.md)
+
 Nemo Assistant is local-first, but it can still perform powerful actions on the user's machine. This document describes the intended safety boundaries for contributors and maintainers.
 
 ## Trust Boundaries
