@@ -55,10 +55,8 @@ a = Analysis(
         'PyQt6.QtCore',
         'PyQt6.QtGui',
         'PyQt6.QtWidgets',
-        # Common packages that user scripts may import.
-        # Add more here when bundling tools that need extra dependencies.
-        'psutil',
-        'requests',
+        # Built-in app modules are collected above. User-added tools that need
+        # extra third-party packages should install them into user tool runtime.
         'runpy',
     ],
     hookspath=[],

@@ -20,7 +20,20 @@ echo [2/3] 安装项目依赖...
 %PYTHON% -m pip install --quiet .
 if errorlevel 1 ( echo [错误] 依赖安装失败 & pause & exit /b 1 )
 
+set "DIST_EXE=dist\Nemo Assistant.exe"
+if exist "%DIST_EXE%" (
+    echo [准备] 清理旧可执行文件...
+    del /f /q "%DIST_EXE%" >nul 2>nul
+    if exist "%DIST_EXE%" (
+        echo [错误] 无法覆盖 "%DIST_EXE%"。
+        echo        请关闭正在运行的 Nemo Assistant，或手动删除该文件后重试。
+        pause
+        exit /b 1
+    )
+)
+
 echo [3/3] 打包中，请稍候...
+set "LITELLM_LOCAL_MODEL_COST_MAP=True"
 %PYTHON% -m PyInstaller --clean --noconfirm Nemo_Assistant.spec
 if errorlevel 1 ( echo [错误] PyInstaller 打包失败 & pause & exit /b 1 )
 

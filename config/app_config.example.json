@@ -69,8 +69,7 @@
       {
         "id": "deepseek-chat",
         "name": "DeepSeek Chat",
-        "provider": "openai",
-        "api_base": "https://api.deepseek.com",
+        "provider": "deepseek",
         "enabled": false
       }
     ]

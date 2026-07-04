@@ -1,0 +1,33 @@
+name: package-windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pyinstaller:
+    runs-on: windows-latest
+
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install packaging dependencies
+        run: |
+          python -m pip install --upgrade pip uv
+          uv sync --extra build --frozen
+
+      - name: Build onefile executable
+        run: uv run python -m PyInstaller --clean --noconfirm Nemo_Assistant.spec
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: nemo-assistant-windows
+          path: "dist/Nemo Assistant.exe"
