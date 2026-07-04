@@ -856,11 +856,11 @@ def _build_custom_qss(theme: dict, content_font_size: int = 15, editor_font_size
     accent = theme["accent"]
     accent_light = theme["accent_light"]
     accent_subtle = theme["accent_subtle"]
-    user_bg = theme["user_bubble"]
-    user_border = theme["user_bubble_border"]
 
     bg = theme["bg_solid"]
     surface = theme["surface_solid"]
+
+    user_bg = theme["user_bubble"]
 
     accent_text = "#FFFFFF"
     dialog_btn_text = "#FFFFFF" if dark else "#FFFFFF"
@@ -947,11 +947,11 @@ QSplitter::handle {{
 QSplitter::handle:hover {{ background: {accent}; }}
 
 /* ═══════════════════════════════════════════════════════════════════
-   Message Bubbles — user has visible bubble, AI is frameless
+   Message Bubbles — user has filled (borderless) bubble, AI is frameless
    ═══════════════════════════════════════════════════════════════════ */
 #userMessage {{
-    background: {accent_subtle};
-    border: 1.5px solid {accent};
+    background: {user_bg};
+    border: none;
     border-radius: 14px;
     padding: 1px 6px;
 }}

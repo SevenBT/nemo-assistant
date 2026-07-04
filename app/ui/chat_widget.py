@@ -235,7 +235,12 @@ class ChatWidget(QWidget):
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setObjectName("chatScroll")
-        self._scroll.viewport().setStyleSheet("background: transparent;")
+        # 用 ID 选择器把透明背景限定在 viewport 自身。裸样式（无选择器）会级联到
+        # viewport 的所有子控件，覆盖掉气泡的 #userMessage 背景，导致用户气泡底色不可见。
+        self._scroll.viewport().setObjectName("chatViewport")
+        self._scroll.viewport().setStyleSheet(
+            "#chatViewport { background: transparent; }"
+        )
 
         self._inner = QWidget()
         self._layout = QVBoxLayout(self._inner)
