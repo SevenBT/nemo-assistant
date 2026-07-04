@@ -156,6 +156,14 @@ pip install -e ".[dev]"
 python main.py
 ```
 
+For reproducible development with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync --extra dev
+uv run pytest -q
+uv run python main.py
+```
+
 On Windows, you can also run:
 
 ```bat
@@ -235,6 +243,7 @@ build.bat
 ```
 
 The script invokes PyInstaller and uses `Nemo_Assistant.spec` to build the desktop app.
+Before publishing a binary release, review [docs/release-checklist.md](docs/release-checklist.md).
 
 ---
 

@@ -12,6 +12,9 @@ This project follows a lightweight changelog format inspired by Keep a Changelog
 - Public development notes for frameless window, selection capture, theme, and dialog implementation trade-offs.
 - Dependency license notes for source and binary release preparation.
 - Dependabot configuration for Python dependencies and GitHub Actions.
+- uv lock workflow for reproducible development and CI installs.
+- Release checklist covering source, Windows binary, and dependency license review.
+- Repository consistency checks for metadata, Markdown links, stale placeholders, and PyInstaller hidden imports.
 
 ### Changed
 

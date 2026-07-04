@@ -39,6 +39,8 @@ Before distributing a PyInstaller build:
 - Review GPL/commercial licensing obligations for Qt/PyQt and related GUI packages.
 - Regenerate this inventory from the exact release environment.
 
+See [docs/release-checklist.md](docs/release-checklist.md) for the full release checklist.
+
 Suggested command after installing a license inventory tool:
 
 ```bash

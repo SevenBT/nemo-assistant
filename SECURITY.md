@@ -32,6 +32,8 @@ Security-sensitive areas include:
 - API key storage through the system keyring.
 - Trace, eval, note, memory, and session persistence.
 
+See [docs/security-model.md](docs/security-model.md) for the contributor-facing security model and release checklist.
+
 ## Maintainer Notes
 
 Before publishing binary releases, review bundled dependency licenses and include required notices. This is especially important for GUI and HTML conversion dependencies that may carry copyleft obligations.

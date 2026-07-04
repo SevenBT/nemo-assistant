@@ -24,6 +24,13 @@ pip install -e ".[dev]"
 python main.py
 ```
 
+推荐使用 `uv` 复现锁定依赖：
+
+```bash
+uv sync --extra dev
+uv run python main.py
+```
+
 首次启动后，进入 **设置 → API** 添加模型并设为默认。API Key 通过系统 keyring 安全存储，不会写入明文配置。个人配置保存在 `config/app_config.json`（已被 `.gitignore` 忽略，不要提交）。
 
 ## 运行测试
@@ -35,6 +42,9 @@ python main.py
 $env:QT_QPA_PLATFORM = "offscreen"
 $env:LITELLM_LOCAL_MODEL_COST_MAP = "True"
 pytest -q
+
+# 或使用 uv
+uv run pytest -q
 
 # macOS / Linux (bash)
 export QT_QPA_PLATFORM=offscreen

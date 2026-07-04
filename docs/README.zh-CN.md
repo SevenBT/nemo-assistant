@@ -154,6 +154,14 @@ pip install -e ".[dev]"
 python main.py
 ```
 
+使用 [uv](https://docs.astral.sh/uv/) 可复现开发环境：
+
+```bash
+uv sync --extra dev
+uv run pytest -q
+uv run python main.py
+```
+
 Windows 下也可以直接运行：
 
 ```bat
@@ -233,6 +241,7 @@ build.bat
 ```
 
 该脚本调用 PyInstaller，并使用 `Nemo_Assistant.spec` 生成桌面应用。
+发布二进制前，请先检查 [docs/release-checklist.md](release-checklist.md)。
 
 ---
 
