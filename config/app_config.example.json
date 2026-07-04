@@ -84,7 +84,7 @@
   },
   "Tools": {
     "SaveDir": "",
-    "SearchProvider": "bocha",
+    "SearchProvider": "duckduckgo",
     "ToolStates": {
       "get_system_info": false,
       "exec": false,
