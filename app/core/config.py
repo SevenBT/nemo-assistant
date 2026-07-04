@@ -156,6 +156,7 @@ THEME_OPTIONS = [
     "morandi_haze", "morandi_olive", "morandi_lilac",
     "latte", "rose_pine_dawn",
     "solarized_light", "gruvbox_light",
+    "cloud_white", "ivory_paper", "snow_white", "pure_white",
 ]
 
 # ── Keyring constants ─────────────────────────────────────────────────
