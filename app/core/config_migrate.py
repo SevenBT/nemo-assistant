@@ -201,7 +201,8 @@ def _convert_old_to_new(old: dict) -> dict:
     ll = old.get("litellm", {})
     new.setdefault("LiteLLM", {})
     new["LiteLLM"]["Enabled"] = ll.get("enabled", False)
-    new["LiteLLM"]["DefaultModel"] = ll.get("default_model", "gpt-4o")
+    from app.core.config import DEFAULT_LITELLM_MODEL
+    new["LiteLLM"]["DefaultModel"] = ll.get("default_model", DEFAULT_LITELLM_MODEL)
     new["LiteLLM"]["Models"] = ll.get("models", [])
 
     # Hotkeys（默认值取自单一来源 DEFAULT_HOTKEYS）

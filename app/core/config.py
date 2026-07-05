@@ -100,37 +100,44 @@ def current_vision_enabled() -> bool:
 # api_base 留空即走该 provider 默认端点，用户只需在设置页填对应 API Key。
 MODEL_TEMPLATES: dict[str, list[dict]] = {
     "openai": [
-        {"id": "gpt-4o", "name": "GPT-4o"},
-        {"id": "gpt-4o-mini", "name": "GPT-4o mini"},
+        {"id": "gpt-5.6-sol", "name": "GPT-5.6 Sol"},
+        {"id": "gpt-5.6-terra", "name": "GPT-5.6 Terra"},
+        {"id": "gpt-5.6-luna", "name": "GPT-5.6 Luna"},
+        {"id": "gpt-5.5", "name": "GPT-5.5"},
     ],
     "anthropic": [
-        {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet"},
-        {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku"},
+        {"id": "claude-sonnet-5", "name": "Claude Sonnet 5"},
+        {"id": "claude-opus-4-8", "name": "Claude Opus 4.8"},
+        {"id": "claude-fable-5", "name": "Claude Fable 5"},
+        {"id": "claude-haiku-5", "name": "Claude Haiku 5"},
     ],
     "gemini": [
-        {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
-        {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
+        {"id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash"},
+        {"id": "gemini-3.5-pro", "name": "Gemini 3.5 Pro"},
+        {"id": "gemini-3.1-pro", "name": "Gemini 3.1 Pro"},
     ],
     "meta_llama": [
+        {"id": "Llama-4-Maverick", "name": "Llama 4 Maverick"},
+        {"id": "Llama-4-Scout", "name": "Llama 4 Scout"},
         {"id": "Llama-3.3-70B-Instruct", "name": "Llama 3.3"},
     ],
     "deepseek": [
-        {"id": "deepseek-chat", "name": "DeepSeek Chat"},
-        {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner"},
+        {"id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro"},
+        {"id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash"},
     ],
     "dashscope": [
-        {"id": "qwen-plus", "name": "Qwen Plus"},
-        {"id": "qwen-turbo", "name": "Qwen Turbo"},
+        {"id": "qwen3-max", "name": "Qwen3 Max"},
+        {"id": "qwen3.6-plus", "name": "Qwen3.6 Plus"},
     ],
     "zai": [
-        {"id": "glm-4-plus", "name": "GLM-4 Plus"},
+        {"id": "glm-5.1", "name": "GLM-5.1"},
     ],
 }
 
 # 全新用户的默认模型集（litellmModels 的初始值来源，单一来源）。
 # 从各 provider 模板汇总；第一条设为默认启用，其余仅入列供选择/编辑。
 # 用户只需在设置页为想用的 provider 填 API Key 即可开箱使用。
-DEFAULT_LITELLM_MODEL = "gpt-4o"
+DEFAULT_LITELLM_MODEL = "deepseek-v4-flash"
 
 DEFAULT_LITELLM_MODELS: list[dict] = [
     {

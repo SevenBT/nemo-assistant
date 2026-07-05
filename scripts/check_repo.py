@@ -40,11 +40,6 @@ STALE_PATTERNS = [
     "TODO_SCREENSHOT_AI",
     "<repo-url>",
     "Ctrl+Alt+H",
-    "claude-opus-4-8",
-    "gpt-5.6",
-    "DeepSeek V4",
-    "glm-5.1",
-    "qwen3.6",
 ]
 
 
