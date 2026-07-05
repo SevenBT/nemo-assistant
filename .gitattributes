@@ -1,0 +1,16 @@
+# Normalize line endings across platforms.
+# Git stores text as LF in the repo; working-tree endings follow the rules below.
+* text=auto
+
+# Windows batch scripts must be CRLF, or cmd.exe misparses ( ) blocks.
+*.bat text eol=crlf
+
+# Unix shell scripts and git config files must stay LF.
+*.sh text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+# Binary assets: never touch their bytes.
+*.png binary
+*.gif binary
+*.ico binary
