@@ -17,7 +17,7 @@ It is not another chat window waiting for you to switch context. It is a set of 
 [Chinese documentation](docs/README.zh-CN.md)
 
 <p align="center">
-  <img src="assets/screenshots/toke.png" alt="Nemo Assistant main window" width="860">
+  <img src="assets/screenshots/selection-demo.gif" alt="Nemo Assistant selection actions demo" width="860">
 </p>
 
 ---
@@ -100,6 +100,12 @@ Built-in tools cover:
 
 <p align="center">
   <img src="assets/screenshots/tools.png" alt="Workshop" width="860">
+</p>
+
+In a conversation, the assistant can summarize the tools it has available and put them to work on your request.
+
+<p align="center">
+  <img src="assets/screenshots/toke.png" alt="Assistant capability overview in chat" width="860">
 </p>
 
 ### 🧠 Observable Agent Runs

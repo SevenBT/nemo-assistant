@@ -7,7 +7,7 @@
 > 基于 **PyQt6 + Fluent Design** 构建。笔记、记忆、配置与会话数据默认保存在本机；API Key 通过系统 keyring 保存，不写入明文配置。
 
 <p align="center">
-  <img src="../assets/screenshots/toke.png" alt="Nemo Assistant 主界面" width="860">
+  <img src="../assets/screenshots/selection-demo.gif" alt="Nemo Assistant 划词操作演示" width="860">
 </p>
 
 ---
@@ -90,6 +90,12 @@
 
 <p align="center">
   <img src="../assets/screenshots/tools.png" alt="工具工坊" width="860">
+</p>
+
+对话中，助手可以总结自己可用的工具，并调用它们来完成你的需求。
+
+<p align="center">
+  <img src="../assets/screenshots/toke.png" alt="对话中的能力概览" width="860">
 </p>
 
 ### 🧠 可观测的 Agent 运行链路
