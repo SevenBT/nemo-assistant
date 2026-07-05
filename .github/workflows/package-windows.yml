@@ -27,7 +27,7 @@ jobs:
         run: uv run python -m PyInstaller --clean --noconfirm Nemo_Assistant.spec
 
       - name: Upload executable
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nemo-assistant-windows
           path: "dist/Nemo Assistant.exe"
