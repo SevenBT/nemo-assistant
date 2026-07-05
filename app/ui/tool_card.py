@@ -44,7 +44,9 @@ class ToolSummaryWidget(QFrame):
         header.addStretch()
 
         self._toggle_btn = TransparentPushButton(t("toolcard.expand"))
-        self._toggle_btn.setFixedSize(52, 22)
+        self._toggle_btn.setFixedHeight(24)
+        # 宽度随文案自适应，避免英文 Expand/Collapse 被固定宽度截断
+        self._toggle_btn.setMinimumWidth(0)
         self._toggle_btn.clicked.connect(self._toggle)
         self._toggle_btn.hide()
         header.addWidget(self._toggle_btn)

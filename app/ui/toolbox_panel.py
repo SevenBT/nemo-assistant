@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QColor, QDesktopServices, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -31,7 +31,6 @@ from qfluentwidgets import (
     ScrollArea,
     StrongBodyLabel,
     SubtitleLabel,
-    SwitchButton,
     TransparentToolButton,
 )
 
@@ -39,6 +38,7 @@ if TYPE_CHECKING:
     from app.tools.registry import ToolRegistry
 
 from app.i18n import t
+from app.ui import style
 from app.tools.registry import HIGH_RISK_TOOLS
 from app.tools.script_adapter import ScriptToolAdapter
 
@@ -71,6 +71,65 @@ def _icon_for(name: str) -> FluentIcon:
 # PLACEHOLDER_CARD
 
 
+class _StatusDot(QWidget):
+    """工具启用状态指示灯,兼作开关。
+
+    绿点=启用,灰点=禁用,点击切换。前置条件缺失(unavailable)时置灰且不可点。
+    比 SwitchButton 更轻量,宽度固定,便于整列对齐。
+    """
+
+    _DIAMETER = 12
+
+    clicked = pyqtSignal()
+
+    def __init__(self, checked: bool, enabled: bool, parent=None):
+        super().__init__(parent)
+        self._checked = checked
+        self._interactive = enabled
+        self.setFixedSize(self._DIAMETER + 4, self._DIAMETER + 4)
+        if enabled:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._refresh_tooltip()
+
+    def _refresh_tooltip(self):
+        # 可交互时按当前状态给出本地化提示；不可用时的原因由调用方设置。
+        if self._interactive:
+            key = "workshop.tip.enabled" if self._checked else "workshop.tip.disabled"
+            self.setToolTip(t(key))
+
+    def setChecked(self, checked: bool):
+        if checked != self._checked:
+            self._checked = checked
+            self._refresh_tooltip()
+            self.update()
+
+    def isChecked(self) -> bool:
+        return self._checked
+
+    def mousePressEvent(self, event):
+        if self._interactive and event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        theme = style.get_current_theme()
+        if not self._interactive:
+            color = QColor(theme["text_muted"])
+            color.setAlpha(90)
+        elif self._checked:
+            color = QColor(theme["success"])
+        else:
+            color = QColor(theme["text_muted"])
+            color.setAlpha(140)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        x = (self.width() - self._DIAMETER) // 2
+        y = (self.height() - self._DIAMETER) // 2
+        painter.drawEllipse(x, y, self._DIAMETER, self._DIAMETER)
+
+
 class _ToolCard(QWidget):
     """工具列表项卡片:图标 + 名字 + 描述,可选开关。
 
@@ -93,6 +152,22 @@ class _ToolCard(QWidget):
         icon.setFixedSize(20, 20)
         layout.addWidget(icon)
 
+        # 名字前的状态圆点兼开关：绿=启用/灰=禁用，点击切换
+        if switchable:
+            reason = tool.unavailable_reason
+            self._toggle = _StatusDot(
+                checked=tool.enabled, enabled=not reason,
+            )
+            if reason:
+                # 前置条件缺失（如未配 API Key）：置灰不可点并说明原因，
+                # 避免用户"点了没反应"的困惑。
+                self._toggle.setToolTip(reason)
+            else:
+                self._toggle.clicked.connect(self._on_dot_clicked)
+            layout.addWidget(self._toggle)
+        else:
+            self._toggle = None
+
         text = QVBoxLayout()
         text.setSpacing(2)
         text.setContentsMargins(0, 0, 0, 0)
@@ -105,22 +180,9 @@ class _ToolCard(QWidget):
         text.addWidget(self._desc_lbl)
         layout.addLayout(text, 1)
 
-        if switchable:
-            self._toggle = SwitchButton()
-            self._toggle.setChecked(tool.enabled)
-            reason = tool.unavailable_reason
-            if reason:
-                # 前置条件缺失（如未配 API Key）：置灰开关并说明原因，
-                # 避免用户"拨了没反应"的困惑。
-                self._toggle.setEnabled(False)
-                self._toggle.setToolTip(reason)
-            else:
-                self._toggle.checkedChanged.connect(
-                    lambda checked: self.toggled.emit(self._name, checked)
-                )
-            layout.addWidget(self._toggle)
-        else:
-            self._toggle = None
+    def _on_dot_clicked(self):
+        self._toggle.setChecked(not self._toggle.isChecked())
+        self.toggled.emit(self._name, self._toggle.isChecked())
 
 
 # PLACEHOLDER_DETAIL

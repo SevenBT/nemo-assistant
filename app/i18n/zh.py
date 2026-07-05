@@ -557,6 +557,8 @@ ZH: dict[str, str] = {
     "workshop.tip.new": "新建工具",
     "workshop.tip.generate": "AI 生成工具",
     "workshop.tip.refresh": "刷新",
+    "workshop.tip.enabled": "已启用 · 点击关闭",
+    "workshop.tip.disabled": "已关闭 · 点击启用",
     "workshop.group.builtin": "内置能力",
     "workshop.group.mine": "我的工具",
     "workshop.empty_hint": "还没有自定义工具 — 点上方 + 或 🤖 添加",

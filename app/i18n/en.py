@@ -557,6 +557,8 @@ EN: dict[str, str] = {
     "workshop.tip.new": "New tool",
     "workshop.tip.generate": "AI-generate tool",
     "workshop.tip.refresh": "Refresh",
+    "workshop.tip.enabled": "Enabled · click to disable",
+    "workshop.tip.disabled": "Disabled · click to enable",
     "workshop.group.builtin": "Built-in abilities",
     "workshop.group.mine": "My tools",
     "workshop.empty_hint": "No custom tools yet — click + or 🤖 above to add",
