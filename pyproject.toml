@@ -7,7 +7,7 @@ name = "nemo-assistant"
 version = "0.1.0"
 description = "A local-first floating desktop AI assistant for selection actions, OCR screenshots, Markdown notes, stickies, tool calling, and chat."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "SevenBT" }]
 keywords = ["desktop-assistant", "pyqt6", "ai", "ocr", "markdown-notes", "litellm"]
@@ -18,8 +18,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Desktop Environment",
 ]

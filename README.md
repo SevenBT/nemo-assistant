@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
-  <img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-blue.svg">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.12%2B-blue.svg">
   <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows-0078D6.svg">
   <a href="https://github.com/SevenBT/nemo-assistant/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/SevenBT/nemo-assistant/actions/workflows/tests.yml/badge.svg"></a>
   <img alt="GUI" src="https://img.shields.io/badge/GUI-PyQt6%20%2B%20Fluent-8A2BE2.svg">
@@ -165,7 +165,7 @@ page — no Python setup required. Unzip and run the executable.
 
 ### Run from source
 
-Requires Python 3.10+.
+Requires Python 3.12+.
 
 ```bash
 git clone https://github.com/SevenBT/nemo-assistant.git
