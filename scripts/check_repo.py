@@ -28,6 +28,7 @@ SKIP_DIRS = {
     "dist",
     "data",
     "logs",
+    "work",
     ".pytest_cache",
 }
 SKIP_FILES = {
@@ -72,7 +73,9 @@ def check_markdown_links() -> list[str]:
     html_img = re.compile(r"<img\s+[^>]*src=\"([^\"]+)\"", re.IGNORECASE)
 
     for path in _iter_markdown_files():
-        text = path.read_text(encoding="utf-8")
+        # Some local-only trees (e.g. macOS AppleDouble ._ files) may carry
+        # non-UTF-8 bytes; degrade gracefully instead of crashing the check.
+        text = path.read_text(encoding="utf-8", errors="replace")
         for pattern in (md_link, html_img):
             for match in pattern.finditer(text):
                 target = match.group(1).strip()
