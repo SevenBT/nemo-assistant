@@ -135,6 +135,13 @@ class MainWindow(FluentWindow):
             consolidator=self._consolidator,
             trace_store=self._trace_store,
         )
+        # 消息级操作（复制/重新生成/编辑）：气泡信号 → 会话控制器。
+        # 必须在控制器创建之后连接（_build_ui 阶段控制器尚不存在）。
+        self._chat.copy_message.connect(self._chat_session_controller.copy_reply)
+        self._chat.regenerate_message.connect(
+            self._chat_session_controller.regenerate_last
+        )
+        self._chat.edit_message.connect(self._chat_session_controller.edit_last)
         # 识图：每次截图动作新建一个会话，附上图片并按动作处理（自动发送或等输入）
         self._screenshot_controller.set_chat_callbacks(
             vision_callback=self._chat_session_controller.start_vision_session,

@@ -7,12 +7,13 @@ from app.i18n import t as _t
 from PyQt6.QtCore import Qt, QEvent, QPoint, QSize, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
+    QHBoxLayout,
     QSizePolicy,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import IndeterminateProgressBar, SmoothScrollArea
+from qfluentwidgets import IndeterminateProgressBar, SmoothScrollArea, TransparentToolButton, FluentIcon
 
 from app.models.message import Message, MessageRole
 from app.ui.anchor_rail import AnchorRail, _AnchorPanel
@@ -116,15 +117,28 @@ class MessageBubble(QFrame):
     AI 气泡支持折叠的工具摘要：
       [工具摘要]  ← 单行 "已调用 N 个工具"，可展开
       [回复文本]  ← 最终回复内容
+
+    悬停时底部浮现操作条：AI 气泡可复制/重新生成，用户气泡可编辑。
+    操作条默认只对「最后一轮」气泡启用（由 ChatWidget 控制），符合
+    「只重生/编辑最后一条」的语义，避免改动中间历史。
     """
+
+    # 携带本气泡的 Message，交由上层（控制器）决定如何处理。
+    copy_requested = pyqtSignal(object)
+    regenerate_requested = pyqtSignal(object)
+    edit_requested = pyqtSignal(object)
 
     def __init__(self, message: Message, parent=None):
         super().__init__(parent)
         self._is_user = message.role == MessageRole.USER
+        self._message = message
         self._text = message.content or ""
         self._tool_summary: ToolSummaryWidget | None = None
-        self.setObjectName("userMessage" if self._is_user else "aiMessage")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._actions: QWidget | None = None
+        self._actions_enabled = False
+        # 外层容器透明，只作布局；带背景的气泡本体是内层 self._frame。
+        # 操作条放在气泡本体「之外、下方」，悬停显示时不会撑高气泡本身。
+        self.setObjectName("bubbleContainer")
         if self._is_user:
             self.setSizePolicy(
                 QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
@@ -136,11 +150,33 @@ class MessageBubble(QFrame):
         return self._is_user
 
     @property
+    def message(self) -> Message:
+        return self._message
+
+    @property
     def text(self) -> str:
         return self._text
 
     def _build(self, message: Message):
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(2)
+
+        # 气泡本体：带背景/边框的内层 frame，只装内容，悬停不受操作条影响。
+        self._frame = QFrame(self)
+        self._frame.setObjectName("userMessage" if self._is_user else "aiMessage")
+        self._frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        if self._is_user:
+            # 用户气泡按内容自适应宽度（右对齐）。
+            self._frame.setSizePolicy(
+                QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
+            )
+        else:
+            # AI 气泡撑满内容列宽，否则回复框会被压成半宽。
+            self._frame.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            )
+        layout = QVBoxLayout(self._frame)
         if self._is_user:
             layout.setContentsMargins(10, 2, 10, 2)
         else:
@@ -182,6 +218,90 @@ class MessageBubble(QFrame):
             self._content.hide()
         layout.addWidget(self._content)
 
+        if self._is_user:
+            # 右对齐让用户气泡贴右；AI 气泡不设对齐，撑满内容列宽。
+            outer.addWidget(self._frame, alignment=Qt.AlignmentFlag.AlignRight)
+        else:
+            outer.addWidget(self._frame)
+
+        # 操作条在气泡本体之外、下方。用固定高度容器承托，隐藏时也占位，
+        # 悬停显示不引起布局跳动（气泡不再变高）。
+        self._actions = self._build_actions()
+        self._actions_holder = QWidget(self)
+        self._actions_holder.setObjectName("bubbleActionsHolder")
+        holder_layout = QHBoxLayout(self._actions_holder)
+        holder_layout.setContentsMargins(0, 0, 0, 0)
+        holder_layout.setSpacing(0)
+        if self._is_user:
+            holder_layout.addStretch(1)
+            holder_layout.addWidget(self._actions)
+        else:
+            holder_layout.addWidget(self._actions)
+            holder_layout.addStretch(1)
+        self._actions_holder.setFixedHeight(22)
+        outer.addWidget(self._actions_holder)
+        self._actions.hide()
+
+    def _build_actions(self) -> QWidget:
+        """底部悬停操作条：AI=复制/重新生成，用户=复制/编辑。"""
+        bar = QWidget(self)
+        bar.setObjectName("bubbleActions")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(2, 0, 2, 0)
+        row.setSpacing(2)
+
+        def _btn(icon, tip, slot) -> TransparentToolButton:
+            b = TransparentToolButton(icon, bar)
+            b.setFixedSize(20, 20)
+            b.setIconSize(QSize(12, 12))
+            b.setToolTip(tip)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+            return b
+
+        self._copy_btn = _btn(
+            FluentIcon.COPY, _t("chat.action.copy"), self._on_copy_clicked
+        )
+        if self._is_user:
+            _btn(FluentIcon.EDIT, _t("chat.action.edit"),
+                 lambda: self.edit_requested.emit(self._message))
+        else:
+            _btn(FluentIcon.SYNC, _t("chat.action.regenerate"),
+                 lambda: self.regenerate_requested.emit(self._message))
+        return bar
+
+    def _on_copy_clicked(self):
+        """复制后把按钮图标临时切成对号，短暂后还原——无需弹通知。"""
+        self.copy_requested.emit(self._message)
+        self._copy_btn.setIcon(FluentIcon.ACCEPT)
+        QTimer.singleShot(1500, self._restore_copy_icon)
+
+    def _restore_copy_icon(self):
+        # 气泡可能已被销毁（重新生成/切会话），忽略即可。
+        try:
+            self._copy_btn.setIcon(FluentIcon.COPY)
+        except RuntimeError:
+            pass
+
+    def set_actions_enabled(self, enabled: bool):
+        """是否允许显示操作条（仅最后一轮气泡开启）。"""
+        self._actions_enabled = enabled
+        if not enabled and self._actions is not None:
+            self._actions.hide()
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        if self._actions_enabled and self._actions is not None:
+            # 空 AI 气泡（还没有内容）不显示操作条。
+            if not self._is_user and not self._text:
+                return
+            self._actions.show()
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        if self._actions is not None:
+            self._actions.hide()
+
     # -- 内部 --------------------------------------------------------
 
     # -- 公开 API -------------------------------------------------------
@@ -207,6 +327,9 @@ class MessageBubble(QFrame):
 
     def set_content(self, text: str):
         """设置回复文本内容，根据是否有内容自动显示/隐藏。"""
+        self._text = text
+        # 保持 message.content 与气泡显示同步，供复制/重新生成读取最新文本。
+        self._message.content = text
         self._content.set_text(text)
         if not self._is_user:
             self._content.setVisible(bool(text))
@@ -216,6 +339,9 @@ class ChatWidget(QWidget):
     """可滚动的消息列表，支持拖放文件附件。"""
 
     file_attached = pyqtSignal(list)  # 发射 Attachment 列表
+    copy_message = pyqtSignal(object)       # 复制某条 AI 回复（Message）
+    regenerate_message = pyqtSignal(object)  # 重新生成某条 AI 回复（Message）
+    edit_message = pyqtSignal(object)        # 编辑某条用户消息（Message）
 
     _MAX_CONTENT_WIDTH = 760  # content column max width; centered when viewport is wider
     _PANEL_RAIL_GAP = 6       # 锚点面板与轨道之间的间隙
@@ -354,14 +480,38 @@ class ChatWidget(QWidget):
 
     def add_message(self, message: Message) -> MessageBubble:
         bubble = MessageBubble(message)
+        self._register_bubble(bubble)
         self._bubbles.append(bubble)
         if bubble.is_user:
             self._layout.addWidget(bubble, alignment=Qt.AlignmentFlag.AlignRight)
         else:
             self._layout.addWidget(bubble)
+        self._refresh_action_targets()
         QTimer.singleShot(30, self._scroll_bottom)
         QTimer.singleShot(30, self._rebuild_anchors)
         return bubble
+
+    def _register_bubble(self, bubble: MessageBubble):
+        """把气泡的操作信号转发到 ChatWidget 层。"""
+        bubble.copy_requested.connect(self.copy_message)
+        bubble.regenerate_requested.connect(self.regenerate_message)
+        bubble.edit_requested.connect(self.edit_message)
+
+    def _refresh_action_targets(self):
+        """只让最后一条用户气泡与最后一条 AI 气泡启用操作条。
+
+        「只限最后一轮」：编辑作用于最后一条用户消息，重新生成/复制作用于
+        最后一条 AI 回复；更早的气泡不显示操作条，避免改动中间历史。
+        """
+        last_user = None
+        last_ai = None
+        for b in self._bubbles:
+            if b.is_user:
+                last_user = b
+            else:
+                last_ai = b
+        for b in self._bubbles:
+            b.set_actions_enabled(b is last_user or b is last_ai)
 
     def last_bubble(self) -> MessageBubble | None:
         return self._bubbles[-1] if self._bubbles else None
@@ -371,6 +521,7 @@ class ChatWidget(QWidget):
             self._bubbles.remove(bubble)
         bubble.setParent(None)
         bubble.deleteLater()
+        self._refresh_action_targets()
         self._rebuild_anchors()
 
     def clear(self):
@@ -403,6 +554,7 @@ class ChatWidget(QWidget):
                     group.append(messages[i])
                     i += 1
                 self._add_assistant_group(group)
+        self._refresh_action_targets()
         QTimer.singleShot(80, self._scroll_bottom)
         QTimer.singleShot(80, self._rebuild_anchors)
 
@@ -429,6 +581,7 @@ class ChatWidget(QWidget):
             tool_calls=all_tool_calls,
         )
         bubble = MessageBubble(combined)
+        self._register_bubble(bubble)
         self._bubbles.append(bubble)
         self._layout.addWidget(bubble)
 

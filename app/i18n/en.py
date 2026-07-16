@@ -162,6 +162,9 @@ EN: dict[str, str] = {
     "chat.error.hint404": "\n\nTip: check the default model's API URL and model name in settings (current model: {model})",
     "chat.error.hint401": "\n\nTip: invalid API key, please re-enter it in settings",
     "chat.emptyMessage": "(empty message)",
+    "chat.action.copy": "Copy",
+    "chat.action.regenerate": "Regenerate",
+    "chat.action.edit": "Edit",
 
     # ── Pin window (pinned screenshot) ──
     "pin.copy": "📋 Copy",

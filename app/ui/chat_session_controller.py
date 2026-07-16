@@ -67,6 +67,10 @@ class ChatSessionController(QObject):
         self._workers: dict[str, AgentLoop] = {}
         self._cancelled_workers: list[AgentLoop] = []
         self._session_live: dict[str, dict] = {}
+        # 待生效的编辑：{sid: 截断下标}。点「编辑」只回填输入框、不动历史；
+        # 用户真正重发时才在 submit 里按此下标截断旧轮，替换为新消息。
+        # 若用户放弃重发（切会话等），原对话原样保留。
+        self._pending_edit: dict[str, int] = {}
         self._current_ai_bubble = None
         self._current_ai_msg: Message | None = None
         self._current_ai_text = ""
@@ -311,6 +315,10 @@ class ChatSessionController(QObject):
             self._current_ai_bubble = None
 
     def switch_session(self, sid: str):
+        # 切走即放弃未重发的编辑：待生效下标只对发起编辑时的那条消息有效。
+        prev = self._current_session_id
+        if prev is not None and prev != sid:
+            self._pending_edit.pop(prev, None)
         self._current_ai_bubble = None
         self._current_ai_msg = None
         self._current_ai_text = ""
@@ -357,6 +365,14 @@ class ChatSessionController(QObject):
             attachments=attachments,
         )
 
+        # 若本次发送来自「编辑重发」，先截断被编辑消息及其后的旧对话，
+        # 再追加新消息——此刻才真正改动历史，放弃重发则原样保留。
+        edit_idx = self._pending_edit.pop(sid, None)
+        if edit_idx is not None and edit_idx < len(self._sessions.get(sid).messages):
+            session = self._sessions.get(sid)
+            session.messages = session.messages[:edit_idx]
+            self._chat.load_session(session.messages)
+
         self._sessions.add_message(sid, user_msg)
         self._chat.add_message(user_msg)
         self._session_panel.update_title(sid, self._sessions.get(sid).title)
@@ -372,6 +388,16 @@ class ChatSessionController(QObject):
         self._current_ai_msg = ai_msg
         self._current_ai_bubble = None
         self._current_ai_text = ""
+
+        self._begin_turn(sid)
+
+    def _begin_turn(self, sid: str):
+        """启动一轮 AgentLoop：装配 live 状态、压缩历史、起 worker。
+
+        submit() 与 regenerate_last() 共用：两者都在会话尾部已有一条空的
+        assistant 占位消息、并设好 live 状态后调用此方法，避免重复的
+        worker 装配逻辑。
+        """
         self._input.set_running(True)
         self._tool_status.hide()
         self._chat.start_typing()
@@ -397,6 +423,79 @@ class ChatSessionController(QObject):
         self._workers[sid] = worker
         self._connect_worker(sid, worker)
         worker.start()
+
+    # ── 消息级操作：复制 / 重新生成 / 编辑重发（仅作用于最后一轮）─────────────
+    def copy_reply(self, message: Message):
+        """把某条消息的原始文本复制到剪贴板。
+
+        复制成功的反馈由气泡按钮自身切换成对号图标呈现（见 MessageBubble），
+        这里不再弹通知。
+        """
+        from PyQt6.QtWidgets import QApplication
+
+        text = message.content or ""
+        if not text:
+            return
+        QApplication.clipboard().setText(text)
+
+    def regenerate_last(self, _message: Message | None = None):
+        """重新生成最后一轮 AI 回复：截断到最后一条用户消息之后，重跑。"""
+        sid = self._current_session_id
+        if not sid or sid in self._workers:
+            return
+        session = self._sessions.get(sid)
+        if session is None:
+            return
+        # 找到最后一条用户消息的位置，丢弃其后的所有 assistant/tool 消息。
+        last_user_idx = self._last_user_index(session.messages)
+        if last_user_idx is None:
+            return
+        session.messages = session.messages[: last_user_idx + 1]
+
+        ai_msg = Message(role=MessageRole.ASSISTANT, content="")
+        self._sessions.add_message(sid, ai_msg)
+        self._session_live[sid] = {
+            "ai_msg": ai_msg,
+            "ai_text": "",
+            "first_chunk_sent": False,
+        }
+        self._current_ai_msg = ai_msg
+        self._current_ai_bubble = None
+        self._current_ai_text = ""
+        self._chat.load_session(session.messages[:-1])
+        self._begin_turn(sid)
+
+    def edit_last(self, message: Message):
+        """编辑最后一条用户消息：把原文与附件回填输入框，等用户重发。
+
+        非破坏性：只登记一个「待生效编辑」下标并回填输入框，不立刻删历史。
+        用户真正重发（submit）时才按此下标截断旧轮、替换为新消息；若用户
+        放弃重发（清空输入框、切会话等），原对话原样保留。
+        """
+        sid = self._current_session_id
+        if not sid or sid in self._workers:
+            return
+        session = self._sessions.get(sid)
+        if session is None:
+            return
+        last_user_idx = self._last_user_index(session.messages)
+        if last_user_idx is None:
+            return
+        user_msg = session.messages[last_user_idx]
+        self._pending_edit[sid] = last_user_idx
+
+        if user_msg.attachments:
+            self._input.add_pending_attachments(list(user_msg.attachments))
+        self._input.set_text(user_msg.content or "")
+        self._input.focus()
+
+    @staticmethod
+    def _last_user_index(messages: list) -> int | None:
+        """返回最后一条 user 消息的下标，没有则 None。"""
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == MessageRole.USER:
+                return i
+        return None
 
     def _build_hooks(self) -> list:
         """构建本次 turn 的生命周期 hook（安全审计 + 评测埋点）。
