@@ -24,6 +24,15 @@ class CheckUrlSafetyTest(unittest.TestCase):
         safe, _ = _check_url_safety("http://8.8.8.8")
         self.assertTrue(safe)
 
+    def test_blocks_ipv4_mapped_ipv6_loopback(self):
+        # 域名解析到 IPv4-mapped IPv6（::ffff:127.0.0.1）应被归一化后拦截，
+        # 否则原生网段比对不命中，形成 SSRF 绕过。
+        fake_infos = [(None, None, None, None, ("::ffff:127.0.0.1", 0))]
+        with mock.patch.object(fetch_url.socket, "getaddrinfo", return_value=fake_infos):
+            safe, reason = _check_url_safety("http://evil.example.com")
+        self.assertFalse(safe)
+        self.assertTrue(reason)
+
 
 class _FakeResp:
     """模拟 httpx.Response 的最小子集。"""
