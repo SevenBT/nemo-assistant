@@ -127,6 +127,20 @@ class SerializeTraceTest(unittest.TestCase):
         ])
 
 
+class TransitionTableTest(unittest.TestCase):
+    """状态机转换表：EXECUTE 阶段的致命工具错误必须有明确转换。"""
+
+    def test_execute_error_transitions_to_finalize(self):
+        from app.core.turn_context import TRANSITIONS
+
+        # 缺失此转换时，_state_execute 返回 "error" 会落到 run() 的兜底分支，
+        # 用 "Invalid transition" 覆盖掉真实错误文案（见 agent_loop 兜底逻辑）。
+        self.assertEqual(
+            TRANSITIONS.get((TurnState.EXECUTE, "error")),
+            TurnState.FINALIZE,
+        )
+
+
 class _RejectAllHook(AgentHook):
     def before_execute_tools(self, ctx: BeforeToolsContext):
         return [reject(tc.id, "nope") for tc in ctx.tool_calls]

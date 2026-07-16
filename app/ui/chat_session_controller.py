@@ -434,7 +434,7 @@ class ChatSessionController(QObject):
             if active_id and self._sessions.get(active_id) is not None:
                 return active_id
         session = self._sessions.create(
-            title=READING_SESSION_TITLE, source=SOURCE_READING
+            title=reading_session_title(), source=SOURCE_READING
         )
         self.set_active_reading(session.id)
         return session.id

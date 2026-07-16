@@ -60,6 +60,10 @@ class FakeSessionManager:
     def save_session(self, sid):
         self.saved.append(sid)
 
+    def create(self, title="", source=""):
+        self.created = SimpleNamespace(id="reading1", title=title, source=source)
+        return self.created
+
 
 class ChatSessionControllerTest(unittest.TestCase):
     def setUp(self):
@@ -83,6 +87,18 @@ class ChatSessionControllerTest(unittest.TestCase):
             session_panel=self.session_panel,
             tool_status=self.tool_status,
         )
+
+    def test_resolve_reading_session_force_new_creates_session(self):
+        # 回归：_resolve_reading_session 曾引用未定义的 READING_SESSION_TITLE，
+        # force_new=True 时必崩 NameError。此路径是划词「新建会话」的必经之处。
+        from app.ui.chat_session_controller import reading_session_title
+
+        with patch("app.ui.chat_session_controller.cfg") as fake_cfg:
+            fake_cfg.get.return_value = ""
+            sid = self.controller._resolve_reading_session(force_new=True)
+
+        self.assertEqual(sid, "reading1")
+        self.assertEqual(self.sessions.created.title, reading_session_title())
 
     def test_submit_creates_messages_and_starts_worker(self):
         self.controller.switch_session("s1")
