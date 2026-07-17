@@ -4,7 +4,15 @@ import markdown as _md
 
 from app.i18n import t as _t
 
-from PyQt6.QtCore import Qt, QEvent, QPoint, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QAbstractAnimation,
+    Qt,
+    QEvent,
+    QPoint,
+    QSize,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -127,6 +135,11 @@ class MessageBubble(QFrame):
     copy_requested = pyqtSignal(object)
     regenerate_requested = pyqtSignal(object)
     edit_requested = pyqtSignal(object)
+    # 文本实际完成布局后发出，ChatWidget 据此在新 maximum 上执行受控回底。
+    content_rendered = pyqtSignal()
+
+    # 流式渲染去抖窗口：窗口内到达的多个 token 合并成一次 markdown 重渲染。
+    _RENDER_INTERVAL_MS = 40
 
     def __init__(self, message: Message, parent=None):
         super().__init__(parent)
@@ -136,6 +149,9 @@ class MessageBubble(QFrame):
         self._tool_summary: ToolSummaryWidget | None = None
         self._actions: QWidget | None = None
         self._actions_enabled = False
+        # 流式渲染去抖：挂起的待渲染文本与合并定时器。
+        self._pending_text: str | None = None
+        self._render_timer: QTimer | None = None
         # 外层容器透明，只作布局；带背景的气泡本体是内层 self._frame。
         # 操作条放在气泡本体「之外、下方」，悬停显示时不会撑高气泡本身。
         self.setObjectName("bubbleContainer")
@@ -322,17 +338,54 @@ class MessageBubble(QFrame):
         """清空并隐藏文本区域（工具调用开始时调用）。"""
         if self._is_user:
             return
+        self._cancel_pending_render()
         self._content.set_text("")
         self._content.hide()
 
+    def set_content_streaming(self, text: str) -> None:
+        """流式增量更新：合并 ~40ms 内到达的多个 chunk，只重渲染一次。
+
+        每个 token 都重跑一遍「累积全文」的 markdown 解析 + 全量文本布局，
+        长回复下是 O(n²) 的主线程开销，token 越多越卡。这里用去抖定时器把
+        窗口内的多次更新压成一次渲染，稳定住 CPU 占用与滚动流畅度。
+        始终同步 message.content（供复制/重新生成读取最新文本），只把「重渲染」
+        这一步延后。
+        """
+        self._text = text
+        self._message.content = text
+        self._pending_text = text
+        if self._render_timer is None:
+            self._render_timer = QTimer(self)
+            self._render_timer.setSingleShot(True)
+            self._render_timer.timeout.connect(self._flush_pending_render)
+        if not self._render_timer.isActive():
+            self._render_timer.start(self._RENDER_INTERVAL_MS)
+
+    def _flush_pending_render(self) -> None:
+        if self._pending_text is None:
+            return
+        text = self._pending_text
+        self._pending_text = None
+        self._content.set_text(text)
+        if not self._is_user:
+            self._content.setVisible(bool(text))
+        self.content_rendered.emit()
+
+    def _cancel_pending_render(self) -> None:
+        self._pending_text = None
+        if self._render_timer is not None and self._render_timer.isActive():
+            self._render_timer.stop()
+
     def set_content(self, text: str):
-        """设置回复文本内容，根据是否有内容自动显示/隐藏。"""
+        """立即设置回复文本内容（终态：完成/出错/取消），并取消挂起的去抖渲染。"""
+        self._cancel_pending_render()
         self._text = text
         # 保持 message.content 与气泡显示同步，供复制/重新生成读取最新文本。
         self._message.content = text
         self._content.set_text(text)
         if not self._is_user:
             self._content.setVisible(bool(text))
+        self.content_rendered.emit()
 
 
 class ChatWidget(QWidget):
@@ -350,6 +403,9 @@ class ChatWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._bubbles: list[MessageBubble] = []
+        # 流式输出默认跟随底部；用户滚轮/拖动滚动条/点锚点后暂停，
+        # 直到用户自己回到底部或开始新的会话轮次。
+        self._auto_follow_stream = True
         self.setAcceptDrops(True)
         self._build()
 
@@ -385,6 +441,12 @@ class ChatWidget(QWidget):
         self._scroll.verticalScrollBar().valueChanged.connect(
             self._on_scroll_changed
         )
+        # SmoothScrollArea 隐藏原生滚动条，用户实际操作的是 delegate 的
+        # 自定义 vScrollBar。其 handle/箭头不会可靠发 sliderPressed，因此直接
+        # 监听滚动条及全部子控件的真实鼠标事件。
+        custom_bar = self._scroll.delegate.vScrollBar
+        for widget in (custom_bar, *custom_bar.findChildren(QWidget)):
+            widget.installEventFilter(self)
 
         # 悬停时弹出的问题列表面板（整体框 + 主题背景）
         self._anchor_panel = _AnchorPanel(self._scroll.viewport())
@@ -407,9 +469,29 @@ class ChatWidget(QWidget):
     # -- public ----------------------------------------------------------
 
     def eventFilter(self, obj, event):
-        if obj is self._scroll.viewport() and event.type() == QEvent.Type.Resize:
-            self._update_inner_margins(event.size().width())
-            self._reposition_rail()
+        event_type = event.type()
+        if obj is self._scroll.viewport():
+            if event_type == QEvent.Type.Resize:
+                self._update_inner_margins(event.size().width())
+                self._reposition_rail()
+            elif event_type == QEvent.Type.Wheel:
+                # 在底部继续向下滚不改变位置，应继续跟随；向上滚或尚未到底
+                # 时滚动，才表示用户接管位置。
+                delta = event.angleDelta().y()
+                sb = self._scroll.verticalScrollBar()
+                has_scroll_range = sb.maximum() > sb.minimum()
+                is_down_at_bottom = delta < 0 and sb.value() >= sb.maximum()
+                if has_scroll_range and delta and not is_down_at_bottom:
+                    self._pause_auto_follow()
+        else:
+            custom_bar = self._scroll.delegate.vScrollBar
+            is_scroll_control = obj is custom_bar or custom_bar.isAncestorOf(obj)
+            if is_scroll_control and event_type == QEvent.Type.MouseButtonPress:
+                self._pause_auto_follow()
+            elif is_scroll_control and event_type == QEvent.Type.MouseButtonRelease:
+                # 箭头 clicked 会在 release 处理后启动 SmoothScrollBar 动画；零延迟
+                # 回调执行时原生滚动条可能仍在底部，不能据此过早恢复自动跟随。
+                QTimer.singleShot(0, self._resume_auto_follow_after_scroll_release)
         return super().eventFilter(obj, event)
 
     def _reposition_rail(self):
@@ -429,6 +511,28 @@ class ChatWidget(QWidget):
     def _on_scroll_changed(self):
         self._anchor_rail.refresh()
         self._anchor_panel.set_active(self._anchor_rail.active_index())
+        self._resume_auto_follow_at_bottom()
+
+    def _resume_auto_follow_after_scroll_release(self) -> None:
+        """滚动控件释放且没有待完成动画时，按最终位置恢复跟随。"""
+        custom_bar = self._scroll.delegate.vScrollBar
+        animation = getattr(custom_bar, "ani", None)
+        if (
+            animation is not None
+            and animation.state() == QAbstractAnimation.State.Running
+        ):
+            return
+        self._resume_auto_follow_at_bottom()
+
+    def _resume_auto_follow_at_bottom(self) -> None:
+        """当前位置在底部时恢复流式自动跟随。"""
+        sb = self._scroll.verticalScrollBar()
+        if sb.value() >= sb.maximum():
+            self._auto_follow_stream = True
+
+    def _pause_auto_follow(self) -> None:
+        """用户主动指定滚动位置时，暂停流式自动回底。"""
+        self._auto_follow_stream = False
 
     def _show_anchor_panel(self):
         self._hide_panel_timer.stop()
@@ -479,6 +583,10 @@ class ChatWidget(QWidget):
         self._layout.setContentsMargins(side, 20, side, 20)
 
     def add_message(self, message: Message) -> MessageBubble:
+        # 新用户消息开启新一轮，恢复自动跟随到底部；AI 流式 chunk 追加气泡时
+        # 不重置该状态，否则会覆盖用户在输出期间主动选择的位置。
+        if message.role == MessageRole.USER:
+            self._auto_follow_stream = True
         bubble = MessageBubble(message)
         self._register_bubble(bubble)
         self._bubbles.append(bubble)
@@ -492,10 +600,11 @@ class ChatWidget(QWidget):
         return bubble
 
     def _register_bubble(self, bubble: MessageBubble):
-        """把气泡的操作信号转发到 ChatWidget 层。"""
+        """把气泡操作信号转发到 ChatWidget，并在文本布局后执行受控回底。"""
         bubble.copy_requested.connect(self.copy_message)
         bubble.regenerate_requested.connect(self.regenerate_message)
         bubble.edit_requested.connect(self.edit_message)
+        bubble.content_rendered.connect(self.scroll_bottom)
 
     def _refresh_action_targets(self):
         """只让最后一条用户气泡与最后一条 AI 气泡启用操作条。
@@ -538,6 +647,7 @@ class ChatWidget(QWidget):
           - 链中所有消息的工具调用 → 工具卡片
           - 最后一条有文本的消息 → 回复内容
         """
+        self._auto_follow_stream = True
         self.clear()
         i = 0
         while i < len(messages):
@@ -586,7 +696,9 @@ class ChatWidget(QWidget):
         self._layout.addWidget(bubble)
 
     def scroll_bottom(self):
-        QTimer.singleShot(30, self._scroll_bottom)
+        """流式输出请求跟随底部；用户已接管滚动时保持其指定位置。"""
+        if self._auto_follow_stream:
+            QTimer.singleShot(30, self._scroll_bottom)
 
     def _rebuild_anchors(self):
         """收集所有用户问题气泡，刷新锚点轨道。"""
@@ -598,6 +710,8 @@ class ChatWidget(QWidget):
         """平滑滚动，使指定气泡顶部对齐视口上沿。"""
         if bubble not in self._bubbles:
             return
+        # 侧边问题锚点是用户显式选择的位置，流式输出不得马上拉回底部。
+        self._pause_auto_follow()
         target = bubble.mapTo(self._inner, QPoint(0, 0)).y()
         sb = self._scroll.verticalScrollBar()
         # 留出少许上边距，避免紧贴顶部
@@ -611,10 +725,25 @@ class ChatWidget(QWidget):
             self._sync_smooth_scroll(value)
 
     def _scroll_bottom(self):
+        # 二次检查用于拦住用户操作前已经排队的 30ms 延迟回底任务。
+        if not self._auto_follow_stream:
+            return
         sb = self._scroll.verticalScrollBar()
+        self._stop_smooth_scroll_animation()
         sb.setValue(sb.maximum())
         self._sync_smooth_scroll(sb.maximum())
         self._anchor_rail.refresh()
+
+    def _stop_smooth_scroll_animation(self) -> None:
+        """停止会覆盖程序化滚动位置的未完成平滑动画。"""
+        delegate = getattr(self._scroll, "delegate", None)
+        bar = getattr(delegate, "vScrollBar", None)
+        animation = getattr(bar, "ani", None)
+        if (
+            animation is not None
+            and animation.state() == QAbstractAnimation.State.Running
+        ):
+            animation.stop()
 
     def _sync_smooth_scroll(self, value: int):
         """同步 qfluentwidgets SmoothScrollBar 的内部累加器。

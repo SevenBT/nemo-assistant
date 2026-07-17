@@ -579,10 +579,10 @@ class ChatSessionController(QObject):
             self._current_ai_bubble = self._chat.add_message(self._current_ai_msg)
         try:
             if self._current_ai_bubble:
-                self._current_ai_bubble.set_content(self._current_ai_text)
+                # 流式路径走去抖渲染，合并窗口内的多个 token 只重渲染一次。
+                self._current_ai_bubble.set_content_streaming(self._current_ai_text)
         except RuntimeError:
             self._current_ai_bubble = None
-        self._chat.scroll_bottom()
 
     def _on_tool_event(self, sid: str, call_id: str, phase: str, payload: dict):
         session = self._sessions.get(sid)
@@ -670,6 +670,13 @@ class ChatSessionController(QObject):
                     and self._current_ai_bubble is None
                 ):
                     self._current_ai_bubble = self._chat.add_message(live["ai_msg"])
+            # 终态强制立即渲染：把去抖窗口里可能还没落地的最后一段文本刷出来，
+            # 否则 done 紧跟最后一个 chunk 到达时，尾部内容会停留在上一帧。
+            if sid == self._current_session_id and self._current_ai_bubble:
+                try:
+                    self._current_ai_bubble.set_content(self._current_ai_text)
+                except RuntimeError:
+                    self._current_ai_bubble = None
             session = self._sessions.get(sid)
             if session:
                 session.messages = [
