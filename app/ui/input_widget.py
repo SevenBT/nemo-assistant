@@ -7,7 +7,12 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import PrimaryToolButton, FluentIcon
+from qfluentwidgets import (
+    CaptionLabel,
+    FluentIcon,
+    PrimaryToolButton,
+    TransparentToolButton,
+)
 
 from app.ui.style import (
     get_text_color,
@@ -26,18 +31,41 @@ _BOTTOM_MARGIN = 30
 
 class InputWidget(QWidget):
     submitted = pyqtSignal(str)
+    edit_submitted = pyqtSignal(str)
+    edit_cancel_requested = pyqtSignal()
     cancel_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("inputWidget")
         self._running = False
+        self._cancelling = False
+        self._editing = False
+        self._changing_edit = False
+        self._draft_text = ""
+        self._draft_attachments: list = []
+        self._has_draft_snapshot = False
         self._build()
 
     def _build(self):
         self._root = QVBoxLayout(self)
         self._root.setContentsMargins(_SIDE_MIN, 8, _SIDE_MIN, _BOTTOM_MARGIN)
         self._root.setSpacing(6)
+
+        self._edit_bar = QWidget(self)
+        edit_row = QHBoxLayout(self._edit_bar)
+        edit_row.setContentsMargins(4, 0, 4, 0)
+        edit_row.setSpacing(4)
+        edit_row.addWidget(CaptionLabel(t("input.editing"), self._edit_bar))
+        edit_row.addStretch()
+        self._cancel_edit_btn = TransparentToolButton(
+            FluentIcon.CLOSE, self._edit_bar
+        )
+        self._cancel_edit_btn.setToolTip(t("input.cancelEdit"))
+        self._cancel_edit_btn.clicked.connect(self.cancel_edit)
+        edit_row.addWidget(self._cancel_edit_btn)
+        self._edit_bar.hide()
+        self._root.addWidget(self._edit_bar)
 
         # 待发送附件预览条（拖放/粘贴的图片在发送前显示在这里）。
         # 用左对齐的容器包裹，使预览条只占内容宽度、不与输入框一样宽。
@@ -59,6 +87,7 @@ class InputWidget(QWidget):
         self._edit.setMaximumHeight(120)
         self._edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self._edit.submitted.connect(self._submit)
+        self._edit.textChanged.connect(self._on_text_changed)
         self._edit.files_dropped.connect(self._on_files_dropped)
         row.addWidget(self._edit)
 
@@ -77,6 +106,7 @@ class InputWidget(QWidget):
         self._root.addLayout(row)
         self._side = _SIDE_MIN
         self._pending_bar.changed.connect(self._update_margins)
+        self._pending_bar.changed.connect(self._on_pending_changed)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -97,15 +127,23 @@ class InputWidget(QWidget):
         self._root.setContentsMargins(self._side, 8, self._side, bottom)
 
     def _submit(self):
-        if self._running:
+        if self._running or self._cancelling:
             return
         text = self._edit.toPlainText().strip()
         # 允许仅附件、无文字时发送（如只拖一张图）。
         if text or self.has_pending_attachments():
-            self.submitted.emit(text)
+            is_editing = self._editing
+            self._set_editing(False)
+            if is_editing:
+                self.edit_submitted.emit(text)
+                self._discard_draft_snapshot()
+            else:
+                self.submitted.emit(text)
             self._edit.clear()
 
     def _on_button_clicked(self):
+        if self._cancelling:
+            return
         if self._running:
             self.cancel_requested.emit()
         else:
@@ -113,12 +151,89 @@ class InputWidget(QWidget):
 
     def set_running(self, running: bool):
         self._running = running
+        self._cancelling = False
         self._edit.setEnabled(True)
         self._btn.setEnabled(True)
         # 纯图标按钮：不设文本，仅切换图标（在 _apply_btn_ink 内按 _running 决定
         # SEND/CLOSE）；文字提示放 tooltip 保留可达性。
         self._btn.setToolTip(t("input.cancel") if running else t("input.send"))
         self._apply_btn_ink()
+
+    def set_cancelling(self, cancelling: bool) -> None:
+        """Keep input locked until a cancelled worker actually exits."""
+        self._cancelling = cancelling
+        self._running = cancelling or self._running
+        self._btn.setEnabled(not cancelling)
+        self._btn.setToolTip(
+            t("input.cancelling") if cancelling else t("input.cancel")
+        )
+        self._apply_btn_ink()
+
+    @property
+    def is_editing(self) -> bool:
+        return self._editing
+
+    def begin_edit(self, text: str, attachments: list) -> None:
+        """Replace the current draft and enter explicit edit mode."""
+        self._changing_edit = True
+        try:
+            if not self._editing:
+                self._draft_text = self._edit.toPlainText()
+                self._draft_attachments = self._pending_bar.take_all()
+                self._has_draft_snapshot = True
+            else:
+                self._pending_bar.clear()
+            self.add_pending_attachments(list(attachments))
+            self.set_text(text)
+            self._set_editing(True)
+        finally:
+            self._changing_edit = False
+
+    def end_edit(self, *, clear: bool) -> None:
+        self._changing_edit = True
+        try:
+            self._set_editing(False)
+            self._pending_bar.clear()
+            if clear and self._has_draft_snapshot:
+                self.set_text(self._draft_text)
+                self.add_pending_attachments(self._draft_attachments)
+            elif clear:
+                self._edit.clear()
+            self._draft_text = ""
+            self._draft_attachments = []
+            self._has_draft_snapshot = False
+        finally:
+            self._changing_edit = False
+
+    def cancel_edit(self) -> None:
+        if not self._editing:
+            return
+        self.end_edit(clear=True)
+        self.edit_cancel_requested.emit()
+
+    def _discard_draft_snapshot(self) -> None:
+        self._draft_text = ""
+        self._draft_attachments = []
+        self._has_draft_snapshot = False
+
+    def _set_editing(self, editing: bool) -> None:
+        self._editing = editing
+        self._edit_bar.setVisible(editing)
+        self._update_margins()
+
+    def _on_text_changed(self) -> None:
+        if self._changing_edit or not self._editing:
+            return
+        if not self._edit.toPlainText() and not self.has_pending_attachments():
+            self.end_edit(clear=False)
+            self.edit_cancel_requested.emit()
+
+    def _on_pending_changed(self) -> None:
+        if self._changing_edit or not self._editing:
+            return
+        if not self.has_pending_attachments() and not self._edit.toPlainText():
+            self.end_edit(clear=False)
+            self.edit_cancel_requested.emit()
 
     def _apply_btn_ink(self):
         """按主题给发送/取消按钮上色：背景用混淡后的强调色（不那么跳、

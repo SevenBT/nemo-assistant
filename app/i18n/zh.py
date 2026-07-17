@@ -140,6 +140,9 @@ ZH: dict[str, str] = {
     "input.placeholder": "输入消息… (Enter 发送，Shift+Enter 换行)",
     "input.send": "发送",
     "input.cancel": "取消",
+    "input.editing": "正在编辑消息",
+    "input.cancelEdit": "取消编辑",
+    "input.cancelling": "正在停止…",
 
     # ── 会话面板 ──
     "session.title": "会话",
@@ -162,6 +165,9 @@ ZH: dict[str, str] = {
     "chat.error.hint404": "\n\n提示：请在设置中检查默认模型的 API 地址和模型名称（当前模型: {model}）",
     "chat.error.hint401": "\n\n提示：API Key 无效，请在设置中重新填写",
     "chat.emptyMessage": "（空消息）",
+    "chat.action.copy": "复制",
+    "chat.action.regenerate": "重新生成",
+    "chat.action.edit": "编辑",
 
     # ── 贴图窗口（钉住的截图）──
     "pin.copy": "📋 复制",

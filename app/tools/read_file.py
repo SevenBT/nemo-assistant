@@ -10,11 +10,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from app.tools.base import BuiltinTool
 from app.tools.schema import Num, Str, tool_params
+from app.tools._path_utils import resolve_safe
 from app.i18n import t
+
+if TYPE_CHECKING:
+    from app.tools.context import ToolContext
 
 # 默认最大读取字符数
 _MAX_DEFAULT = 50_000
@@ -22,6 +26,13 @@ _MAX_DEFAULT = 50_000
 
 class ReadFileTool(BuiltinTool):
     """本地文件读取工具。"""
+
+    def __init__(self, workspace: Path):
+        self._workspace = workspace.resolve()
+
+    @classmethod
+    def create(cls, ctx: "ToolContext") -> "ReadFileTool":
+        return cls(workspace=ctx.workspace)
 
     @property
     def name(self) -> str:
@@ -51,8 +62,10 @@ class ReadFileTool(BuiltinTool):
         if not raw_path:
             return {"status": "error", "data": {"message": "file_path is required"}}
 
-        # 展开 ~ 为用户主目录
-        path = Path(raw_path).expanduser()
+        # 限制在 workspace 内，避免 AI 读取任意系统文件（.ssh、凭据等）
+        path, err = resolve_safe(raw_path, self._workspace)
+        if err:
+            return {"status": "error", "data": {"message": err}}
 
         if not path.exists():
             return {"status": "error", "data": {"message": t("tool.read_file.msg.not_found", path=path)}}

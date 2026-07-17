@@ -72,6 +72,11 @@ def _check_url_safety(url: str) -> tuple[bool, str]:
             ip = ipaddress.ip_address(info[4][0])
         except ValueError:
             continue
+        # IPv4-mapped IPv6（如 ::ffff:127.0.0.1）在原生网段比对时不会命中内网段，
+        # 但 OS 解析后仍会连到对应 IPv4，先归一化再判断，避免 SSRF 绕过。
+        mapped = getattr(ip, "ipv4_mapped", None)
+        if mapped is not None:
+            ip = mapped
         for network in _BLOCKED_NETWORKS:
             if ip in network:
                 return False, t("tool.fetch_url.msg.blocked_internal", hostname=hostname, ip=ip)

@@ -135,6 +135,13 @@ class MainWindow(FluentWindow):
             consolidator=self._consolidator,
             trace_store=self._trace_store,
         )
+        # 消息级操作（复制/重新生成/编辑）：气泡信号 → 会话控制器。
+        # 必须在控制器创建之后连接（_build_ui 阶段控制器尚不存在）。
+        self._chat.copy_message.connect(self._chat_session_controller.copy_reply)
+        self._chat.regenerate_message.connect(
+            self._chat_session_controller.regenerate_last
+        )
+        self._chat.edit_message.connect(self._chat_session_controller.edit_last)
         # 识图：每次截图动作新建一个会话，附上图片并按动作处理（自动发送或等输入）
         self._screenshot_controller.set_chat_callbacks(
             vision_callback=self._chat_session_controller.start_vision_session,
@@ -386,6 +393,8 @@ class MainWindow(FluentWindow):
         self._chat_col.addWidget(self._tool_status)
         self._input = InputWidget()
         self._input.submitted.connect(self._on_submit)
+        self._input.edit_submitted.connect(self._on_edit_submit)
+        self._input.edit_cancel_requested.connect(self._cancel_edit)
         self._input.cancel_requested.connect(self._cancel_worker)
         self._chat_col.addWidget(self._input)
         chat_col = self._chat_col
@@ -530,6 +539,13 @@ class MainWindow(FluentWindow):
     @pyqtSlot(str)
     def _on_submit(self, text: str):
         self._chat_session_controller.submit(text)
+
+    @pyqtSlot(str)
+    def _on_edit_submit(self, text: str):
+        self._chat_session_controller.submit_edit(text)
+
+    def _cancel_edit(self):
+        self._chat_session_controller.cancel_edit()
 
     # ──────────────────────────────────────────── 调度器回调
     def _on_scheduler_result(self, job_id: str, job_name: str, result: dict):
