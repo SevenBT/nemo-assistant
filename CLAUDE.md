@@ -11,6 +11,9 @@ This file is for AI coding agents working in this repository. Public contributor
 
 - Use English Conventional Commits, for example `fix: ...`, `docs: ...`, `chore: ...`.
 - Keep commits focused. Split unrelated changes.
+- Start each new task from the latest `main` on a dedicated branch; do not branch from unmerged task branches.
+- Keep one independent task per branch and pull request. Finish and merge that PR before starting the next task.
+- After CI passes, use Squash and merge so each PR becomes one focused commit on `main`, then delete the task branch and sync local `main`.
 
 ## Development
 
