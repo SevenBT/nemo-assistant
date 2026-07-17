@@ -393,6 +393,8 @@ class MainWindow(FluentWindow):
         self._chat_col.addWidget(self._tool_status)
         self._input = InputWidget()
         self._input.submitted.connect(self._on_submit)
+        self._input.edit_submitted.connect(self._on_edit_submit)
+        self._input.edit_cancel_requested.connect(self._cancel_edit)
         self._input.cancel_requested.connect(self._cancel_worker)
         self._chat_col.addWidget(self._input)
         chat_col = self._chat_col
@@ -537,6 +539,13 @@ class MainWindow(FluentWindow):
     @pyqtSlot(str)
     def _on_submit(self, text: str):
         self._chat_session_controller.submit(text)
+
+    @pyqtSlot(str)
+    def _on_edit_submit(self, text: str):
+        self._chat_session_controller.submit_edit(text)
+
+    def _cancel_edit(self):
+        self._chat_session_controller.cancel_edit()
 
     # ──────────────────────────────────────────── 调度器回调
     def _on_scheduler_result(self, job_id: str, job_name: str, result: dict):

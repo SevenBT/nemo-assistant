@@ -65,12 +65,11 @@ class ChatSessionController(QObject):
 
         self._current_session_id: str | None = None
         self._workers: dict[str, AgentLoop] = {}
-        self._cancelled_workers: list[AgentLoop] = []
+        self._cancelling_sessions: set[str] = set()
         self._session_live: dict[str, dict] = {}
-        # 待生效的编辑：{sid: 截断下标}。点「编辑」只回填输入框、不动历史；
-        # 用户真正重发时才在 submit 里按此下标截断旧轮，替换为新消息。
-        # 若用户放弃重发（切会话等），原对话原样保留。
-        self._pending_edit: dict[str, int] = {}
+        # 待生效编辑：{sid: user message id}。普通发送永不截断历史；只有
+        # submit_edit() 再次确认目标仍是最后一条 user 消息后才执行替换。
+        self._pending_edit: dict[str, str] = {}
         self._current_ai_bubble = None
         self._current_ai_msg: Message | None = None
         self._current_ai_text = ""
@@ -283,42 +282,29 @@ class ChatSessionController(QObject):
     def cancel_worker(self, sid: str | None = None, *, mark_cancelled: bool = True):
         if sid is None:
             sid = self._current_session_id
-        if not sid:
+        if not sid or sid in self._cancelling_sessions:
             return
-        worker = self._workers.pop(sid, None)
-        live = self._session_live.pop(sid, None)
+        worker = self._workers.get(sid)
+        live = self._session_live.get(sid)
         if worker is None:
             return
 
+        self._cancelling_sessions.add(sid)
         if mark_cancelled and live:
             self._mark_live_message_cancelled(sid, live)
 
-        try:
-            worker.disconnect()
-        except RuntimeError:
-            pass
-        self._cancelled_workers.append(worker)
-        try:
-            worker.finished.connect(
-                lambda _=None, w=worker: self._release_cancelled_worker(w)
-            )
-        except (AttributeError, RuntimeError):
-            pass
         worker.cancel()
-
         if sid == self._current_session_id:
             self._chat.stop_typing()
             self._tool_status.hide()
-            self._input.set_running(False)
-            self._input.focus()
-            self._current_ai_msg = None
-            self._current_ai_bubble = None
+            self._input.set_cancelling(True)
 
     def switch_session(self, sid: str):
         # 切走即放弃未重发的编辑：待生效下标只对发起编辑时的那条消息有效。
         prev = self._current_session_id
         if prev is not None and prev != sid:
-            self._pending_edit.pop(prev, None)
+            if self._pending_edit.pop(prev, None) is not None:
+                self._input.end_edit(clear=True)
         self._current_ai_bubble = None
         self._current_ai_msg = None
         self._current_ai_text = ""
@@ -337,11 +323,15 @@ class ChatSessionController(QObject):
             last = self._chat.last_bubble()
             if last and not last.is_user:
                 self._current_ai_bubble = last
+                self._current_ai_bubble.bind_message(live["ai_msg"])
             else:
                 self._current_ai_bubble = None
-            self._input.set_running(True)
-            if not live.get("first_chunk_sent"):
-                self._chat.start_typing()
+            if sid in self._cancelling_sessions:
+                self._input.set_cancelling(True)
+            else:
+                self._input.set_running(True)
+                if not live.get("first_chunk_sent"):
+                    self._chat.start_typing()
         else:
             self._input.set_running(False)
 
@@ -352,26 +342,41 @@ class ChatSessionController(QObject):
         self._input.add_pending_attachments(attachments)
 
     def submit(self, text: str):
+        """Append a normal user turn; pending edit state is never consumed as edit."""
+        sid = self._current_session_id
+        if not sid or sid in self._workers:
+            return
+        if self._pending_edit.pop(sid, None) is not None:
+            self._input.end_edit(clear=False)
+        self._submit_turn(sid, text)
+
+    def submit_edit(self, text: str) -> None:
+        """Replace the last user turn only when the recorded message still matches."""
+        sid = self._current_session_id
+        if not sid or sid in self._workers:
+            return
+        target_id = self._pending_edit.pop(sid, None)
+        session = self._sessions.get(sid)
+        edit_idx = self._message_index(session.messages, target_id) if session else None
+        last_user_idx = self._last_user_index(session.messages) if session else None
+        if edit_idx is not None and edit_idx == last_user_idx:
+            session.messages = session.messages[:edit_idx]
+            self._chat.load_session(session.messages)
+        self._submit_turn(sid, text)
+
+    def cancel_edit(self) -> None:
         sid = self._current_session_id
         if not sid:
             return
-        if sid in self._workers:
-            return
+        self._pending_edit.pop(sid, None)
 
+    def _submit_turn(self, sid: str, text: str) -> None:
         attachments = self._input.take_pending_attachments()
         user_msg = Message(
             role=MessageRole.USER,
             content=text,
             attachments=attachments,
         )
-
-        # 若本次发送来自「编辑重发」，先截断被编辑消息及其后的旧对话，
-        # 再追加新消息——此刻才真正改动历史，放弃重发则原样保留。
-        edit_idx = self._pending_edit.pop(sid, None)
-        if edit_idx is not None and edit_idx < len(self._sessions.get(sid).messages):
-            session = self._sessions.get(sid)
-            session.messages = session.messages[:edit_idx]
-            self._chat.load_session(session.messages)
 
         self._sessions.add_message(sid, user_msg)
         self._chat.add_message(user_msg)
@@ -466,12 +471,7 @@ class ChatSessionController(QObject):
         self._begin_turn(sid)
 
     def edit_last(self, message: Message):
-        """编辑最后一条用户消息：把原文与附件回填输入框，等用户重发。
-
-        非破坏性：只登记一个「待生效编辑」下标并回填输入框，不立刻删历史。
-        用户真正重发（submit）时才按此下标截断旧轮、替换为新消息；若用户
-        放弃重发（清空输入框、切会话等），原对话原样保留。
-        """
+        """Enter explicit edit mode for the current session's last user message."""
         sid = self._current_session_id
         if not sid or sid in self._workers:
             return
@@ -482,15 +482,27 @@ class ChatSessionController(QObject):
         if last_user_idx is None:
             return
         user_msg = session.messages[last_user_idx]
-        self._pending_edit[sid] = last_user_idx
-
-        if user_msg.attachments:
-            self._input.add_pending_attachments(list(user_msg.attachments))
-        self._input.set_text(user_msg.content or "")
+        if user_msg.id != message.id:
+            return
+        self._pending_edit[sid] = user_msg.id
+        self._input.begin_edit(
+            user_msg.content or "", list(user_msg.attachments)
+        )
         self._input.focus()
 
     @staticmethod
-    def _last_user_index(messages: list) -> int | None:
+    def _message_index(
+        messages: list[Message], message_id: str | None
+    ) -> int | None:
+        if message_id is None:
+            return None
+        for i, message in enumerate(messages):
+            if message.id == message_id:
+                return i
+        return None
+
+    @staticmethod
+    def _last_user_index(messages: list[Message]) -> int | None:
         """返回最后一条 user 消息的下标，没有则 None。"""
         for i in range(len(messages) - 1, -1, -1):
             if messages[i].role == MessageRole.USER:
@@ -548,21 +560,37 @@ class ChatSessionController(QObject):
             self.cancel_worker(sid, mark_cancelled=False)
 
     def _connect_worker(self, sid: str, worker: AgentLoop):
-        worker.text_chunk.connect(lambda delta, s=sid: self._on_text_chunk(s, delta))
+        worker.text_chunk.connect(
+            lambda delta, s=sid, w=worker: self._on_text_chunk(s, delta, w)
+        )
         worker.tool_event.connect(
-            lambda call_id, phase, payload, s=sid: self._on_tool_event(
-                s, call_id, phase, payload
+            lambda call_id, phase, payload, s=sid, w=worker: self._on_tool_event(
+                s, call_id, phase, payload, w
             )
         )
         worker.need_input.connect(
-            lambda call_id, tool_name, params, s=sid: self._on_need_input(
-                s, call_id, tool_name, params
+            lambda call_id, tool_name, params, s=sid, w=worker: self._on_need_input(
+                s, call_id, tool_name, params, w
             )
         )
-        worker.new_turn.connect(lambda turn_count, s=sid: self._on_new_turn(s, turn_count))
-        worker.done.connect(lambda info, s=sid: self._on_done(s, info))
+        worker.new_turn.connect(
+            lambda turn_count, s=sid, w=worker: self._on_new_turn(s, turn_count, w)
+        )
+        worker.done.connect(
+            lambda info, s=sid, w=worker: self._on_done(s, info, w)
+        )
+        worker.finished.connect(
+            lambda s=sid, w=worker: self._on_worker_finished(s, w)
+        )
 
-    def _on_text_chunk(self, sid: str, delta: str):
+    def _is_current_worker(self, sid: str, worker: AgentLoop | None) -> bool:
+        return worker is None or self._workers.get(sid) is worker
+
+    def _on_text_chunk(
+        self, sid: str, delta: str, worker: AgentLoop | None = None
+    ):
+        if not self._is_current_worker(sid, worker) or sid in self._cancelling_sessions:
+            return
         live = self._session_live.get(sid)
         if live is None:
             return
@@ -584,20 +612,33 @@ class ChatSessionController(QObject):
         except RuntimeError:
             self._current_ai_bubble = None
 
-    def _on_tool_event(self, sid: str, call_id: str, phase: str, payload: dict):
+    def _on_tool_event(
+        self,
+        sid: str,
+        call_id: str,
+        phase: str,
+        payload: dict,
+        worker: AgentLoop | None = None,
+    ):
+        if not self._is_current_worker(sid, worker):
+            return
         session = self._sessions.get(sid)
+        live = self._session_live.get(sid)
+        is_cancelling = sid in self._cancelling_sessions
         if phase == "start":
             tool_name = payload["name"]
             params = payload["params"]
-            if session and session.messages:
+            if live and live.get("ai_msg"):
                 tool_call = ToolCall(
                     id=call_id,
                     name=tool_name,
                     arguments=params,
                     status="running",
                 )
-                session.messages[-1].tool_calls.append(tool_call)
-            if sid != self._current_session_id:
+                live["ai_msg"].tool_calls.append(tool_call)
+                if is_cancelling:
+                    self._sessions.save_session(sid)
+            if is_cancelling or sid != self._current_session_id:
                 return
             # 工具执行期间保持亮条转动——执行本身就是「任务进行中」，
             # 不要 stop_typing，否则长耗时工具（如 websearch）期间界面没有
@@ -617,6 +658,7 @@ class ChatSessionController(QObject):
                         if tool_call.id == call_id:
                             tool_call.result = result
                             tool_call.status = result.get("status", "success")
+                            self._sessions.save_session(sid)
                             break
             if sid != self._current_session_id:
                 return
@@ -629,9 +671,14 @@ class ChatSessionController(QObject):
         call_id: str,
         tool_name: str,
         param_names: list,
+        source_worker: AgentLoop | None = None,
     ):
         worker = self._workers.get(sid)
-        if worker is None:
+        if (
+            worker is None
+            or (source_worker is not None and worker is not source_worker)
+            or sid in self._cancelling_sessions
+        ):
             return
         if sid == self._current_session_id:
             dialog = ManualParamsDialog(tool_name, param_names, self._parent)
@@ -640,7 +687,11 @@ class ChatSessionController(QObject):
             params = {}
         worker.supply_input(params)
 
-    def _on_new_turn(self, sid: str, turn_count: int):
+    def _on_new_turn(
+        self, sid: str, turn_count: int, worker: AgentLoop | None = None
+    ):
+        if not self._is_current_worker(sid, worker) or sid in self._cancelling_sessions:
+            return
         ai_msg = Message(role=MessageRole.ASSISTANT, content="")
         self._sessions.add_message(sid, ai_msg)
         live = self._session_live.get(sid)
@@ -653,10 +704,17 @@ class ChatSessionController(QObject):
         self._current_ai_msg = ai_msg
         self._current_ai_text = ""
         if self._current_ai_bubble:
+            self._current_ai_bubble.bind_message(ai_msg)
             self._current_ai_bubble.clear_text()
         self._chat.start_typing()
 
-    def _on_done(self, sid: str, info: dict):
+    def _on_done(
+        self, sid: str, info: dict, worker: AgentLoop | None = None
+    ):
+        if not self._is_current_worker(sid, worker):
+            return
+        if sid in self._cancelling_sessions:
+            return
         live = self._session_live.get(sid)
         ok = info.get("ok", True)
         error_msg = info.get("error")
@@ -743,11 +801,43 @@ class ChatSessionController(QObject):
             return f"{text}\n\n{marker}"
         return marker
 
-    def _release_cancelled_worker(self, worker: AgentLoop):
-        try:
-            self._cancelled_workers.remove(worker)
-        except ValueError:
-            pass
+    def _on_worker_finished(self, sid: str, worker: AgentLoop) -> None:
+        if self._workers.get(sid) is not worker:
+            return
+        if sid not in self._cancelling_sessions:
+            return
+        live = self._session_live.get(sid)
+        if live:
+            self._finalize_cancelled_tools(sid, live)
+        self._sessions.save_session(sid)
+        self._workers.pop(sid, None)
+        self._session_live.pop(sid, None)
+        self._cancelling_sessions.discard(sid)
+        if sid != self._current_session_id:
+            return
+        self._chat.stop_typing()
+        self._tool_status.hide()
+        self._input.set_cancelling(False)
+        self._input.set_running(False)
+        self._input.focus()
+        self._current_ai_msg = None
+        self._current_ai_bubble = None
+
+    def _finalize_cancelled_tools(self, sid: str, live: dict) -> None:
+        ai_msg = live.get("ai_msg")
+        if ai_msg is None:
+            return
+        result = {
+            "status": "error",
+            "data": {"message": _cancelled_marker()},
+        }
+        for tool_call in ai_msg.tool_calls:
+            if tool_call.status not in ("pending", "running"):
+                continue
+            tool_call.result = dict(result)
+            tool_call.status = "error"
+            if sid == self._current_session_id and self._current_ai_bubble:
+                self._current_ai_bubble.update_tool_card(tool_call.id, tool_call.result)
 
     def _format_error(self, error_msg: str | None) -> str:
         hint = ""

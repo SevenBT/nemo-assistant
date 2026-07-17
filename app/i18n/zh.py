@@ -140,6 +140,9 @@ ZH: dict[str, str] = {
     "input.placeholder": "输入消息… (Enter 发送，Shift+Enter 换行)",
     "input.send": "发送",
     "input.cancel": "取消",
+    "input.editing": "正在编辑消息",
+    "input.cancelEdit": "取消编辑",
+    "input.cancelling": "正在停止…",
 
     # ── 会话面板 ──
     "session.title": "会话",

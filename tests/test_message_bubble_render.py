@@ -28,8 +28,8 @@ class MessageBubbleStreamingRenderTest(unittest.TestCase):
             # 尚未 flush：一次真正的重渲染都没发生。
             set_text.assert_not_called()
             self.assertEqual(bubble._pending_text, "abc")
-            # message.content 始终同步最新文本（复制/重新生成读取用）。
-            self.assertEqual(bubble.message.content, "abc")
+            # 渲染层只维护展示状态；持久化 Message 由控制器唯一写入。
+            self.assertEqual(bubble.message.content, "")
 
             # 定时器触发后，只渲染最后一次的合并文本。
             bubble._flush_pending_render()
@@ -58,6 +58,15 @@ class MessageBubbleStreamingRenderTest(unittest.TestCase):
         # 挂起的去抖被取消，不会再补一帧旧内容。
         self.assertIsNone(bubble._pending_text)
         self.assertFalse(bubble._render_timer.isActive())
+        self.assertEqual(bubble.message.content, "")
+
+    def test_bind_message_changes_action_target(self):
+        bubble = self._ai_bubble()
+        current = Message(role=MessageRole.ASSISTANT, content="final")
+
+        bubble.bind_message(current)
+
+        self.assertIs(bubble.message, current)
 
     def test_clear_text_cancels_pending_render(self):
         bubble = self._ai_bubble()
@@ -67,6 +76,74 @@ class MessageBubbleStreamingRenderTest(unittest.TestCase):
         bubble.clear_text()
         self.assertIsNone(bubble._pending_text)
         self.assertFalse(bubble._render_timer.isActive())
+
+
+class ChatWidgetSessionLoadBatchingTest(unittest.TestCase):
+    """会话批量加载只在全部气泡就绪后统一完成派生 UI 工作。"""
+
+    @staticmethod
+    def _conversation() -> list[Message]:
+        return [
+            Message(role=MessageRole.USER, content="question 1"),
+            Message(role=MessageRole.ASSISTANT, content="answer 1"),
+            Message(role=MessageRole.USER, content="question 2"),
+            Message(role=MessageRole.ASSISTANT, content="answer 2"),
+        ]
+
+    def test_load_session_refreshes_action_targets_once(self):
+        chat = ChatWidget()
+        self.addCleanup(chat.deleteLater)
+
+        with patch.object(
+            chat,
+            "_refresh_action_targets",
+            wraps=chat._refresh_action_targets,
+        ) as refresh_action_targets:
+            chat.load_session(self._conversation())
+
+        refresh_action_targets.assert_called_once_with()
+
+    def test_load_session_queues_only_final_scroll_and_anchor_rebuild(self):
+        chat = ChatWidget()
+        self.addCleanup(chat.deleteLater)
+        scheduled = []
+
+        with patch(
+            "app.ui.chat_widget.QTimer.singleShot",
+            side_effect=lambda _delay, callback: scheduled.append(callback),
+        ):
+            chat.load_session(self._conversation())
+
+        self.assertEqual(
+            scheduled,
+            [chat._scroll_bottom, chat._rebuild_anchors],
+        )
+
+    def test_add_message_keeps_realtime_refresh_and_scheduling(self):
+        chat = ChatWidget()
+        self.addCleanup(chat.deleteLater)
+        scheduled = []
+        message = Message(role=MessageRole.USER, content="live question")
+
+        with (
+            patch.object(
+                chat,
+                "_refresh_action_targets",
+                wraps=chat._refresh_action_targets,
+            ) as refresh_action_targets,
+            patch(
+                "app.ui.chat_widget.QTimer.singleShot",
+                side_effect=lambda _delay, callback: scheduled.append(callback),
+            ),
+        ):
+            bubble = chat.add_message(message)
+
+        self.assertIs(chat.last_bubble(), bubble)
+        refresh_action_targets.assert_called_once_with()
+        self.assertEqual(
+            scheduled,
+            [chat._scroll_bottom, chat._rebuild_anchors],
+        )
 
 
 class ChatWidgetAutoFollowTest(unittest.TestCase):

@@ -169,6 +169,12 @@ class MessageBubble(QFrame):
     def message(self) -> Message:
         return self._message
 
+    def bind_message(self, message: Message) -> None:
+        """Retarget message actions while preserving the merged bubble UI."""
+        if (message.role == MessageRole.USER) != self._is_user:
+            raise ValueError("message role does not match bubble type")
+        self._message = message
+
     @property
     def text(self) -> str:
         return self._text
@@ -339,6 +345,7 @@ class MessageBubble(QFrame):
         if self._is_user:
             return
         self._cancel_pending_render()
+        self._text = ""
         self._content.set_text("")
         self._content.hide()
 
@@ -348,11 +355,9 @@ class MessageBubble(QFrame):
         每个 token 都重跑一遍「累积全文」的 markdown 解析 + 全量文本布局，
         长回复下是 O(n²) 的主线程开销，token 越多越卡。这里用去抖定时器把
         窗口内的多次更新压成一次渲染，稳定住 CPU 占用与滚动流畅度。
-        始终同步 message.content（供复制/重新生成读取最新文本），只把「重渲染」
-        这一步延后。
+        持久化 Message 由控制器唯一写入；气泡只维护展示状态并延后重渲染。
         """
         self._text = text
-        self._message.content = text
         self._pending_text = text
         if self._render_timer is None:
             self._render_timer = QTimer(self)
@@ -380,8 +385,6 @@ class MessageBubble(QFrame):
         """立即设置回复文本内容（终态：完成/出错/取消），并取消挂起的去抖渲染。"""
         self._cancel_pending_render()
         self._text = text
-        # 保持 message.content 与气泡显示同步，供复制/重新生成读取最新文本。
-        self._message.content = text
         self._content.set_text(text)
         if not self._is_user:
             self._content.setVisible(bool(text))
@@ -582,7 +585,9 @@ class ChatWidget(QWidget):
         side = max(16, (viewport_width - self._MAX_CONTENT_WIDTH) // 2)
         self._layout.setContentsMargins(side, 20, side, 20)
 
-    def add_message(self, message: Message) -> MessageBubble:
+    def add_message(
+        self, message: Message, *, defer_updates: bool = False
+    ) -> MessageBubble:
         # 新用户消息开启新一轮，恢复自动跟随到底部；AI 流式 chunk 追加气泡时
         # 不重置该状态，否则会覆盖用户在输出期间主动选择的位置。
         if message.role == MessageRole.USER:
@@ -594,9 +599,10 @@ class ChatWidget(QWidget):
             self._layout.addWidget(bubble, alignment=Qt.AlignmentFlag.AlignRight)
         else:
             self._layout.addWidget(bubble)
-        self._refresh_action_targets()
-        QTimer.singleShot(30, self._scroll_bottom)
-        QTimer.singleShot(30, self._rebuild_anchors)
+        if not defer_updates:
+            self._refresh_action_targets()
+            QTimer.singleShot(30, self._scroll_bottom)
+            QTimer.singleShot(30, self._rebuild_anchors)
         return bubble
 
     def _register_bubble(self, bubble: MessageBubble):
@@ -656,7 +662,7 @@ class ChatWidget(QWidget):
                 i += 1
                 continue
             if msg.role == MessageRole.USER:
-                self.add_message(msg)
+                self.add_message(msg, defer_updates=True)
                 i += 1
             else:  # ASSISTANT
                 group: list[Message] = []

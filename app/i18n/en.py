@@ -140,6 +140,9 @@ EN: dict[str, str] = {
     "input.placeholder": "Type a message… (Enter to send, Shift+Enter for newline)",
     "input.send": "Send",
     "input.cancel": "Cancel",
+    "input.editing": "Editing message",
+    "input.cancelEdit": "Cancel edit",
+    "input.cancelling": "Stopping…",
 
     # ── Session panel ──
     "session.title": "Sessions",
