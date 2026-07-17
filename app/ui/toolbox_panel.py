@@ -429,6 +429,7 @@ class ToolboxPanel(QWidget):
 
         # 右侧详情
         self._right = QWidget()
+        self._right.setObjectName("toolDetailPanel")
         right_layout = QVBoxLayout(self._right)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)

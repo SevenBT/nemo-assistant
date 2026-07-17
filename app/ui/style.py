@@ -1039,10 +1039,30 @@ def _build_custom_qss(theme: dict, content_font_size: int = 15, editor_font_size
 
     return f"""
 /* ═══════════════════════════════════════════════════════════════════
+   Primary Tab Canvas
+   ═══════════════════════════════════════════════════════════════════ */
+#chatInterface,
+#notesInterface,
+#toolboxInterface,
+#chatArea,
+#noteEditorPanel,
+#toolDetailPanel,
+#sessionPanel,
+#noteListPanel,
+#toolListPanel {{
+    background: {surface};
+}}
+#sessionList,
+#noteList,
+#toolList {{
+    background: transparent;
+}}
+
+/* ═══════════════════════════════════════════════════════════════════
    Chat Area
    ═══════════════════════════════════════════════════════════════════ */
 #chatArea {{
-    background: transparent;
+    border: none;
 }}
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1072,7 +1092,6 @@ SegmentedWidget > QWidget:checked {{
    Session Panel — accent left stripe on selected item
    ═══════════════════════════════════════════════════════════════════ */
 #sessionPanel {{
-    background: {surface};
     border-right: 1px solid {theme["border"]};
 }}
 #panelTitle {{
@@ -1217,7 +1236,6 @@ QSplitter::handle:hover {{ background: {accent}; }}
    Notes Panel
    ═══════════════════════════════════════════════════════════════════ */
 #noteListPanel {{
-    background: {theme["surface_solid"]};
     border-radius: 10px 0 0 10px;
     border-right: 1px solid {theme["border"]};
 }}
@@ -1234,14 +1252,8 @@ QSplitter::handle:hover {{ background: {accent}; }}
    Toolbox Panel
    ═══════════════════════════════════════════════════════════════════ */
 #toolListPanel {{
-    background: {theme["surface_solid"]};
     border-right: 1px solid {theme["border"]};
     border-radius: 10px 0 0 10px;
-}}
-
-/* Note editor panel — transparent so side margins blend with window bg */
-#noteEditorPanel {{
-    background: transparent;
 }}
 
 /* Markdown editor — transparent bg, thin hover-only scrollbar at right edge */
