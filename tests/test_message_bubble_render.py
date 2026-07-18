@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QApplication
 
 from app.models.message import Message, MessageRole
 from app.ui.chat_widget import ChatWidget, MessageBubble
+from app.ui.tool_card import ToolSummaryWidget
 
 _app = QApplication.instance() or QApplication([])
 
@@ -76,6 +77,56 @@ class MessageBubbleStreamingRenderTest(unittest.TestCase):
         bubble.clear_text()
         self.assertIsNone(bubble._pending_text)
         self.assertFalse(bubble._render_timer.isActive())
+
+    def test_final_render_skips_text_already_rendered_by_stream(self):
+        bubble = self._ai_bubble()
+
+        with patch.object(bubble._content, "setHtml") as set_html:
+            bubble.set_content_streaming("final answer")
+            bubble._flush_pending_render()
+            bubble.set_content("final answer")
+
+        set_html.assert_called_once()
+        self.assertEqual(bubble.text, "final answer")
+        self.assertEqual(bubble._rendered_text, "final answer")
+
+    def test_tool_summary_updates_existing_detail_row_in_place(self):
+        bubble = self._ai_bubble()
+        bubble.add_tool_card("call-1", "search", {})
+        summary = bubble._tool_summary
+        self.assertIsInstance(summary, ToolSummaryWidget)
+
+        detail_label = summary._detail_layout.itemAt(0).widget()
+        with patch.object(summary, "_rebuild_detail") as rebuild_detail:
+            bubble.update_tool_card("call-1", {"status": "success"})
+
+        rebuild_detail.assert_not_called()
+        self.assertIs(summary._detail_layout.itemAt(0).widget(), detail_label)
+        self.assertIn("✓", detail_label.text())
+
+    def test_tool_summary_keeps_duplicate_call_ids_on_separate_rows(self):
+        summary = ToolSummaryWidget()
+        summary.add_tool("duplicate", "first")
+        summary.add_tool("duplicate", "second")
+
+        summary.update_tool("duplicate", {"status": "success"})
+
+        rows = [
+            summary._detail_layout.itemAt(index).widget()
+            for index in range(summary._detail_layout.count())
+        ]
+        self.assertIn("✓ first", rows[0].text())
+        self.assertIn("⟳ second", rows[1].text())
+
+    def test_message_bubble_refreshes_tool_summary_theme(self):
+        bubble = self._ai_bubble()
+        bubble.add_tool_card("call-1", "search", {})
+        summary = bubble._tool_summary
+
+        with patch.object(summary, "refresh_theme") as refresh_theme:
+            bubble.refresh_theme()
+
+        refresh_theme.assert_called_once_with()
 
 
 class ChatWidgetSessionLoadBatchingTest(unittest.TestCase):

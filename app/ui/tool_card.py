@@ -24,7 +24,8 @@ class ToolSummaryWidget(QFrame):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._tools: list[dict] = []  # [{id, name, status}]
+        self._tools: list[dict] = []  # [{id, name, status, label}]
+        self._detail_labels: list[CaptionLabel] = []
         self._expanded = False
         self.setObjectName("toolSummary")
         self._build()
@@ -63,21 +64,32 @@ class ToolSummaryWidget(QFrame):
         self._refresh_summary()
 
     # ------------------------------------------------------------------ public
-    def add_tool(self, call_id: str, name: str):
+    def add_tool(self, call_id: str, name: str) -> None:
         """Register a new tool call (pending state)."""
-        self._tools.append({"id": call_id, "name": name, "status": "pending"})
+        tool = {"id": call_id, "name": name, "status": "pending"}
+        self._tools.append(tool)
+        label = self._append_detail(tool)
+        tool["label"] = label
         self._refresh_summary()
-        self._rebuild_detail()
-        self._toggle_btn.setVisible(len(self._tools) > 0)
+        self._toggle_btn.setVisible(bool(self._tools))
 
-    def update_tool(self, call_id: str, result: dict):
+    def update_tool(self, call_id: str, result: dict) -> None:
         """Mark a tool call as completed."""
-        for t in self._tools:
-            if t["id"] == call_id:
-                t["status"] = "success" if result.get("status") == "success" else "error"
-                break
+        for tool in self._tools:
+            if tool["id"] != call_id:
+                continue
+            tool["status"] = (
+                "success" if result.get("status") == "success" else "error"
+            )
+            self._refresh_detail(tool)
+            self._refresh_summary()
+            return
+
+    def refresh_theme(self) -> None:
+        theme = style.get_current_theme()
         self._refresh_summary()
-        self._rebuild_detail()
+        for tool in self._tools:
+            self._refresh_detail(tool, theme=theme)
 
     # ------------------------------------------------------------------ internal
     def _refresh_summary(self):
@@ -96,24 +108,38 @@ class ToolSummaryWidget(QFrame):
             text = f'<span style="color:{theme["success"]}">✓</span> {t("toolcard.called", n=n)}'
         self._summary_label.setText(text)
 
-    def _rebuild_detail(self):
-        # Clear existing labels
+    def _append_detail(self, tool: dict) -> CaptionLabel:
+        theme = style.get_current_theme()
+        label = CaptionLabel()
+        self._detail_labels.append(label)
+        self._detail_layout.addWidget(label)
+        tool["label"] = label
+        self._refresh_detail(tool, theme=theme)
+        return label
+
+    def _refresh_detail(self, tool: dict, *, theme: dict | None = None) -> None:
+        theme = theme or style.get_current_theme()
+        if tool["status"] == "pending":
+            icon, color = "⟳", theme["warning"]
+        elif tool["status"] == "success":
+            icon, color = "✓", theme["success"]
+        else:
+            icon, color = "✗", theme["error"]
+        label = tool["label"]
+        label.setText(f"  {icon} {tool['name']}")
+        label.setStyleSheet(f"color: {color}")
+
+    def _rebuild_detail(self) -> None:
+        """Rebuild all detail rows after a theme change or full refresh."""
         while self._detail_layout.count():
             item = self._detail_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        # Add one label per tool
+        self._detail_labels.clear()
         theme = style.get_current_theme()
-        for t in self._tools:
-            if t["status"] == "pending":
-                icon, color = "⟳", theme["warning"]
-            elif t["status"] == "success":
-                icon, color = "✓", theme["success"]
-            else:
-                icon, color = "✗", theme["error"]
-            lbl = CaptionLabel(f"  {icon} {t['name']}")
-            lbl.setStyleSheet(f"color: {color}")
-            self._detail_layout.addWidget(lbl)
+        for tool in self._tools:
+            label = self._append_detail(tool)
+            tool["label"] = label
 
     def _toggle(self):
         self._expanded = not self._expanded

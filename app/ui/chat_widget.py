@@ -146,6 +146,7 @@ class MessageBubble(QFrame):
         self._is_user = message.role == MessageRole.USER
         self._message = message
         self._text = message.content or ""
+        self._rendered_text = self._text
         self._tool_summary: ToolSummaryWidget | None = None
         self._actions: QWidget | None = None
         self._actions_enabled = False
@@ -340,12 +341,17 @@ class MessageBubble(QFrame):
         if self._tool_summary:
             self._tool_summary.update_tool(call_id, result)
 
-    def clear_text(self):
+    def refresh_theme(self) -> None:
+        if self._tool_summary:
+            self._tool_summary.refresh_theme()
+
+    def clear_text(self) -> None:
         """清空并隐藏文本区域（工具调用开始时调用）。"""
         if self._is_user:
             return
         self._cancel_pending_render()
         self._text = ""
+        self._rendered_text = ""
         self._content.set_text("")
         self._content.hide()
 
@@ -371,7 +377,9 @@ class MessageBubble(QFrame):
             return
         text = self._pending_text
         self._pending_text = None
-        self._content.set_text(text)
+        if text != self._rendered_text:
+            self._content.set_text(text)
+            self._rendered_text = text
         if not self._is_user:
             self._content.setVisible(bool(text))
         self.content_rendered.emit()
@@ -381,11 +389,13 @@ class MessageBubble(QFrame):
         if self._render_timer is not None and self._render_timer.isActive():
             self._render_timer.stop()
 
-    def set_content(self, text: str):
+    def set_content(self, text: str) -> None:
         """立即设置回复文本内容（终态：完成/出错/取消），并取消挂起的去抖渲染。"""
         self._cancel_pending_render()
         self._text = text
-        self._content.set_text(text)
+        if text != self._rendered_text:
+            self._content.set_text(text)
+            self._rendered_text = text
         if not self._is_user:
             self._content.setVisible(bool(text))
         self.content_rendered.emit()
@@ -638,6 +648,10 @@ class ChatWidget(QWidget):
         bubble.deleteLater()
         self._refresh_action_targets()
         self._rebuild_anchors()
+
+    def refresh_theme(self) -> None:
+        for bubble in self._bubbles:
+            bubble.refresh_theme()
 
     def clear(self):
         for b in self._bubbles:

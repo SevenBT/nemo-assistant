@@ -603,6 +603,7 @@ class MainWindow(FluentWindow):
         self._notes_panel.refresh_theme()
         # 发送按钮图标色按 accent 亮度重算（浅色强调色下白箭头看不清）。
         self._input.refresh_theme()
+        self._chat.refresh_theme()
 
     def _switch_view(self, index: int):
         if 0 <= index < len(self._pages):
