@@ -6,6 +6,19 @@ This project follows a lightweight changelog format inspired by Keep a Changelog
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-19
+
+### Changed
+
+- Improved chat interaction reliability and safety.
+- Optimized chat rendering updates.
+- Added automated Windows Draft Release packaging.
+- Added release metadata and version consistency validation.
+
+### Fixed
+
+- Fixed issues affecting chat interaction behavior.
+
 ## [0.1.0] - 2026-07-04
 
 First public release: floating desktop AI assistant with selection actions,
