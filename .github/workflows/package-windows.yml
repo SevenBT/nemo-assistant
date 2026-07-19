@@ -1,33 +1,216 @@
 name: package-windows
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: package-windows-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  pyinstaller:
+  build:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
 
     env:
       LITELLM_LOCAL_MODEL_COST_MAP: 'True'
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag points to main
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          git fetch origin main --quiet
+          $fetchExitCode = $LASTEXITCODE
+          if ($fetchExitCode -ne 0) {
+            throw "Failed to fetch origin/main before verifying the release tag."
+          }
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release tag $env:GITHUB_REF_NAME does not point to a commit on origin/main."
+          }
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.12'
 
-      - name: Install packaging dependencies
+      - name: Install locked dependencies
         run: |
-          python -m pip install --upgrade pip uv
-          uv sync --extra build --frozen
+          python -m pip install uv==0.11.26
+          uv sync --locked --extra dev --extra build
+
+      - name: Validate release metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          $arguments = @(
+            '--root', '.',
+            '--notes-output', 'release-notes.md',
+            '--github-output', $env:GITHUB_OUTPUT
+          )
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            $arguments += @('--tag', $env:GITHUB_REF_NAME)
+          }
+          uv run python scripts/release_metadata.py @arguments
+
+      - name: Run repository checks
+        run: uv run python scripts/check_repo.py
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run python -m pytest -q
 
       - name: Build onefile executable
         run: uv run python -m PyInstaller --clean --noconfirm Nemo_Assistant.spec
 
-      - name: Upload executable
-        uses: actions/upload-artifact@v7
+      - name: Assemble release archive
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packageDir = 'release/package'
+          $archiveDir = 'release'
+          New-Item -ItemType Directory -Force $packageDir | Out-Null
+
+          $executable = 'dist/Nemo Assistant.exe'
+          if (-not (Test-Path $executable) -or (Get-Item $executable).Length -eq 0) {
+            throw "PyInstaller did not produce a non-empty executable."
+          }
+
+          Copy-Item $executable "$packageDir/Nemo Assistant.exe"
+          Copy-Item 'LICENSE' $packageDir
+          Copy-Item 'THIRD_PARTY_NOTICES.md' $packageDir
+          Copy-Item 'DEPENDENCY_LICENSES.md' $packageDir
+          Copy-Item 'README.md' $packageDir
+          uv run pip-licenses --with-license-file --format=markdown > "$packageDir/DEPENDENCY_LICENSES-FULL.md"
+
+          $zipPath = "$archiveDir/Nemo-Assistant-v$env:RELEASE_VERSION-Windows-x64.zip"
+          Compress-Archive -Path "$packageDir/*" -DestinationPath $zipPath -CompressionLevel Optimal
+
+          $expectedEntries = @(
+            'Nemo Assistant.exe',
+            'LICENSE',
+            'THIRD_PARTY_NOTICES.md',
+            'DEPENDENCY_LICENSES.md',
+            'DEPENDENCY_LICENSES-FULL.md',
+            'README.md'
+          )
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zipPath))
+          try {
+            $actualEntries = @($archive.Entries | ForEach-Object { $_.FullName })
+          } finally {
+            $archive.Dispose()
+          }
+          if (Compare-Object $expectedEntries $actualEntries) {
+            throw "Release archive contains unexpected or missing files: $($actualEntries -join ', ')"
+          }
+
+          $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $zipPath -Leaf)" | Set-Content 'release/SHA256SUMS.txt' -Encoding ascii
+
+          $notes = Get-Content 'release-notes.md' -Raw
+          @"
+          # Nemo Assistant v$env:RELEASE_VERSION
+
+          $notes
+          ## Download
+
+          Download `Nemo-Assistant-v$env:RELEASE_VERSION-Windows-x64.zip`, verify it with `SHA256SUMS.txt`, and extract it on Windows 10/11.
+
+          The archive includes the executable, project license, third-party notices, and dependency license inventories. This build is unsigned; Windows SmartScreen may show a warning on first launch.
+          "@ | Set-Content 'release/release-notes.md' -Encoding utf8
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: nemo-assistant-windows
-          path: "dist/Nemo Assistant.exe"
+          name: nemo-assistant-release-${{ steps.metadata.outputs.version }}-${{ github.run_attempt }}
+          path: |
+            release/*.zip
+            release/SHA256SUMS.txt
+            release/release-notes.md
+          if-no-files-found: error
+          retention-days: 14
+
+  draft-release:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_VERSION: ${{ needs.build.outputs.version }}
+
+    steps:
+      - name: Download release candidate
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: nemo-assistant-release-${{ needs.build.outputs.version }}-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Create or update draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes_file="release-assets/release-notes.md"
+          zip_asset="release-assets/Nemo-Assistant-v${RELEASE_VERSION}-Windows-x64.zip"
+          checksum_asset="release-assets/SHA256SUMS.txt"
+
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+            echo "Release tag moved from $RELEASE_SHA to $tag_sha during the workflow." >&2
+            exit 1
+          fi
+
+          release_json="$RUNNER_TEMP/release.json"
+          release_error="$RUNNER_TEMP/release-error.log"
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_json" 2>"$release_error"; then
+            if [[ "$(jq -r .draft "$release_json")" != "true" ]]; then
+              echo "Refusing to modify already-published release $RELEASE_TAG" >&2
+              exit 1
+            fi
+            while IFS= read -r asset_name; do
+              if [[ "$asset_name" != "$(basename "$zip_asset")" && "$asset_name" != "$(basename "$checksum_asset")" ]]; then
+                echo "Draft release contains unexpected asset: $asset_name" >&2
+                exit 1
+              fi
+            done < <(jq -r '.assets[].name' "$release_json")
+
+            gh release upload "$RELEASE_TAG" "$zip_asset" "$checksum_asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --title "Nemo Assistant v${RELEASE_VERSION}" \
+              --notes-file "$notes_file"
+          elif grep -q '(HTTP 404)' "$release_error"; then
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --draft \
+              --title "Nemo Assistant v${RELEASE_VERSION}" \
+              --notes-file "$notes_file" \
+              "$zip_asset" "$checksum_asset"
+          else
+            cat "$release_error" >&2
+            exit 1
+          fi
