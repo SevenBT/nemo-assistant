@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nemo-assistant"
-version = "0.1.0"
+version = "0.2.0"
 description = "A local-first floating desktop AI assistant for selection actions, OCR screenshots, Markdown notes, stickies, tool calling, and chat."
 readme = "README.md"
 requires-python = ">=3.12"
