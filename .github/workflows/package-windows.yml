@@ -159,7 +159,7 @@ jobs:
 
     steps:
       - name: Download release candidate
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: nemo-assistant-release-${{ needs.build.outputs.version }}-${{ github.run_attempt }}
           path: release-assets
