@@ -16,3 +16,5 @@ shipped behavior — check each document's header.
 | [llm-evaluation](llm-evaluation.md) | AI application evaluation methodology |
 | [security-eval-guide](security-eval-guide.md) | Observability / security / eval walkthrough |
 | [local-rag-plan](local-rag-plan.md) | Local knowledge base (RAG) plan — design draft, not yet implemented |
+| [current-codebase-improvement-plan](current-codebase-improvement-plan.md) | Current codebase improvement plan — review draft, no implementation yet |
+| [workshop-advanced-generation-design](workshop-advanced-generation-design.md) | Workshop advanced generation design — only Phase 1 implemented |
