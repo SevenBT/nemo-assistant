@@ -29,6 +29,8 @@ from pathlib import Path
 from typing import Any
 
 from app.tools.base import BuiltinTool
+from app.core.tool_build.manifest import manifest_to_parameters, parse_manifest_text
+from app.core.tool_build.models import ToolPermission
 from app.core.tool_deps import ToolDependencyManager
 from app.tools.registry import ToolErrorType
 from app.i18n import t
@@ -36,6 +38,18 @@ from app.i18n import t
 # 脚本执行超时时间（秒）
 _TOOL_TIMEOUT = 60
 
+
+def _validate_legacy_manifest_options(manifest: dict[str, Any]) -> None:
+    """Preserve the old adapter's required legacy metadata contract."""
+
+    for field in ("name", "description"):
+        value = manifest.get(field)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"legacy manifest {field} must be a non-empty string")
+    if "script" in manifest:
+        script = manifest["script"]
+        if not isinstance(script, str) or not script:
+            raise ValueError("legacy manifest script must be a non-empty string")
 
 class ScriptToolAdapter(BuiltinTool):
     """
@@ -65,7 +79,9 @@ class ScriptToolAdapter(BuiltinTool):
         version: str = "",
         author: str = "",
         retry_safe: bool = False,
-    ):
+        permissions: frozenset[ToolPermission] = frozenset(),
+        is_legacy_manifest: bool = True,
+    ) -> None:
         self._name = tool_name
         self._description = tool_description
         self._parameters = tool_parameters
@@ -76,7 +92,9 @@ class ScriptToolAdapter(BuiltinTool):
         self._enabled = True
         self._version = version
         self._author = author
-        self._retry_safe = retry_safe
+        self._retry_safe = retry_safe if is_legacy_manifest else False
+        self._permissions = frozenset(permissions)
+        self._is_legacy_manifest = is_legacy_manifest
         # 依赖管理器：负责将工具声明的 pip 包安装到隔离的 site-packages
         self._deps_mgr = ToolDependencyManager()
 
@@ -113,7 +131,7 @@ class ScriptToolAdapter(BuiltinTool):
         return self._enabled
 
     @enabled.setter
-    def enabled(self, value: bool):
+    def enabled(self, value: bool) -> None:
         """允许用户在设置界面中开关工具。"""
         self._enabled = value
 
@@ -135,6 +153,21 @@ class ScriptToolAdapter(BuiltinTool):
     def dependencies(self) -> list[str]:
         return self._dependencies
 
+    @property
+    def permissions(self) -> frozenset[ToolPermission]:
+        """Declared strict-manifest permissions; legacy manifests declare none."""
+        return self._permissions
+
+    @property
+    def missing_dependencies(self) -> tuple[str, ...]:
+        """Return missing declared dependencies without installing anything."""
+        return tuple(self._deps_mgr.get_missing(self._dependencies))
+
+    @property
+    def is_legacy_manifest(self) -> bool:
+        """Whether this adapter came from the compatibility manifest format."""
+        return self._is_legacy_manifest
+
     def execute(self, params: dict[str, Any]) -> dict[str, Any]:
         """
         通过 subprocess 执行脚本工具。
@@ -146,6 +179,19 @@ class ScriptToolAdapter(BuiltinTool):
           4. 启动子进程执行 tool.py
           5. 解析 stdout 最后一行为 JSON 结果
         """
+        # Strict manifests can never carry dependencies. Retain the legacy
+        # dependency path for compatibility, but refuse an inconsistent strict
+        # adapter defensively before it can trigger pip or a subprocess.
+        if not self._is_legacy_manifest and self._dependencies:
+            return {
+                "status": "error",
+                "data": {
+                    "message": "Strict manifest dependencies are not supported.",
+                    "error_type": ToolErrorType.RUNTIME.value,
+                    "retryable": False,
+                },
+            }
+
         # 确保依赖已安装
         if self._dependencies:
             ok, err = self._deps_mgr.ensure_deps(self._dependencies)
@@ -270,55 +316,47 @@ class ScriptToolAdapter(BuiltinTool):
             retry_safe=true，或 retry_policy.enabled=true。
         """
         with open(manifest_path, encoding="utf-8") as f:
-            manifest = json.load(f)
+            manifest_text = f.read()
+        try:
+            raw_manifest = json.loads(manifest_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError("manifest JSON is invalid") from exc
+        if not isinstance(raw_manifest, dict):
+            raise ValueError("manifest must be a JSON object")
+        if "manifest_version" in raw_manifest:
+            manifest = parse_manifest_text(manifest_text, mode="strict")
+            legacy_options: dict[str, Any] = {}
+        else:
+            legacy_options = dict(raw_manifest)
+            _validate_legacy_manifest_options(legacy_options)
+            legacy_options.setdefault("script", "tool.py")
+            manifest = parse_manifest_text(json.dumps(legacy_options), mode="legacy")
 
         tool_dir = manifest_path.parent.resolve()
         # script 字段完全来自用户 manifest，必须校验解析后仍在 tool_dir 内，
         # 否则恶意 manifest 可用 "../../../x.py" 让子进程执行工具目录外的任意脚本。
-        script_resolved = (tool_dir / manifest.get("script", "tool.py")).resolve()
+        script_resolved = (tool_dir / manifest.script).resolve()
         if not script_resolved.is_relative_to(tool_dir):
             raise ValueError(
-                t("tool.script_adapter.msg.script_out_of_bounds", script=manifest.get('script'))
+                t("tool.script_adapter.msg.script_out_of_bounds", script=manifest.script)
             )
         script_path = str(script_resolved)
-
-        # 将 manifest 中的参数定义转换为标准 JSON Schema 格式
-        properties = {}
-        required = []
-        for pname, pdata in manifest.get("parameters", {}).items():
-            # source="config" 的参数来自应用配置，不暴露给 LLM
-            if pdata.get("source") == "config":
-                continue
-            prop: dict[str, Any] = {"type": pdata.get("type", "string")}
-            if pdata.get("description"):
-                prop["description"] = pdata["description"]
-            if pdata.get("enum"):
-                prop["enum"] = pdata["enum"]
-            if pdata.get("items"):
-                prop["items"] = pdata["items"]
-            properties[pname] = prop
-            # 默认 required=True，除非显式设为 False
-            if pdata.get("required", True):
-                required.append(pname)
-
-        parameters: dict[str, Any] = {"type": "object", "properties": properties}
-        if required:
-            parameters["required"] = required
-
-        retry_policy = manifest.get("retry_policy", {})
-        retry_safe = bool(manifest.get("retry_safe", False))
-        if isinstance(retry_policy, dict):
-            retry_safe = retry_safe or bool(retry_policy.get("enabled", False))
+        parameters = manifest_to_parameters(manifest)
 
         return cls(
-            tool_name=manifest["name"],
-            tool_description=manifest["description"],
+            tool_name=manifest.name,
+            tool_description=manifest.description,
             tool_parameters=parameters,
             script_path=script_path,
             tool_dir=str(tool_dir),
-            is_read_only=manifest.get("read_only", False),
-            dependencies=manifest.get("dependencies", []),
-            version=manifest.get("version", ""),
-            author=manifest.get("author", ""),
-            retry_safe=retry_safe,
+            is_read_only=legacy_options.get("read_only", False) is True,
+            dependencies=list(manifest.dependencies),
+            version=manifest.version,
+            author=manifest.author,
+            retry_safe=manifest.retry_safe or (
+                isinstance(legacy_options.get("retry_policy"), dict)
+                and legacy_options["retry_policy"].get("enabled") is True
+            ),
+            permissions=manifest.permissions,
+            is_legacy_manifest=manifest.is_legacy,
         )

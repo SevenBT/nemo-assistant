@@ -235,6 +235,9 @@ class ToolRegistry:
         if not tool:
             logger.warning("[Registry] Tool not found: %s", name)
             return _make_error(ToolErrorType.TOOL_NOT_FOUND, f"Tool not found: {name}")
+        if not tool.enabled:
+            logger.warning("[Registry] Disabled tool execution rejected: %s", name)
+            return _make_error(ToolErrorType.PERMISSION, t("tool.common.hint.permission"))
 
         params = tool.cast_params(params)
         errors = tool.validate_params(params)
