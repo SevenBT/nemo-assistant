@@ -55,6 +55,7 @@ ASSETS_DIR = BUNDLE_DIR / "assets"
 USER_TOOLS_DIR = DATA_DIR / "user_tools"
 TOOL_RUNTIME_DIR = DATA_DIR / "tool_runtime"
 TOOL_SITE_PACKAGES = TOOL_RUNTIME_DIR / "site-packages"
+TOOL_BUILDS_DIR = DATA_DIR / "tool_builds"
 
 # ── Model metadata ────────────────────────────────────────────────────
 
@@ -360,7 +361,7 @@ def _ensure_dirs() -> None:
     for d in [
         CONFIG_DIR, DATA_DIR, SESSIONS_DIR, NOTES_DIR, NOTES_IMAGES_DIR,
         TRASH_DIR, USER_TOOLS_DIR, TOOL_RUNTIME_DIR,
-        TOOL_SITE_PACKAGES, SCREENSHOTS_DIR,
+        TOOL_SITE_PACKAGES, TOOL_BUILDS_DIR, SCREENSHOTS_DIR,
     ]:
         d.mkdir(parents=True, exist_ok=True)
 
