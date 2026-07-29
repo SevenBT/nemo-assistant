@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Iterator, Optional
 
 from app.core.config import cfg
-from app.core.llm_gateway import LLMGateway
+from app.core.llm_gateway import CancellationToken, LLMGateway
 
 
 @dataclass
@@ -37,7 +37,7 @@ class _ConfigProxy:
     one-off model without mutating global settings.
     """
 
-    def __init__(self, override: ModelOverride):
+    def __init__(self, override: ModelOverride) -> None:
         self._override = override
 
     @property
@@ -81,32 +81,47 @@ _SYSTEM_PROMPT = """\
 
 工具由两个文件组成：manifest.json（工具描述和参数定义）和 tool.py（工具逻辑脚本）。
 
-### manifest.json 格式
+### manifest.json strict v1 格式
 
 ```json
 {
+  "manifest_version": 1,
   "name": "tool_name",
   "description": "简明描述工具用途，AI 根据此决定何时调用",
   "script": "tool.py",
   "version": "1.0.0",
   "author": "",
-  "dependencies": [],
   "parameters": {
     "param_name": {
-      "type": "string|number|boolean|array|object",
+      "type": "string|number|integer|boolean|array|object",
       "description": "参数说明，帮助 AI 正确填写",
-      "source": "ai|config|manual",
-      "required": true,
-      "default": "可选默认值"
+      "source": "ai|config",
+      "required": true
     }
-  }
+  },
+  "output": {
+    "type": "object",
+    "description": "工具返回 data 的结构说明"
+  },
+  "permissions": ["file_read"],
+  "dependencies": [],
+  "retry_safe": false
 }
 ```
+
+manifest 约束：
+- manifest_version 必须是整数 1
+- name 只能使用字母、数字和下划线，且不能以数字开头
+- script 必须是相对路径，通常使用 "tool.py"
+- permissions 只能从以下八项中选择：file_read、file_write、network、clipboard_read、clipboard_write、shell、python_subprocess、process_spawn
+- dependencies 必须固定输出为空列表 "dependencies": []
+- retry_safe 必须固定为 false 或省略；严格工具不能自行授权自动重试
+- parameters 必须是对象；参数 type 只能是 string、number、integer、boolean、array、object
+- output 必须是对象
 
 参数 source 说明：
 - ai：由 AI 根据对话上下文自动填写，会暴露给 AI
 - config：由用户在设置中配置（API Key、路径等敏感信息），不暴露给 AI
-- manual：每次执行前弹窗让用户手动输入
 
 ### tool.py 协议
 
@@ -141,7 +156,7 @@ if __name__ == "__main__":
 - stdout 最后一行必须是合法 JSON，格式为 {"status": "success"|"error", "data": {...}}
 - 错误时返回 {"status": "error", "data": {"message": "错误原因"}}
 - 超时限制 60 秒
-- 第三方库在 dependencies 中声明，系统会自动安装，无需手动 pip install
+- 不要声明或安装第三方依赖
 - 敏感信息（API Key、路径、账号密码）一律用 source: config，不要硬编码
 
 ## 输出要求
@@ -167,6 +182,8 @@ def _extract_blocks(text: str) -> tuple[str, str]:
 def stream_generate(
     requirement: str,
     model_override: Optional[ModelOverride] = None,
+    *,
+    cancel_token: CancellationToken | None = None,
 ) -> Iterator[dict]:
     """Stream tool generation from AI.
 
@@ -189,7 +206,10 @@ def stream_generate(
         },
     ]
     gateway = LLMGateway(config_proxy=_ConfigProxy(model_override)) if model_override else LLMGateway()
-    yield from gateway.chat_stream(messages)
+    yield from gateway.chat_stream(
+        messages,
+        cancel_token=cancel_token,
+    )
 
 
 def parse_result(full_text: str) -> tuple[str, str, str]:
@@ -210,6 +230,9 @@ def parse_result(full_text: str) -> tuple[str, str, str]:
         manifest = json.loads(manifest_str)
     except json.JSONDecodeError as e:
         return manifest_str, script_str, f"manifest.json 格式错误：{e}"
+
+    if not isinstance(manifest, dict):
+        return manifest_str, script_str, "manifest.json 必须是对象"
 
     if "name" not in manifest:
         return manifest_str, script_str, "manifest.json 缺少 name 字段"

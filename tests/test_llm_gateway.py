@@ -1,7 +1,10 @@
 import json
+import threading
+import time
 from pathlib import Path
 
 import httpx
+import pytest
 
 from app.core.llm_gateway import (
     CancellationToken,
@@ -58,9 +61,9 @@ class SpyLimiter(LocalRateLimiter):
         super().__init__(max_concurrent=99, rpm=9999, sleep=lambda _: None)
         self.keys = []
 
-    def acquire(self, key):
+    def acquire(self, key, **kwargs):
         self.keys.append(key)
-        return super().acquire(key)
+        return super().acquire(key, **kwargs)
 
 
 class StaticConfig:
@@ -238,4 +241,151 @@ def test_error_event_handles_unread_streaming_httpx_response():
     assert event["status_code"] == 504
     assert "LiteLLM 调用失败" in event["message"]
     assert "gateway timeout" in event["message"]
+
+
+class BlockingLimiter(LocalRateLimiter):
+    def __init__(self):
+        super().__init__(max_concurrent=1, rpm=9999)
+        self.hold = self._semaphore.acquire()
+
+    def release_hold(self):
+        self._semaphore.release()
+
+
+class CancelDuringWait:
+    def __init__(self, token: CancellationToken):
+        self.token = token
+        self.calls = 0
+
+    def __call__(self, _seconds: float) -> None:
+        self.calls += 1
+        self.token.cancel()
+
+
+@pytest.mark.parametrize("wait_kind", ["semaphore", "rpm", "retry_after"])
+def test_generation_cancellation_interrupts_all_local_waits_promptly(wait_kind):
+    adapter = ScriptedAdapter([[{"type": "error", "message": "busy", "status_code": 429, "retry_after": 3600}]])
+    token = CancellationToken()
+    limiter = LocalRateLimiter(max_concurrent=1, rpm=9999)
+    retry = RetryPolicy(max_attempts=2)
+
+    if wait_kind == "semaphore":
+        limiter = BlockingLimiter()
+    elif wait_kind == "rpm":
+        cancel_sleep = CancelDuringWait(token)
+        limiter = LocalRateLimiter(max_concurrent=1, rpm=1, sleep=cancel_sleep)
+        limiter._timestamps["litellm:test-model"].append(time.monotonic())
+    else:
+        retry = RetryPolicy(max_attempts=2, sleep=CancelDuringWait(token))
+
+    gateway = LLMGateway(
+        config_proxy=StaticConfig(),
+        adapters={"litellm": adapter},
+        retry_policy=retry,
+        limiter=limiter,
+        logger=GatewayLogger.disabled(),
+    )
+    events = []
+    worker = threading.Thread(
+        target=lambda: events.extend(
+            gateway.chat_stream(
+                [{"role": "user", "content": "hi"}],
+                cancel_token=token,
+                stream_timeout=0.2,
+            )
+        )
+    )
+    worker.start()
+    if wait_kind == "semaphore":
+        time.sleep(0.03)
+        token.cancel()
+    worker.join(0.5)
+    if isinstance(limiter, BlockingLimiter):
+        limiter.release_hold()
+
+    assert worker.is_alive() is False
+    assert events == []
+
+
+def test_retry_after_is_capped_by_generation_deadline():
+    sleeps = []
+    adapter = ScriptedAdapter([
+        [{"type": "error", "message": "busy", "status_code": 429, "retry_after": 3600}],
+        [{"type": "done"}],
+    ])
+    gateway = LLMGateway(
+        config_proxy=StaticConfig(),
+        adapters={"litellm": adapter},
+        retry_policy=RetryPolicy(max_attempts=2, sleep=sleeps.append),
+        logger=GatewayLogger.disabled(),
+    )
+
+    list(gateway.chat_stream(
+        [{"role": "user", "content": "hi"}],
+        cancel_token=CancellationToken(),
+        stream_timeout=0.25,
+    ))
+
+    assert sleeps
+    assert sum(sleeps) <= 0.25
+
+
+def test_error_event_redacts_credentials_paths_and_nested_provider_payload(tmp_path):
+    secret_path = str(tmp_path / "private" / "request.json")
+    exc = Exception(
+        "Authorization: Bearer bearer-secret api_key=key-secret password=pw-secret "
+        "https://provider.test/v1?token=query-secret&safe=ok "
+        f"path={secret_path} "
+        "payload={'nested': {'apiKey': 'nested-secret'}, 'status': 'overloaded'}"
+    )
+    exc.body = {
+        "error": {
+            "type": "rate_limit",
+            "code": "429",
+            "message": "overloaded",
+            "token": "body-secret",
+            "nested": [{"password": "nested-password"}],
+        }
+    }
+
+    event = _error_event(exc, "Provider request failed")
+    serialized = json.dumps(event, ensure_ascii=False)
+
+    for secret in (
+        "bearer-secret", "key-secret", "pw-secret", "query-secret",
+        "nested-secret", "body-secret", "nested-password", secret_path,
+    ):
+        assert secret not in serialized
+    assert "rate_limit" in serialized
+    assert event["status_code"] is None
+    assert "Provider request failed" in event["message"]
+
+
+def test_gateway_persistence_receives_only_sanitized_error_summary(tmp_path):
+    class TraceSink:
+        def __init__(self):
+            self.records = []
+
+        def record_llm_call(self, _trace_id, _seq, record):
+            self.records.append(record)
+
+    secret = "Bearer persist-secret api_key=persist-key C:/Users/private/request.json"
+    adapter = ScriptedAdapter([[{"type": "error", "message": secret, "status_code": 401}]])
+    sink = TraceSink()
+    log_path = tmp_path / "gateway.jsonl"
+    gateway = LLMGateway(
+        config_proxy=StaticConfig(),
+        adapters={"litellm": adapter},
+        retry_policy=RetryPolicy(max_attempts=1),
+        logger=GatewayLogger(log_path),
+        trace_sink=sink,
+    )
+
+    events = list(gateway.chat_stream([{"role": "user", "content": "hi"}]))
+    persisted = log_path.read_text(encoding="utf-8") + json.dumps(sink.records)
+
+    assert "persist-secret" not in json.dumps(events)
+    assert "persist-key" not in persisted
+    assert "C:/Users/private" not in persisted
+    assert sink.records[0]["error_status_code"] == 401
 

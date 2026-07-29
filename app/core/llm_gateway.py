@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import threading
 import time
 import uuid
@@ -35,6 +36,21 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0)
 _LOG_DIR = DATA_DIR.parent / "logs"
 _DEFAULT_LOG_PATH = _LOG_DIR / "llm_gateway.jsonl"
+_WAIT_SLICE_SECONDS = 0.05
+_MAX_RETRY_AFTER_SECONDS = 30.0
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?i)(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|credential)"
+)
+_BEARER_RE = re.compile(r"(?i)\bBearer\s+[^\s,;\"']+")
+_ASSIGNMENT_SECRET_RE = re.compile(
+    r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|credential)\b\s*[:=]\s*([^\s,;]+)"
+)
+_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|credential)=)[^&#\s]+"
+)
+_ABSOLUTE_PATH_RE = re.compile(
+    r"(?i)(?:[A-Z]:[\\/](?:[^\s,;\"']+[\\/])*[^\s,;\"']+|/(?:Users|home|tmp|var|private)/[^\s,;\"']+)"
+)
 
 
 def _is_cancelled(cancel_token: "CancellationToken | None") -> bool:
@@ -67,6 +83,11 @@ class CancellationToken:
 
     def is_cancelled(self) -> bool:
         return self._event.is_set()
+
+    def wait(self, timeout: float) -> bool:
+        """Wait for cancellation and return whether cancellation occurred."""
+
+        return self._event.wait(max(0.0, timeout))
 
     def add_resource(self, resource: Any) -> None:
         if resource is None:
@@ -109,6 +130,7 @@ class LLMRequest:
     api_key: str = ""
     base_url: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
+    stream_timeout: float | None = None
 
 
 class ProviderAdapter(Protocol):
@@ -280,6 +302,74 @@ def _strip_litellm_boilerplate(text: str) -> str:
     return cleaned or text.strip()
 
 
+def _sanitize_sensitive_value(value: Any, *, key: str = "") -> Any:
+    """Recursively redact provider data before it reaches UI or persistence."""
+
+    if key and _SENSITIVE_KEY_RE.search(key):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {
+            str(item_key): _sanitize_sensitive_value(item, key=str(item_key))
+            for item_key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_sensitive_value(item) for item in value]
+    if isinstance(value, str):
+        return _sanitize_error_text(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return _sanitize_error_text(str(value))
+
+
+def _sanitize_error_text(text: str) -> str:
+    sanitized = _BEARER_RE.sub("Bearer [REDACTED]", text)
+    sanitized = _ASSIGNMENT_SECRET_RE.sub(
+        lambda match: f"{match.group(1)}=[REDACTED]", sanitized
+    )
+    sanitized = _QUERY_SECRET_RE.sub(
+        lambda match: f"{match.group(1)}[REDACTED]", sanitized
+    )
+    sanitized = _ABSOLUTE_PATH_RE.sub("[PATH]", sanitized)
+    return sanitized[:500]
+
+
+def _safe_error_message(payload: Any, exc: Exception) -> str:
+    sanitized_payload = _sanitize_sensitive_value(payload)
+    if isinstance(sanitized_payload, dict):
+        error = sanitized_payload.get("error")
+        if isinstance(error, dict):
+            candidate = error.get("message")
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        candidate = sanitized_payload.get("message")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    if isinstance(sanitized_payload, str) and sanitized_payload.strip():
+        return sanitized_payload.strip()
+    return _sanitize_error_text(str(exc)).strip()
+
+
+def sanitize_error_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Return an immutable-style sanitized event copy for UI/log/trace use."""
+
+    safe = {
+        key: _sanitize_sensitive_value(value, key=key)
+        for key, value in event.items()
+        if key in {
+            "type",
+            "message",
+            "status_code",
+            "error_kind",
+            "error_type",
+            "error_code",
+            "retry_after",
+        }
+    }
+    safe["type"] = "error"
+    safe["message"] = _sanitize_error_text(str(safe.get("message") or "Provider request failed"))
+    return safe
+
+
 def _error_event(exc: Exception, prefix: str = "") -> dict:
     """把 SDK/httpx 异常转换为网关可判断的结构化 error 事件。"""
     response = getattr(exc, "response", None)
@@ -291,9 +381,8 @@ def _error_event(exc: Exception, prefix: str = "") -> dict:
     err_type, err_code = _error_type_code(payload)
     headers = getattr(response, "headers", None)
 
-    body = payload if isinstance(payload, str) else ""
-    raw_message = body.strip() if body.strip() else str(exc)
-    message = _strip_litellm_boilerplate(raw_message)[:500]
+    raw_message = _safe_error_message(payload, exc)
+    message = _strip_litellm_boilerplate(raw_message)
 
     name = exc.__class__.__name__.lower()
     if "timeout" in name:
@@ -309,7 +398,7 @@ def _error_event(exc: Exception, prefix: str = "") -> dict:
     if prefix:
         message = f"{prefix}: {message}"
 
-    return {
+    return sanitize_error_event({
         "type": "error",
         "message": message,
         "status_code": int(status_code) if status_code is not None else None,
@@ -317,7 +406,7 @@ def _error_event(exc: Exception, prefix: str = "") -> dict:
         "error_type": err_type,
         "error_code": err_code,
         "retry_after": _retry_after_from_headers(headers),
-    }
+    })
 
 
 def _field(data: Any, name: str, default: Any = None) -> Any:
@@ -472,6 +561,8 @@ class LiteLLMAdapter:
         if request.tools:
             kwargs["tools"] = request.tools
             kwargs["tool_choice"] = "auto"
+        if request.stream_timeout is not None:
+            kwargs["timeout"] = request.stream_timeout
 
         try:
             stream = litellm.completion(**kwargs)
@@ -523,6 +614,30 @@ class LiteLLMAdapter:
                 return
             event = _error_event(exc, "LiteLLM 调用失败")
             yield event
+
+
+def _bounded_wait(
+    delay: float,
+    *,
+    cancel_token: CancellationToken | None,
+    deadline: float | None,
+    sleep: Callable[[float], None],
+) -> bool:
+    """Wait in bounded slices; return False on cancellation/deadline."""
+
+    remaining = max(0.0, delay)
+    while remaining > 0:
+        if _is_cancelled(cancel_token):
+            return False
+        deadline_remaining = (
+            max(0.0, deadline - time.monotonic()) if deadline is not None else remaining
+        )
+        if deadline is not None and deadline_remaining <= 0:
+            return False
+        interval = min(remaining, deadline_remaining, _WAIT_SLICE_SECONDS)
+        sleep(interval)
+        remaining -= interval
+    return not _is_cancelled(cancel_token)
 
 
 class RetryPolicy:
@@ -596,16 +711,34 @@ class RetryPolicy:
         text = (event.get("message") or "").lower()
         return any(marker in text for marker in self._RETRYABLE_TEXT)
 
-    def wait(self, attempt: int, event: dict) -> float:
-        """按 Retry-After 或退避表等待，并返回实际等待秒数。"""
+    def wait(
+        self,
+        attempt: int,
+        event: dict,
+        *,
+        cancel_token: CancellationToken | None = None,
+        deadline: float | None = None,
+    ) -> float:
+        """Wait for bounded Retry-After/backoff, interruptible by cancellation."""
+
         retry_after = event.get("retry_after")
         if retry_after:
-            delay = float(retry_after)
+            delay = min(float(retry_after), _MAX_RETRY_AFTER_SECONDS)
         else:
             delay = self.delays[min(attempt - 1, len(self.delays) - 1)] if self.delays else 0.0
             if self.jitter:
                 delay += random.uniform(0.0, self.jitter)
-        self.sleep(delay)
+        if deadline is not None:
+            delay = min(delay, max(0.0, deadline - time.monotonic()))
+        if cancel_token is None and deadline is None:
+            self.sleep(delay)
+            return delay
+        _bounded_wait(
+            delay,
+            cancel_token=cancel_token,
+            deadline=deadline,
+            sleep=self.sleep,
+        )
         return delay
 
 
@@ -629,16 +762,46 @@ class LocalRateLimiter:
         self._timestamps: dict[str, deque[float]] = defaultdict(deque)
 
     @contextmanager
-    def acquire(self, key: str):
-        self._semaphore.acquire()
+    def acquire(
+        self,
+        key: str,
+        *,
+        cancel_token: CancellationToken | None = None,
+        deadline: float | None = None,
+    ):
+        acquired = False
+        while not acquired:
+            if _is_cancelled(cancel_token) or (
+                deadline is not None and time.monotonic() >= deadline
+            ):
+                yield False
+                return
+            timeout = _WAIT_SLICE_SECONDS
+            if deadline is not None:
+                timeout = min(timeout, max(0.0, deadline - time.monotonic()))
+            acquired = self._semaphore.acquire(timeout=timeout)
         try:
-            self._wait_for_slot(key)
-            yield
+            if not self._wait_for_slot(
+                key, cancel_token=cancel_token, deadline=deadline
+            ):
+                yield False
+                return
+            yield True
         finally:
             self._semaphore.release()
 
-    def _wait_for_slot(self, key: str) -> None:
+    def _wait_for_slot(
+        self,
+        key: str,
+        *,
+        cancel_token: CancellationToken | None = None,
+        deadline: float | None = None,
+    ) -> bool:
         while True:
+            if _is_cancelled(cancel_token) or (
+                deadline is not None and time.monotonic() >= deadline
+            ):
+                return False
             with self._lock:
                 now = time.monotonic()
                 bucket = self._timestamps[key]
@@ -646,9 +809,15 @@ class LocalRateLimiter:
                     bucket.popleft()
                 if len(bucket) < self._rpm:
                     bucket.append(now)
-                    return
+                    return True
                 wait_s = max(0.01, 60 - (now - bucket[0]))
-            self._sleep(wait_s)
+            if not _bounded_wait(
+                wait_s,
+                cancel_token=cancel_token,
+                deadline=deadline,
+                sleep=self._sleep,
+            ):
+                return False
 
 
 class GatewayLogger:
@@ -719,6 +888,7 @@ class LLMGateway:
         cancel_token: CancellationToken | None = None,
         trace_id: str | None = None,
         seq: int = 0,
+        stream_timeout: float | None = None,
     ) -> Iterator[dict]:
         """对外暴露的流式接口，返回 AgentLoop 已兼容的事件字典。
 
@@ -726,15 +896,26 @@ class LLMGateway:
         保证非 AgentLoop 调用方（consolidator/dream/tool_generator/result_bubble）
         无需改动也能正常工作。seq 标记同一 turn 内第几次 LLM 往返。
         """
-        request = self._build_request(messages, tools, trace_id)
+        request = self._build_request(messages, tools, trace_id, stream_timeout)
         adapter = self._adapters.get(request.api_type)
         if adapter is None:
             yield {"type": "error", "message": f"未知 API 类型: {request.api_type}"}
             return
 
         rate_key = f"{request.api_type}:{request.model}"
-        with self._limiter.acquire(rate_key):
-            yield from self._stream_with_retry(adapter, request, cancel_token, seq)
+        deadline = (
+            time.monotonic() + stream_timeout
+            if stream_timeout is not None and stream_timeout > 0
+            else None
+        )
+        with self._limiter.acquire(
+            rate_key, cancel_token=cancel_token, deadline=deadline
+        ) as acquired:
+            if not acquired:
+                return
+            yield from self._stream_with_retry(
+                adapter, request, cancel_token, seq, deadline=deadline
+            )
 
     def _stream_with_retry(
         self,
@@ -742,6 +923,8 @@ class LLMGateway:
         request: LLMRequest,
         cancel_token: CancellationToken | None = None,
         seq: int = 0,
+        *,
+        deadline: float | None = None,
     ) -> Iterator[dict]:
         """执行一次或多次 provider 调用。
 
@@ -755,7 +938,9 @@ class LLMGateway:
         ttft_ms: float | None = None
 
         for attempt in range(1, self._retry_policy.max_attempts + 1):
-            if _is_cancelled(cancel_token):
+            if _is_cancelled(cancel_token) or (
+                deadline is not None and time.monotonic() >= deadline
+            ):
                 self._write_log(request, t0, ttft_ms, retry_count, "cancelled", None, seq)
                 return
             streamed = False
@@ -780,6 +965,7 @@ class LLMGateway:
                         yield event
                         continue
                     if event_type == "error":
+                        event = sanitize_error_event(event)
                         final_error = event
                         can_retry = (
                             not streamed
@@ -789,7 +975,25 @@ class LLMGateway:
                         )
                         if can_retry:
                             retry_count += 1
-                            self._retry_policy.wait(attempt, event)
+                            self._retry_policy.wait(
+                                attempt,
+                                event,
+                                cancel_token=cancel_token,
+                                deadline=deadline,
+                            )
+                            if _is_cancelled(cancel_token) or (
+                                deadline is not None and time.monotonic() >= deadline
+                            ):
+                                self._write_log(
+                                    request,
+                                    t0,
+                                    ttft_ms,
+                                    retry_count,
+                                    "cancelled",
+                                    None,
+                                    seq,
+                                )
+                                return
                             retry_next_attempt = True
                             break
                         # 同 done：先写日志再 yield，否则消费者 break 后丢日志。
@@ -836,6 +1040,7 @@ class LLMGateway:
         usage: dict | None = None,
     ) -> None:
         """写一条脱敏 attempt 汇总日志，并按 trace_id 同步到 TraceStore。"""
+        safe_error = sanitize_error_event(error) if error else None
         record = {
             "trace_id": request.trace_id,
             "api_type": request.api_type,
@@ -848,10 +1053,10 @@ class LLMGateway:
             "latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
             "retry_count": retry_count,
             "status": status,
-            "error_type": error.get("error_type") if error else None,
-            "error_kind": error.get("error_kind") if error else None,
-            "error_status_code": error.get("status_code") if error else None,
-            "error_message": error.get("message") if error else None,
+            "error_type": safe_error.get("error_type") if safe_error else None,
+            "error_kind": safe_error.get("error_kind") if safe_error else None,
+            "error_status_code": safe_error.get("status_code") if safe_error else None,
+            "error_message": safe_error.get("message") if safe_error else None,
         }
         # token 用量（仅成功流末尾有），独立放进 record 供 sink 落库。
         if usage:
@@ -871,6 +1076,7 @@ class LLMGateway:
         messages: list[dict],
         tools: Optional[list[dict]],
         trace_id: str | None = None,
+        stream_timeout: float | None = None,
     ) -> LLMRequest:
         """把全局配置或 config_proxy 解析为 provider-neutral 请求。"""
         trace_id = trace_id or uuid.uuid4().hex
@@ -892,6 +1098,7 @@ class LLMGateway:
             top_p=cfg.get(cfg.topP),
             api_key=get_litellm_provider_api_key(provider) if provider else "",
             base_url=base_url,
+            stream_timeout=stream_timeout,
         )
 
     def _value(self, proxy_attr: str, config_item: Any) -> Any:
