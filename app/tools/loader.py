@@ -152,6 +152,13 @@ def load_user_script_tools(
             continue
         try:
             adapter = ScriptToolAdapter.from_manifest(manifest_path)
+            if registry.get(adapter.name) is not None:
+                logger.warning(
+                    "Skip user tool %s: name %s conflicts with an existing tool",
+                    tool_dir.name,
+                    adapter.name,
+                )
+                continue
             registry.register(adapter)
             registered.append(adapter.name)
         except Exception:
