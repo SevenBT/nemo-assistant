@@ -10,8 +10,8 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QDesktopServices, QPainter
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QDesktopServices, QKeyEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
+    CheckBox,
     FluentIcon,
     IconWidget,
     ListWidget,
@@ -38,7 +39,6 @@ if TYPE_CHECKING:
     from app.tools.registry import ToolRegistry
 
 from app.i18n import t
-from app.ui import style
 from app.tools.registry import HIGH_RISK_TOOLS
 from app.tools.script_adapter import ScriptToolAdapter
 
@@ -71,63 +71,55 @@ def _icon_for(name: str) -> FluentIcon:
 # PLACEHOLDER_CARD
 
 
-class _StatusDot(QWidget):
-    """工具启用状态指示灯,兼作开关。
+class _StatusDot(CheckBox):
+    """Accessible text-and-checked-state control for a tool's enabled status."""
 
-    绿点=启用,灰点=禁用,点击切换。前置条件缺失(unavailable)时置灰且不可点。
-    比 SwitchButton 更轻量,宽度固定,便于整列对齐。
-    """
-
-    _DIAMETER = 12
-
-    clicked = pyqtSignal()
-
-    def __init__(self, checked: bool, enabled: bool, parent=None):
-        super().__init__(parent)
-        self._checked = checked
+    def __init__(
+        self,
+        checked: bool,
+        enabled: bool,
+        tool_name: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent=parent)
+        self._tool_name = tool_name
         self._interactive = enabled
-        self.setFixedSize(self._DIAMETER + 4, self._DIAMETER + 4)
-        if enabled:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._refresh_tooltip()
+        self.setEnabled(enabled)
+        self.setChecked(checked)
+        self.setText(t("workshop.status.enabled" if checked else "workshop.status.disabled"))
+        self.stateChanged.connect(self._refresh_accessibility)
+        self._refresh_accessibility()
+        self.setMinimumSize(24, 24)
+        self.setFixedHeight(24)
+        self.setStyleSheet("min-height: 24px; max-height: 24px;")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-    def _refresh_tooltip(self):
-        # 可交互时按当前状态给出本地化提示；不可用时的原因由调用方设置。
-        if self._interactive:
-            key = "workshop.tip.enabled" if self._checked else "workshop.tip.disabled"
-            self.setToolTip(t(key))
+    def _refresh_accessibility(self) -> None:
+        state_key = "workshop.status.enabled" if self.isChecked() else "workshop.status.disabled"
+        state = t(state_key)
+        self.setText(state)
+        self.setToolTip(t("workshop.tip.enabled" if self.isChecked() else "workshop.tip.disabled"))
+        self.setAccessibleName(
+            t("workshop.a11y.status_toggle", name=self._tool_name, state=state)
+        )
+        self.setAccessibleDescription(
+            t("workshop.a11y.status_toggle_description", state=state)
+        )
 
-    def setChecked(self, checked: bool):
-        if checked != self._checked:
-            self._checked = checked
-            self._refresh_tooltip()
-            self.update()
+    def event(self, event: QEvent) -> bool:
+        if (
+            isinstance(event, QKeyEvent)
+            and event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}
+        ):
+            if event.type() == QEvent.Type.ShortcutOverride:
+                event.accept()
+                return True
+            if event.type() == QEvent.Type.KeyPress:
+                self.click()
+                event.accept()
+                return True
+        return super().event(event)
 
-    def isChecked(self) -> bool:
-        return self._checked
-
-    def mousePressEvent(self, event):
-        if self._interactive and event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(event)
-
-    def paintEvent(self, event):
-        theme = style.get_current_theme()
-        if not self._interactive:
-            color = QColor(theme["text_muted"])
-            color.setAlpha(90)
-        elif self._checked:
-            color = QColor(theme["success"])
-        else:
-            color = QColor(theme["text_muted"])
-            color.setAlpha(140)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
-        x = (self.width() - self._DIAMETER) // 2
-        y = (self.height() - self._DIAMETER) // 2
-        painter.drawEllipse(x, y, self._DIAMETER, self._DIAMETER)
 
 
 class _ToolCard(QWidget):
@@ -139,7 +131,7 @@ class _ToolCard(QWidget):
 
     toggled = pyqtSignal(str, bool)
 
-    def __init__(self, tool, switchable: bool, parent=None):
+    def __init__(self, tool, switchable: bool, parent=None) -> None:
         super().__init__(parent)
         self._name = tool.name
         self.setMinimumHeight(64)
@@ -156,7 +148,9 @@ class _ToolCard(QWidget):
         if switchable:
             reason = tool.unavailable_reason
             self._toggle = _StatusDot(
-                checked=tool.enabled, enabled=not reason,
+                checked=tool.enabled,
+                enabled=not reason,
+                tool_name=tool.name,
             )
             if reason:
                 # 前置条件缺失（如未配 API Key）：置灰不可点并说明原因，
@@ -180,8 +174,7 @@ class _ToolCard(QWidget):
         text.addWidget(self._desc_lbl)
         layout.addLayout(text, 1)
 
-    def _on_dot_clicked(self):
-        self._toggle.setChecked(not self._toggle.isChecked())
+    def _on_dot_clicked(self) -> None:
         self.toggled.emit(self._name, self._toggle.isChecked())
 
 
@@ -196,11 +189,11 @@ class _DetailPane(QWidget):
     folder_requested = pyqtSignal()
     delete_requested = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._build()
 
-    def _build(self):
+    def _build(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 14, 14)
         root.setSpacing(0)
@@ -209,6 +202,7 @@ class _DetailPane(QWidget):
         header.setSpacing(10)
         self._icon = IconWidget(FluentIcon.DEVELOPER_TOOLS)
         self._icon.setFixedSize(28, 28)
+        self._icon.setAccessibleName(t("workshop.a11y.detail_icon"))
         header.addWidget(self._icon)
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
@@ -236,6 +230,8 @@ class _DetailPane(QWidget):
         self._info_layout.setSpacing(14)
         self._params_section = self._make_section(t("workshop.detail.params"))
         self._info_layout.addWidget(self._params_section)
+        self._permissions_section = self._make_section(t("workshop.detail.permissions"))
+        self._info_layout.addWidget(self._permissions_section)
         self._deps_section = self._make_section(t("workshop.detail.deps"))
         self._info_layout.addWidget(self._deps_section)
         self._info_layout.addStretch()
@@ -283,11 +279,13 @@ class _DetailPane(QWidget):
         content = BodyLabel()
         content.setObjectName(f"_section_{title}")
         content.setWordWrap(True)
+        content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        content.setAccessibleName(title)
         layout.addWidget(content)
         return w
 
     # PLACEHOLDER_DETAIL_LOAD
-    def load(self, tool):
+    def load(self, tool: object) -> None:
         is_script = isinstance(tool, ScriptToolAdapter)
         self._icon.setIcon(_icon_for(tool.name))
         self._name_lbl.setText(tool.name)
@@ -297,8 +295,14 @@ class _DetailPane(QWidget):
             if tool.version:
                 meta.append(f"v{tool.version}")
             if tool.author:
-                meta.append(f"by {tool.author}")
-            self._meta_lbl.setText("  ·  ".join(meta) if meta else t("workshop.meta.my_tool"))
+                meta.append(t("workshop.meta.author", author=tool.author))
+            if tool.is_legacy_manifest is True:
+                meta.append(t("workshop.meta.legacy_unreviewed"))
+            elif tool.is_legacy_manifest is False:
+                meta.append(t("workshop.meta.strict_review_unknown"))
+            else:
+                meta.append(t("workshop.meta.review_unknown"))
+            self._meta_lbl.setText("  ·  ".join(meta))
         elif tool.name in HIGH_RISK_TOOLS:
             self._meta_lbl.setText(t("workshop.meta.builtin_highrisk"))
         else:
@@ -324,23 +328,55 @@ class _DetailPane(QWidget):
         else:
             params_lbl.setText(t("workshop.detail.no_params"))
 
+        permissions_lbl = self._permissions_section.findChildren(BodyLabel)[0]
+        if is_script:
+            self._permissions_section.show()
+            permissions = sorted(permission.value for permission in tool.permissions)
+            permissions_lbl.setText(
+                "\n".join(f"• {permission}" for permission in permissions)
+                if permissions
+                else t("workshop.detail.no_permissions")
+            )
+        else:
+            self._permissions_section.hide()
+
         # 依赖区仅对脚本工具有意义
         deps_lbl = self._deps_section.findChildren(BodyLabel)[0]
         if is_script:
             self._deps_section.show()
             if tool.dependencies:
-                deps_lbl.setText("  ".join(
-                    f"<span style='background:#F3F4F6;border-radius:4px;padding:2px 6px'>{d}</span>"
-                    for d in tool.dependencies
-                ))
-                deps_lbl.setTextFormat(Qt.TextFormat.RichText)
+                missing = frozenset(tool.missing_dependencies)
+                dependency_text = "\n".join(
+                    t(
+                        "workshop.detail.dependency_row",
+                        dependency=dependency,
+                        status=t(
+                            "workshop.detail.dependency_missing"
+                            if dependency in missing
+                            else "workshop.detail.dependency_installed"
+                        ),
+                    )
+                    for dependency in tool.dependencies
+                )
             else:
-                deps_lbl.setText(t("workshop.detail.no_deps"))
+                dependency_text = t("workshop.detail.no_deps")
+            dependency_notice = t(
+                "workshop.detail.legacy_deps_warning"
+                if tool.is_legacy_manifest
+                else "workshop.detail.strict_deps_notice"
+            )
+            deps_lbl.setText(f"{dependency_text}\n{dependency_notice}")
+            deps_lbl.setTextFormat(Qt.TextFormat.PlainText)
         else:
             self._deps_section.hide()
 
-        # 操作区仅脚本工具可见
+        # 操作区仅脚本工具可见；严格工具不能进入旧版直接写编辑器。
         self._actions.setVisible(is_script)
+        can_legacy_edit = is_script and tool.is_legacy_manifest is True
+        self._edit_btn.setEnabled(can_legacy_edit)
+        self._edit_btn.setToolTip(
+            "" if can_legacy_edit else t("workshop.action.strict_edit_disabled")
+        )
 
 
 # PLACEHOLDER_PANEL
@@ -351,7 +387,7 @@ class ToolboxPanel(QWidget):
 
     tool_toggled = pyqtSignal(str, bool)
 
-    def __init__(self, registry: "ToolRegistry", parent=None):
+    def __init__(self, registry: ToolRegistry, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._registry = registry
         self._current_tool = None
@@ -365,7 +401,7 @@ class ToolboxPanel(QWidget):
         self._apply_font_size()
         cfg.navigationFontSize.valueChanged.connect(self._apply_font_size)
 
-    def _apply_font_size(self, _value=None):
+    def _apply_font_size(self, _value: object = None) -> None:
         from app.core.config import cfg
         from PyQt6.QtGui import QFont  # noqa: F401
         size = cfg.get(cfg.navigationFontSize)
@@ -373,7 +409,7 @@ class ToolboxPanel(QWidget):
         font.setPixelSize(size)
         self._list.setFont(font)
 
-    def _build(self):
+    def _build(self) -> None:
         from PyQt6.QtWidgets import QSplitter
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -403,16 +439,19 @@ class ToolboxPanel(QWidget):
         new_btn = TransparentToolButton(FluentIcon.ADD)
         new_btn.setFixedSize(30, 30)
         new_btn.setToolTip(t("workshop.tip.new"))
+        new_btn.setAccessibleName(t("workshop.tip.new"))
         new_btn.clicked.connect(self._on_new_tool)
         header.addWidget(new_btn)
         gen_btn = TransparentToolButton(FluentIcon.ROBOT)
         gen_btn.setFixedSize(30, 30)
         gen_btn.setToolTip(t("workshop.tip.generate"))
+        gen_btn.setAccessibleName(t("workshop.tip.generate"))
         gen_btn.clicked.connect(self._on_generate_tool)
         header.addWidget(gen_btn)
         refresh_btn = TransparentToolButton(FluentIcon.SYNC)
         refresh_btn.setFixedSize(30, 30)
         refresh_btn.setToolTip(t("workshop.tip.refresh"))
+        refresh_btn.setAccessibleName(t("workshop.tip.refresh"))
         refresh_btn.clicked.connect(self.refresh)
         header.addWidget(refresh_btn)
         left_layout.addLayout(header)
@@ -447,11 +486,11 @@ class ToolboxPanel(QWidget):
         root.addWidget(self._splitter, 1)
 
     # PLACEHOLDER_PANEL_DATA
-    def refresh(self):
+    def refresh(self) -> None:
         self._reload_user_tools()
         self._load_list()
 
-    def _reload_user_tools(self):
+    def _reload_user_tools(self) -> None:
         """重新加载用户脚本工具(保留内置工具),并重新应用开关状态。"""
         from app.core.config import cfg, USER_TOOLS_DIR
         from app.tools.loader import load_user_script_tools
@@ -461,13 +500,13 @@ class ToolboxPanel(QWidget):
         load_user_script_tools(USER_TOOLS_DIR, self._registry)
         self._registry.apply_saved_states(cfg.get(cfg.toolStates))
 
-    def _add_group_header(self, text: str):
+    def _add_group_header(self, text: str) -> None:
         item = QListWidgetItem(text)
         item.setFlags(Qt.ItemFlag.NoItemFlags)  # 不可选中
         item.setData(Qt.ItemDataRole.UserRole, None)
         self._list.addItem(item)
 
-    def _add_tool_item(self, tool, switchable: bool):
+    def _add_tool_item(self, tool: object, switchable: bool) -> None:
         item = QListWidgetItem()
         item.setData(Qt.ItemDataRole.UserRole, tool.name)
         card = _ToolCard(tool, switchable=switchable)
@@ -477,7 +516,7 @@ class ToolboxPanel(QWidget):
         self._list.addItem(item)
         self._list.setItemWidget(item, card)
 
-    def _load_list(self):
+    def _load_list(self) -> None:
         self._list.clear()
         all_tools = self._registry.get_all()
         builtin = sorted(
@@ -510,7 +549,7 @@ class ToolboxPanel(QWidget):
                 self._list.setCurrentRow(i)
                 break
 
-    def _on_select(self, row: int):
+    def _on_select(self, row: int) -> None:
         if row < 0:
             self._detail_pane.hide()
             return
@@ -528,7 +567,7 @@ class ToolboxPanel(QWidget):
         self._detail_pane.load(tool)
         self._detail_pane.show()
 
-    def _on_tool_toggled(self, name: str, enabled: bool):
+    def _on_tool_toggled(self, name: str, enabled: bool) -> None:
         from app.core.config import cfg
         tool = self._registry.get(name)
         if tool is not None:
@@ -539,40 +578,59 @@ class ToolboxPanel(QWidget):
         self.tool_toggled.emit(name, enabled)
 
     # PLACEHOLDER_PANEL_ACTIONS
-    def _on_new_tool(self):
+    def _on_new_tool(self) -> None:
         from app.ui.tool_editor_dialog import ToolEditorDialog
         dlg = ToolEditorDialog(self._registry, parent=self)
         if dlg.exec():
             self.refresh()
 
-    def _on_generate_tool(self):
+    @pyqtSlot(str)
+    def _on_generated_tool_saved(self, name: str) -> None:
+        """Persist a successful generated-tool installation as enabled, then reload."""
+
+        from app.core.config import cfg
+
+        states = {**dict(cfg.get(cfg.toolStates)), name: True}
+        cfg.set(cfg.toolStates, states)
+        tool = self._registry.get(name)
+        if tool is not None:
+            tool.enabled = True
+        self.refresh()
+
+    def _on_generate_tool(self) -> None:
         from app.ui.tool_generate_dialog import ToolGenerateDialog
         dlg = ToolGenerateDialog(self._registry, parent=self)
-        dlg.tool_saved.connect(lambda _: self.refresh())
+        dlg.tool_saved.connect(self._on_generated_tool_saved)
         dlg.exec()
 
-    def _on_edit(self):
+    def _on_edit(self) -> None:
         if not isinstance(self._current_tool, ScriptToolAdapter):
+            return
+        if self._current_tool.is_legacy_manifest is not True:
+            self._detail_pane._edit_btn.setEnabled(False)
+            self._detail_pane._edit_btn.setToolTip(
+                t("workshop.action.strict_edit_disabled")
+            )
             return
         from app.ui.tool_editor_dialog import ToolEditorDialog
         dlg = ToolEditorDialog(self._registry, tool=self._current_tool, parent=self)
         if dlg.exec():
             self.refresh()
 
-    def _on_test(self):
+    def _on_test(self) -> None:
         if not self._current_tool:
             return
         from app.ui.tool_test_dialog import ToolTestDialog
         dlg = ToolTestDialog(self._current_tool, self._registry, parent=self)
         dlg.exec()
 
-    def _on_open_folder(self):
+    def _on_open_folder(self) -> None:
         if not isinstance(self._current_tool, ScriptToolAdapter):
             return
         from PyQt6.QtCore import QUrl
         QDesktopServices.openUrl(QUrl.fromLocalFile(self._current_tool.tool_dir))
 
-    def _on_delete(self):
+    def _on_delete(self) -> None:
         if not isinstance(self._current_tool, ScriptToolAdapter):
             return
         w = MessageBox(
@@ -586,7 +644,7 @@ class ToolboxPanel(QWidget):
                 shutil.rmtree(tool_dir)
             self.refresh()
 
-    def showEvent(self, event):
+    def showEvent(self, event: object) -> None:
         # 仅首次显示时加载；工具增删改由各对话框显式调用 refresh()。
         # 每次 showEvent 都整表重建会让切 tab 时列表与详情区跳动。
         if not self._loaded:
@@ -594,7 +652,7 @@ class ToolboxPanel(QWidget):
             self._loaded = True
         super().showEvent(event)
 
-    def toggle_list(self):
+    def toggle_list(self) -> None:
         """切换工具列表显示(由 TitleBar 调用)。"""
         sizes = self._splitter.sizes()
         total = sum(sizes)
@@ -612,7 +670,7 @@ class ToolboxPanel(QWidget):
             width = self._saved_list_width or 220
             self._splitter.setSizes([width, total - width])
 
-    def apply_search(self, keyword: str):
+    def apply_search(self, keyword: str) -> None:
         """按关键字过滤工具列表(由 TitleBar 调用)。"""
         kw = keyword.lower()
         for i in range(self._list.count()):
