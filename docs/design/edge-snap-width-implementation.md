@@ -130,7 +130,7 @@ python test_edge_snap_width.py
 
 - [x] 修改 `app/core/config.py` 添加配置项
 - [x] 修改 `app/ui/edge_snap.py` 添加宽度检查逻辑
-- [x] 修改 `app/ui/settings_dialog.py` 添加设置界面
+- [x] 修改 `app/ui/settings_window.py` 添加设置界面
 - [x] 创建测试脚本 `test_edge_snap_width.py`
 - [x] 创建功能文档 `docs/edge-snap-width-threshold.md`
 - [x] 运行测试验证功能正确性
