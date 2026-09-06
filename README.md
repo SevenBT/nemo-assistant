@@ -78,8 +78,8 @@ Screenshot support is built into the floating-window workflow rather than delega
 ### 📝 Notes & Stickies
 
 - **Desktop stickies**: press `Ctrl+Alt+N` to create a floating sticky note with automatic saving.
-- **Notebook**: supports Markdown, folders, tags, full-text search, `[[wiki links]]`, and syntax highlighting.
-- **AI collaboration**: chat can read, create, and update notes, and important information can be saved as long-term memory.
+- **Notebook**: supports Markdown, folders, tags, keyword search, `[[wiki links]]`, and syntax highlighting.
+- **AI collaboration**: chat can read and create notes, and important information can be saved as long-term memory.
 
 <p align="center">
   <img src="assets/screenshots/notes-and-stickies.png" alt="Notes and stickies" width="860">
