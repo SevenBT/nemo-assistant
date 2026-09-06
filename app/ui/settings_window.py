@@ -140,6 +140,12 @@ class SettingsWindow(QDialog):
         )
 
     def _on_nav_changed(self, index: int):
+        # 切换页面前保存当前页的设置
+        current_index = self._stack.currentIndex()
+        if current_index >= 0:
+            current_widget = self._stack.widget(current_index)
+            if hasattr(current_widget, 'save'):
+                current_widget.save()
         self._stack.setCurrentIndex(index)
 
     def accept(self):
