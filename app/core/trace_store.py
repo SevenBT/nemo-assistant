@@ -137,6 +137,7 @@ class TraceStore:
                     completion_tokens INTEGER,
                     total_tokens      INTEGER,
                     cached_tokens     INTEGER,
+                    cost_usd      REAL,
                     created_at   TEXT NOT NULL
                 );
 
@@ -252,6 +253,7 @@ class TraceStore:
                 ("completion_tokens", "INTEGER"),
                 ("total_tokens", "INTEGER"),
                 ("cached_tokens", "INTEGER"),
+                ("cost_usd", "REAL"),
             ],
         }
         for table, cols in new_cols.items():
@@ -319,13 +321,29 @@ class TraceStore:
         if not self.enabled:
             return
         usage = record.get("usage") or {}
+
+        # 计算成本
+        cost_usd = None
+        provider = record.get("provider")
+        model = record.get("model")
+        if provider and model and usage:
+            try:
+                from app.core.cost_calculator import calculate_cost_from_usage
+                cost_usd = calculate_cost_from_usage(
+                    provider=provider,
+                    model=model,
+                    usage=usage,
+                )
+            except Exception as e:
+                logger.debug(f"[TraceStore] Cost calculation failed: {e}")
+
         self._write(
             "INSERT INTO llm_calls (trace_id, seq, api_type, provider, model, "
             "has_tools, input_message_count, ttft_ms, latency_ms, retry_count, "
             "status, error_type, error_kind, error_status_code, error_message, "
-            "prompt_tokens, completion_tokens, total_tokens, cached_tokens, "
+            "prompt_tokens, completion_tokens, total_tokens, cached_tokens, cost_usd, "
             "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-            "?, ?, ?, ?, ?)",
+            "?, ?, ?, ?, ?, ?)",
             (
                 trace_id,
                 seq,
@@ -346,6 +364,7 @@ class TraceStore:
                 usage.get("completion_tokens"),
                 usage.get("total_tokens"),
                 usage.get("cached_tokens"),
+                cost_usd,
                 _now_iso(),
             ),
         )
