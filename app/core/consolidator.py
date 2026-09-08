@@ -2,7 +2,7 @@
 Consolidator — 对话 token 超限时自动压缩旧消息为摘要。
 
 工作流程：
-  1. 每轮对话前检查当前 session 消息的 token 估算值
+  1. 每轮对话前检查当前 session 消息的 token 精确计数（使用 tiktoken）
   2. 超过阈值时，取最旧的一批消息
   3. 调用 LLM 生成摘要
   4. 摘要存入 memories 表 (category=archive)
@@ -10,11 +10,11 @@ Consolidator — 对话 token 超限时自动压缩旧消息为摘要。
 """
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import TYPE_CHECKING
 
+from app.core.context_manager import ContextManager
 from app.models.memory import MemoryCategory, MemoryScope
 
 if TYPE_CHECKING:
@@ -37,37 +37,8 @@ _CONSOLIDATION_PROMPT = """你是对话摘要助手。请将以下对话内容�
 """
 
 
-def _estimate_tokens(text: str) -> int:
-    """粗略估算 token 数：中文约 1.5 字/token，英文约 4 字符/token。"""
-    chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-    other_chars = len(text) - chinese_chars
-    return int(chinese_chars / 1.5 + other_chars / 4)
-
-
-def _message_token_text(m: "Message") -> str:
-    """单条消息用于 token 估算的全部文本：含 content + tool_calls(参数+结果)。
-
-    仅用 m.content 会严重低估 —— assistant 的 tool_calls(arguments)、tool 角色的
-    结果 JSON 往往体量很大，漏算会导致压缩触发过晚、实际超出上下文窗口。
-    """
-    parts = [m.content or ""]
-    for tc in getattr(m, "tool_calls", None) or []:
-        args = getattr(tc, "arguments", None)
-        result = getattr(tc, "result", None)
-        if args:
-            parts.append(json.dumps(args, ensure_ascii=False))
-        if result:
-            parts.append(json.dumps(result, ensure_ascii=False))
-    return "\n".join(p for p in parts if p)
-
-
-def _estimate_messages_tokens(messages: list["Message"]) -> int:
-    """估算整段消息的 token 总量（含 tool_calls）。"""
-    return _estimate_tokens("\n".join(_message_token_text(m) for m in messages))
-
-
 def _messages_to_text(messages: list["Message"]) -> str:
-    """将消息列表转为纯文本用于摘要。"""
+    """将消息列表转为纯文本用于摘要（不包含 tool_calls，避免摘要过长）。"""
     lines = []
     for m in messages:
         role_label = {"user": "用户", "assistant": "AI", "system": "系统"}.get(m.role, m.role)
@@ -83,13 +54,20 @@ class Consolidator:
         self,
         llm_gateway: "LLMGateway",
         memory_mgr: "MemoryManager",
-        max_context_tokens: int = 60000,
+        model: str = "default",
         consolidation_ratio: float = 0.5,
     ):
+        """
+        Args:
+            llm_gateway: LLM 网关
+            memory_mgr: 记忆管理器
+            model: 模型名称（用于确定上下文窗口和 encoding）
+            consolidation_ratio: 压缩后的目标 token 占比（默认 50%）
+        """
         self._llm = llm_gateway
         self._mem = memory_mgr
-        self._max_tokens = max_context_tokens
-        self._ratio = consolidation_ratio  # 压缩后目标占比
+        self._ratio = consolidation_ratio
+        self._ctx_mgr = ContextManager(model=model, reserve_ratio=0.2)
 
     def maybe_consolidate(
         self,
@@ -103,29 +81,20 @@ class Consolidator:
         如果压缩成功，返回 [摘要系统消息] + 保留的近期消息。
         如果 LLM 调用失败，做 raw 截断。
         """
-        estimated_tokens = _estimate_messages_tokens(messages)
-
-        threshold = int(self._max_tokens * 0.7)
-        if estimated_tokens <= threshold:
+        # 使用 ContextManager 判断是否需要压缩
+        if not self._ctx_mgr.should_consolidate(messages, threshold_ratio=0.7):
             return messages
 
-        logger.info(
-            f"[Consolidator] token 估算 {estimated_tokens} > 阈值 {threshold}，开始压缩"
-        )
+        current_tokens = self._ctx_mgr.count_messages_tokens(messages)
+        logger.info(f"[Consolidator] Token count {current_tokens} exceeds threshold, starting consolidation")
 
         # 计算需要保留多少消息（目标：压缩到 50%）
-        target_tokens = int(self._max_tokens * self._ratio)
-        keep_count = len(messages)
-        running_tokens = estimated_tokens
-        for i, m in enumerate(messages):
-            msg_tokens = _estimate_tokens(_message_token_text(m))
-            running_tokens -= msg_tokens
-            if running_tokens <= target_tokens:
-                keep_count = len(messages) - i - 1
-                break
+        keep_count = self._ctx_mgr.calculate_keep_count(
+            messages,
+            target_ratio=self._ratio,
+            min_keep=4,
+        )
 
-        # 至少保留最近 4 条消息
-        keep_count = max(keep_count, 4)
         if keep_count >= len(messages):
             return messages
 
@@ -146,12 +115,13 @@ class Consolidator:
         )
 
         logger.info(
-            f"[Consolidator] 压缩 {len(to_compress)} 条消息 → 摘要 {len(summary)} 字符，"
-            f"保留 {len(to_keep)} 条"
+            f"[Consolidator] Compressed {len(to_compress)} messages → summary {len(summary)} chars, "
+            f"keeping {len(to_keep)} messages"
         )
 
         # 构造摘要消息插入到保留消息前面
         from app.models.message import Message, MessageRole
+
         summary_msg = Message(
             role=MessageRole.SYSTEM,
             content=f"[以下是之前对话的摘要]\n{summary}",
@@ -178,7 +148,7 @@ class Consolidator:
             if summary:
                 return summary
         except Exception as e:
-            logger.warning(f"[Consolidator] LLM 摘要失败: {e}，使用 raw 截断")
+            logger.warning(f"[Consolidator] LLM summarization failed: {e}, using raw truncation")
 
         # fallback: 取每条消息的前 100 字符
         lines = []
