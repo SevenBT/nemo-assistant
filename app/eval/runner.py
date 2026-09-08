@@ -18,6 +18,7 @@ import uuid
 from typing import Any, Callable
 
 from app.core.agent_loop import AgentLoop
+from app.core.audit_hooks import EvalHook
 from app.eval import metrics, rule_checks
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ def _run_one_case(
         session_id="",  # 评测重跑不归属任何真实会话
         max_turns=max_turns,
         trace_store=trace_store,
-        hooks=None,  # 重跑不需要安全/埋点 hook，trace 已自动落库
+        hooks=[EvalHook(trace_store)],  # EvalHook 写入 eval_samples 供 judge 使用
     )
     loop.run()  # 同步执行，阻塞至本 turn 结束
     trace_id = loop._trace_id  # AgentLoop 为本次 run 生成的统一 trace_id
