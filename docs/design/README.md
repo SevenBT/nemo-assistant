@@ -13,7 +13,6 @@ shipped behavior — check each document's header.
 | [file-upload-implementation](file-upload-implementation.md) | Drag-and-drop file upload implementation |
 | [memory-module-design](memory-module-design.md) | Long-term memory module design |
 | [prd-model-settings](prd-model-settings.md) | Model settings & system prompt design |
-| [llm-evaluation](llm-evaluation.md) | AI application evaluation methodology |
 | [security-eval-guide](security-eval-guide.md) | Observability / security / eval walkthrough |
 | [local-rag-plan](local-rag-plan.md) | Local knowledge base (RAG) plan — design draft, not yet implemented |
 | [current-codebase-improvement-plan](current-codebase-improvement-plan.md) | Current codebase improvement plan — review draft, no implementation yet |
