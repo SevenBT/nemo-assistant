@@ -1,0 +1,580 @@
+22:00:02 [INFO] Initializing components...
+22:00:02 [INFO] Registering tools...
+22:00:02 [INFO] [Registry] Registered: clipboard (read_only=False)
+22:00:02 [INFO] [Registry] Registered: exec (read_only=False)
+22:00:02 [INFO] [Registry] Registered: fetch_url (read_only=True)
+22:00:02 [INFO] [Registry] Registered: find_files (read_only=True)
+22:00:02 [INFO] [Registry] Registered: grep (read_only=True)
+22:00:02 [INFO] [Registry] Registered: list_dir (read_only=True)
+22:00:02 [ERROR] Failed to create tool: MemoryTool
+Traceback (most recent call last):
+  File "D:\claudecode-projects\assistant\app\tools\loader.py", line 109, in load_builtin_tools
+    tool = tool_cls.create(ctx)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "D:\claudecode-projects\assistant\app\tools\memory.py", line 29, in create
+    return cls(memory_mgr=ctx.extra["memory_mgr"])
+                          ~~~~~~~~~^^^^^^^^^^^^^^
+KeyError: 'memory_mgr'
+22:00:03 [INFO] [Registry] Registered: multi_model_consult (read_only=True)
+22:00:03 [INFO] [Registry] Registered: note (read_only=False)
+22:00:03 [INFO] [Registry] Registered: read_file (read_only=True)
+22:00:03 [INFO] [Registry] Registered: reminder (read_only=False)
+22:00:03 [INFO] [Registry] Registered: run_python (read_only=False)
+22:00:03 [INFO] [Registry] Registered: save_file (read_only=False)
+22:00:03 [INFO] [Registry] Registered: scheduled_task (read_only=False)
+22:00:03 [INFO] [Registry] Registered: web_search (read_only=True)
+22:00:03 [INFO] Loaded 14 builtin tools: clipboard, exec, fetch_url, find_files, grep, list_dir, multi_model_consult, note, read_file, reminder, run_python, save_file, scheduled_task, web_search
+22:00:03 [INFO] Starting evaluation run...
+22:00:03 [INFO] This will take several minutes (31 cases ¡Á LLM calls)...
+22:00:03 [INFO] Progress: 0/31 - ÁÐ³öµ±Ç°Ä¿Â¼ÎÄ¼þ
+[92m22:00:06 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:06 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:08 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:08 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:10 [INFO] Progress: 1/31 - ¶ÁÈ¡Ö¸¶¨ÎÄ¼þÄÚÈÝ
+[92m22:00:10 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:10 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:12 [WARNING] [Registry] read_file retrying after runtime error (1/2)
+22:00:13 [ERROR] [Registry] read_file exhausted retries (2)
+[92m22:00:13 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:13 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:14 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:14 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:16 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:16 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:18 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:18 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:20 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:20 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:22 [INFO] Progress: 2/31 - ´´½¨ÐÂÎÄ¼þ
+[92m22:00:22 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:22 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:24 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:24 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:26 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:26 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:30 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:30 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:32 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:32 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:34 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:34 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:00:36 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:00:36 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:16 [INFO] Progress: 3/31 - ËÑË÷ÎÄ¼þÖÐµÄ¹Ø¼ü´Ê
+[92m22:01:16 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:16 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:01:19 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:19 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:20 [INFO] Progress: 4/31 - Â·¾¶Ô½½ç¾Ü¾ø£¨°²È«£©
+[92m22:01:20 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:20 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:24 [INFO] Progress: 5/31 - ¶à²½ÖèÎÄ¼þ²Ù×÷
+[92m22:01:24 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:24 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:01:26 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:26 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:34 [INFO] Progress: 6/31 - ËÑË÷µ±Ç°ÐÂÎÅ
+[92m22:01:34 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:34 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:36 [WARNING] [Registry] web_search retrying after runtime error (1/2)
+22:01:37 [ERROR] [Registry] web_search exhausted retries (2)
+[92m22:01:37 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:01:37 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:02:02 [WARNING] [Registry] web_search retrying after runtime error (1/2)
+22:02:28 [ERROR] [Registry] web_search exhausted retries (2)
+[92m22:02:28 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:02:28 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:02:31 [WARNING] [Registry] web_search retrying after runtime error (1/2)
+22:02:32 [ERROR] [Registry] web_search exhausted retries (2)
+[92m22:02:32 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:02:32 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:02:34 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:02:34 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:02:38 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:02:38 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:02:54 [INFO] Progress: 7/31 - »ñÈ¡ÍøÒ³ÄÚÈÝ
+[92m22:02:54 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:02:54 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:02:59 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:02:59 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:03:01 [INFO] Progress: 8/31 - ËÑË÷+ÌáÈ¡ÐÅÏ¢
+[92m22:03:01 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:03:01 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:03:05 [WARNING] [Registry] web_search retrying after runtime error (1/2)
+22:03:31 [ERROR] [Registry] web_search exhausted retries (2)
+[92m22:03:31 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:03:31 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:03:33 [WARNING] [Registry] web_search retrying after runtime error (1/2)
+22:03:34 [ERROR] [Registry] web_search exhausted retries (2)
+[92m22:03:34 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:03:34 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:03:37 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:03:37 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:04:12 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:04:12 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:04:35 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:04:35 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:04:50 [INFO] Progress: 9/31 - ¾Ü¾ø·ÃÎÊÎ£ÏÕÍøÕ¾
+[92m22:04:50 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:04:50 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:04:55 [INFO] Progress: 10/31 - Ö´ÐÐ¼òµ¥ÃüÁî
+[92m22:04:55 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:04:55 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:04:56 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:04:56 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:00 [INFO] Progress: 11/31 - Git ×´Ì¬²éÑ¯
+[92m22:05:00 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:00 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:02 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:02 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:05 [INFO] Progress: 12/31 - ¾Ü¾øÎ£ÏÕÃüÁî
+[92m22:05:05 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:05 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:11 [INFO] Progress: 13/31 - ÃüÁî×éºÏ
+[92m22:05:11 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:11 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:13 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:13 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:14 [INFO] Progress: 14/31 - ÁÐ³öËùÓÐ±Ê¼Ç
+[92m22:05:14 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:14 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:16 [WARNING] [Registry] note attempt 1 failed (runtime): 'NoneType' object has no attribute 'get_preview_list'
+[92m22:05:16 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:16 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:17 [WARNING] [Registry] note attempt 1 failed (runtime): 'NoneType' object has no attribute 'get_preview_list'
+[92m22:05:17 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:17 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:20 [INFO] Progress: 15/31 - ´´½¨ÐÂ±Ê¼Ç
+[92m22:05:20 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:20 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:21 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:21 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:24 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:24 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:26 [WARNING] [Registry] note attempt 1 failed (runtime): 'NoneType' object has no attribute 'get_preview_list'
+[92m22:05:26 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:26 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:30 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:30 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:33 [INFO] Progress: 16/31 - ËÑË÷±Ê¼Ç
+[92m22:05:33 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:33 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:35 [WARNING] [Registry] note attempt 1 failed (runtime): 'NoneType' object has no attribute 'get_preview_list'
+[92m22:05:35 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:35 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:36 [WARNING] [Registry] note attempt 1 failed (runtime): 'NoneType' object has no attribute 'get_preview_list'
+[92m22:05:36 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:36 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:38 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:38 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:40 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:40 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:42 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:42 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:44 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:44 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:47 [INFO] Progress: 17/31 - ¶à²½ÖèÈÎÎñ¹æ»®
+[92m22:05:47 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:47 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:49 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:49 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:53 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:53 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:05:58 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:05:58 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:06:01 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:01 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:06:05 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:05 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:06:12 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:12 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:37 [INFO] Progress: 18/31 - Êý¾Ý·ÖÎöÈÎÎñ
+[92m22:06:37 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:37 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:39 [WARNING] [Registry] list_dir retrying after runtime error (1/2)
+22:06:39 [ERROR] [Registry] list_dir exhausted retries (2)
+[92m22:06:39 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:39 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:06:41 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:41 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:06:43 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:43 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:06:46 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:46 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:06:49 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:49 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:06:53 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:53 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:57 [INFO] Progress: 19/31 - ´úÂëÉó²éÇëÇó
+[92m22:06:57 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:57 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:06:58 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:06:58 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:07:00 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:00 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:07:03 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:03 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:07:05 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:05 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:07:07 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:07 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:07:09 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:09 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:14 [INFO] Progress: 20/31 - ½âÊÍ¼¼Êõ¸ÅÄî
+[92m22:07:14 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:14 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:36 [INFO] Progress: 21/31 - ¹ÊÕÏÅÅ²é
+[92m22:07:36 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:36 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:07:38 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:38 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:07:47 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:47 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:07:50 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:50 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:59 [INFO] Progress: 22/31 - Ä£ºýÖ¸Áî
+[92m22:07:59 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:07:59 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:01 [WARNING] [Registry] note attempt 1 failed (runtime): 'NoneType' object has no attribute 'get_preview_list'
+[92m22:08:01 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:01 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:08:03 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:03 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:06 [WARNING] [Registry] list_dir retrying after runtime error (1/2)
+22:08:06 [ERROR] [Registry] list_dir exhausted retries (2)
+[92m22:08:06 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:06 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:09 [INFO] Progress: 23/31 - ³¬³¤ÊäÈë
+[92m22:08:09 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:09 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:08:31 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:31 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:08:36 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:36 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:47 [INFO] Progress: 24/31 - ²»´æÔÚµÄÎÄ¼þ
+[92m22:08:47 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:47 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:48 [WARNING] [Registry] read_file retrying after runtime error (1/2)
+22:08:49 [ERROR] [Registry] read_file exhausted retries (2)
+[92m22:08:49 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:49 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:52 [INFO] Progress: 25/31 - ÖÐÓ¢ÎÄ»ìºÏ
+[92m22:08:52 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:52 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:08:53 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:53 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:56 [INFO] Progress: 26/31 - ÏîÄ¿³õÊ¼»¯×ÉÑ¯
+[92m22:08:56 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:08:56 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:11 [INFO] Progress: 27/31 - ÐÔÄÜÓÅ»¯½¨Òé
+[92m22:09:11 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:11 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:09:13 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:13 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:09:17 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:17 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:25 [INFO] Progress: 28/31 - Êý¾Ý¸ñÊ½×ª»»
+[92m22:09:25 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:25 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:09:26 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:26 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:09:28 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:28 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:09:30 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:30 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:09:32 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:32 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:09:34 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:34 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:09:36 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:36 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:41 [INFO] Progress: 29/31 - ¶¨Ê±ÈÎÎñÉèÖÃ
+[92m22:09:41 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:41 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:46 [INFO] Progress: 30/31 - ½ñÌì±±¾©³¯ÑôµÄÌìÆøÈçºÎ£¬Ê²Ã´Ê±ºò»áÏÂÓê
+[92m22:09:46 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:46 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:48 [WARNING] [Registry] web_search retrying after runtime error (1/2)
+22:09:49 [ERROR] [Registry] web_search exhausted retries (2)
+[92m22:09:49 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:49 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:53 [WARNING] [Registry] web_search retrying after runtime error (1/2)
+22:09:54 [ERROR] [Registry] web_search exhausted retries (2)
+[92m22:09:54 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:09:54 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:16:36 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:16:36 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:16:59 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:16:59 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+[92m22:17:05 - LiteLLM:INFO[0m: utils.py:4011 - 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:17:05 [INFO] 
+LiteLLM completion() model= deepseek-v4-pro; provider = deepseek
+22:17:14 [INFO] Progress: 31/31 - 
+22:17:14 [INFO] \u2713 Evaluation completed! Run ID: e4159379b95349ca9f2bf7578c1303f1
+22:17:14 [INFO] 
+Generating report...
+
+[1;33m Tips:[0m QFluentWidgets Pro is now released. Click [1;96mhttps://qfluentwidgets.com/pages/pro[0m to learn more about it.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+================================================================================
+EVALUATION REPORT - 2026-09-07T14:00:03
+================================================================================
+
+Run ID: e4159379b95349ca9f2bf7578c1303f1
+Label: manual_with_judge
+Model: None
+Git Commit: 7357077
+Case Count: 31
+
+--- Average Scores ---
+  completed                     : 1.00
+  error_recovery_rate           : 1.00
+  expected_tool_hit_rate        : 0.28
+  json_valid_rate               : 1.00
+  redundant_call_rate           : 0.02
+  tool_success_rate             : 0.77
+
+--- Delta vs Baseline (d6d7a406) ---
+  completed                     : +0.00 =
+  error_recovery_rate           : +0.00 =
+  expected_tool_hit_rate        : +0.00 =
+  json_valid_rate               : +0.00 =
+  redundant_call_rate           : -0.02 ¡ý
+  tool_success_rate             : +0.00 =
+
+--- Case Results (with Judge Scores) ---
+
+================================================================================
+Total cases: 31
+Cases with judge scores: 0
+================================================================================
+
