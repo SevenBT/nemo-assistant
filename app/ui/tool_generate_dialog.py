@@ -519,9 +519,9 @@ class ToolGenerateDialog(QDialog):
         ):
             return
         overrides = self._review_panel.acknowledged_overrides()
-        self._pending_install_context = (review, approvals, bool(overwrite), overrides)
+        self._pending_install_context = (review, frozenset(), bool(overwrite), overrides)
         self._start_build_operation(
-            "install", (review.build_id, approvals, bool(overwrite), overrides)
+            "install", (review.build_id, frozenset(), bool(overwrite), overrides)
         )
 
     def _start_build_operation(
