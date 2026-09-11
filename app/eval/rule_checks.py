@@ -103,16 +103,17 @@ def json_valid_rate(tool_calls: list[dict]) -> float | None:
     return valid / len(typed)
 
 
-def score_turn(turn_data: dict) -> dict[str, float]:
-    """对一次 run（TraceStore.get_turn 的返回）算全部确定性指标。
+def score_trace(trace_data: dict) -> dict[str, float]:
+    """对一次完整 Trace（TraceStore.get_trace 的返回）算全部确定性指标。
 
     返回只含「适用」维度（值非 None）的 dict——不适用的维度直接缺席，避免把
     「无工具调用」误读成「成功率 0」。completed 用 0/1 表示，便于和其它比率
     一起做平均与对比。
     """
-    turn = turn_data.get("turn") or {}
-    tool_calls = turn_data.get("tool_calls") or []
-    completed = (turn.get("status") == "ok")
+    # 兼容 V1/V2: turn/trace
+    trace = trace_data.get("trace") or trace_data.get("turn") or {}
+    tool_calls = trace_data.get("tool_calls") or []
+    completed = (trace.get("status") == "ok")
 
     raw = {
         DIM_TOOL_SUCCESS: tool_success_rate(tool_calls),
@@ -122,3 +123,8 @@ def score_turn(turn_data: dict) -> dict[str, float]:
         DIM_COMPLETED: 1.0 if completed else 0.0,
     }
     return {k: round(v, 4) for k, v in raw.items() if v is not None}
+
+
+def score_turn(turn_data: dict) -> dict[str, float]:
+    """[已废弃] 使用 score_trace() 代替。"""
+    return score_trace(turn_data)

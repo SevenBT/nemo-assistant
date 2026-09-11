@@ -31,8 +31,11 @@ _DEFAULT_DB_PATH = DATA_DIR / "traces.db"
 # 工具入参/结果可能含用户数据，回放需要看 I/O，但要防止超长记录撑爆库。
 _MAX_FIELD_CHARS = 2000
 
-# prune 默认保留的 turn 条数（按 started_at 倒序）。
-_DEFAULT_KEEP_TURNS = 2000
+# prune 默认保留的 trace 条数（按 started_at 倒序）。
+_DEFAULT_KEEP_TRACES = 2000
+
+# Schema 版本号：每次破坏性变更时递增
+_SCHEMA_VERSION = 2  # V2: turns→traces, turn→turn_index, run_id→eval_run_id 等
 
 
 def _now_iso() -> str:
@@ -100,6 +103,21 @@ class TraceStore:
     def _ensure_schema(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
+            # 创建 schema_version 表（如果不存在）
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.commit()
+
+            # 检查当前版本
+            current_version = self._get_schema_version(conn)
+
+            # 创建基础表结构（V1 兼容名称）
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS turns (
@@ -236,11 +254,58 @@ class TraceStore:
                 """
             )
             conn.commit()
-            self._migrate(conn)
+
+            # 执行迁移（如需要）
+            if current_version < _SCHEMA_VERSION:
+                logger.info(f"[TraceStore] Migrating schema from v{current_version} to v{_SCHEMA_VERSION}")
+                self._backup_database()
+                self._migrate(conn, current_version)
+                self._set_schema_version(conn, _SCHEMA_VERSION)
 
     @staticmethod
-    def _migrate(conn: sqlite3.Connection) -> None:
-        """对早于 token 统计的旧库补列（CREATE TABLE IF NOT EXISTS 不会加列）。"""
+    def _get_schema_version(conn: sqlite3.Connection) -> int:
+        """获取当前 schema 版本号。"""
+        try:
+            row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+            return row[0] if row[0] is not None else 0
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+        """记录新的 schema 版本。"""
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (version, _now_iso()),
+        )
+        conn.commit()
+
+    def _backup_database(self) -> None:
+        """备份数据库文件（迁移前自动备份）。"""
+        if not self._path.exists():
+            return
+        import shutil
+        backup_path = self._path.with_suffix(f".backup.{int(time.time())}.db")
+        try:
+            shutil.copy2(self._path, backup_path)
+            logger.info(f"[TraceStore] Database backed up to {backup_path}")
+        except Exception:
+            logger.exception("[TraceStore] Database backup failed")
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
+        """执行数据库迁移。"""
+        # V0 → V1: 补充 token 统计列
+        if from_version < 1:
+            TraceStore._migrate_v1_token_columns(conn)
+
+        # V1 → V2: turns→traces, turn→turn_index, run_id→eval_run_id 等
+        if from_version < 2:
+            TraceStore._migrate_v2_naming(conn)
+
+    @staticmethod
+    def _migrate_v1_token_columns(conn: sqlite3.Connection) -> None:
+        """V1: 补充 token 统计列（兼容旧版本）。"""
         new_cols = {
             "turns": [
                 ("prompt_tokens", "INTEGER NOT NULL DEFAULT 0"),
@@ -252,6 +317,7 @@ class TraceStore:
                 ("completion_tokens", "INTEGER"),
                 ("total_tokens", "INTEGER"),
                 ("cached_tokens", "INTEGER"),
+                ("cost_usd", "REAL"),
             ],
         }
         for table, cols in new_cols.items():
@@ -261,18 +327,137 @@ class TraceStore:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
         conn.commit()
 
+    @staticmethod
+    def _migrate_v2_naming(conn: sqlite3.Connection) -> None:
+        """V2: 统一 Trace/Turn 命名规范。
+
+        变更清单：
+        1. turns 表 → traces
+        2. eval_samples.turn → turn_index
+        3. eval_samples.id → eval_sample_id
+        4. eval_runs.run_id → eval_run_id
+        5. eval_runs.baseline_run_id → baseline_eval_run_id
+        6. eval_results.id → eval_result_id
+        7. eval_results.run_id → eval_run_id
+        """
+        # 检查是否已迁移（通过检查表名）
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+
+        # 1. turns → traces
+        if 'turns' in tables and 'traces' not in tables:
+            conn.execute("ALTER TABLE turns RENAME TO traces")
+            # 重建索引（旧索引名会失效）
+            conn.execute("DROP INDEX IF EXISTS idx_turns_session")
+            conn.execute("DROP INDEX IF EXISTS idx_turns_started")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_session ON traces(session_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_started ON traces(started_at DESC)")
+
+        # 2-3. eval_samples: turn → turn_index, id → eval_sample_id
+        if 'eval_samples' in tables:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(eval_samples)").fetchall()}
+            if 'turn' in cols or 'id' in cols:
+                # 需要重建表（SQLite 不支持重命名主键列）
+                conn.execute("""
+                    CREATE TABLE eval_samples_new (
+                        eval_sample_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        trace_id    TEXT NOT NULL,
+                        turn_index  INTEGER NOT NULL,
+                        answer      TEXT,
+                        tool_count  INTEGER NOT NULL DEFAULT 0,
+                        error_count INTEGER NOT NULL DEFAULT 0,
+                        had_error   INTEGER NOT NULL DEFAULT 0,
+                        scores      TEXT,
+                        created_at  TEXT NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO eval_samples_new
+                    SELECT id, trace_id, turn, answer, tool_count, error_count, had_error, scores, created_at
+                    FROM eval_samples
+                """)
+                conn.execute("DROP TABLE eval_samples")
+                conn.execute("ALTER TABLE eval_samples_new RENAME TO eval_samples")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_trace ON eval_samples(trace_id)")
+
+        # 4-5. eval_runs: run_id → eval_run_id, baseline_run_id → baseline_eval_run_id
+        if 'eval_runs' in tables:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(eval_runs)").fetchall()}
+            if 'run_id' in cols:
+                conn.execute("""
+                    CREATE TABLE eval_runs_new (
+                        eval_run_id TEXT PRIMARY KEY,
+                        label       TEXT,
+                        model       TEXT,
+                        prompt_version TEXT,
+                        git_commit  TEXT,
+                        case_count  INTEGER NOT NULL DEFAULT 0,
+                        avg_scores  TEXT,
+                        baseline_eval_run_id TEXT,
+                        started_at  TEXT NOT NULL,
+                        completed_at TEXT
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO eval_runs_new
+                    SELECT run_id, label, model, prompt_version, git_commit, case_count,
+                           avg_scores, baseline_run_id, started_at, completed_at
+                    FROM eval_runs
+                """)
+                conn.execute("DROP TABLE eval_runs")
+                conn.execute("ALTER TABLE eval_runs_new RENAME TO eval_runs")
+
+        # 6-7. eval_results: id → eval_result_id, run_id → eval_run_id
+        if 'eval_results' in tables:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(eval_results)").fetchall()}
+            if 'id' in cols or 'run_id' in cols:
+                conn.execute("""
+                    CREATE TABLE eval_results_new (
+                        eval_result_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        eval_run_id TEXT NOT NULL,
+                        case_id     TEXT NOT NULL,
+                        trace_id    TEXT,
+                        actual_output TEXT,
+                        rule_scores TEXT,
+                        judge_scores TEXT,
+                        judge_reasoning TEXT,
+                        judge_model TEXT,
+                        created_at  TEXT NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO eval_results_new
+                    SELECT id, run_id, case_id, trace_id, actual_output, rule_scores,
+                           judge_scores, judge_reasoning, judge_model, created_at
+                    FROM eval_results
+                """)
+                conn.execute("DROP TABLE eval_results")
+                conn.execute("ALTER TABLE eval_results_new RENAME TO eval_results")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_evalres_run ON eval_results(eval_run_id)")
+
+        conn.commit()
+        logger.info("[TraceStore] V2 naming migration completed")
+
     # ── 写入接口（异常安全） ─────────────────────────────────────────────
 
-    def start_turn(self, trace_id: str, session_id: str = "") -> None:
+    def start_trace(self, trace_id: str, session_id: str = "") -> None:
+        """开始记录一次 Agent Trace。"""
         if not self.enabled:
             return
+        # 优先使用 traces 表，如果不存在则回退到 turns（迁移兼容）
+        table = "traces" if self._table_exists("traces") else "turns"
         self._write(
-            "INSERT OR REPLACE INTO turns "
+            f"INSERT OR REPLACE INTO {table} "
             "(trace_id, session_id, started_at, status) VALUES (?, ?, ?, 'running')",
             (trace_id, session_id or None, _now_iso()),
         )
 
-    def finish_turn(
+    def start_turn(self, trace_id: str, session_id: str = "") -> None:
+        """[已废弃] 使用 start_trace() 代替。"""
+        self.start_trace(trace_id, session_id)
+
+    def finish_trace(
         self,
         trace_id: str,
         *,
@@ -281,9 +466,10 @@ class TraceStore:
         duration_ms: float | None = None,
         error: str | None = None,
     ) -> None:
-        """收尾 turn，并从已落库的 llm_calls 汇总 token 用量到 turns 行。"""
+        """完成一次 Agent Trace，并从已落库的 llm_calls 汇总 token 用量。"""
         if not self.enabled:
             return
+        table = "traces" if self._table_exists("traces") else "turns"
         try:
             with self._lock, self._connect() as conn:
                 row = conn.execute(
@@ -295,7 +481,7 @@ class TraceStore:
                 ).fetchone()
                 prompt_tokens, completion_tokens, total_tokens = row
                 conn.execute(
-                    "UPDATE turns SET ended_at = ?, status = ?, turn_count = ?, "
+                    f"UPDATE {table} SET ended_at = ?, status = ?, turn_count = ?, "
                     "duration_ms = ?, error = ?, prompt_tokens = ?, "
                     "completion_tokens = ?, total_tokens = ? WHERE trace_id = ?",
                     (
@@ -312,7 +498,20 @@ class TraceStore:
                 )
                 conn.commit()
         except Exception:
-            logger.exception("[TraceStore] finish_turn failed")
+            logger.exception("[TraceStore] finish_trace failed")
+
+    def finish_turn(
+        self,
+        trace_id: str,
+        *,
+        status: str,
+        turn_count: int = 0,
+        duration_ms: float | None = None,
+        error: str | None = None,
+    ) -> None:
+        """[已废弃] 使用 finish_trace() 代替。"""
+        self.finish_trace(trace_id, status=status, turn_count=turn_count,
+                         duration_ms=duration_ms, error=error)
 
     def record_llm_call(self, trace_id: str, seq: int, record: dict[str, Any]) -> None:
         """记录一次 LLM attempt 汇总（与网关 _write_log 同源字段）。"""
@@ -449,8 +648,11 @@ class TraceStore:
         """记录一轮迭代的评测样本（最终答复 + 工具/错误计数）。scores 留空待离线打分。"""
         if not self.enabled:
             return
+        # 兼容 V1/V2: turn/turn_index, id/eval_sample_id
+        cols = self._get_eval_samples_columns()
+        turn_col = "turn_index" if "turn_index" in cols else "turn"
         self._write(
-            "INSERT INTO eval_samples (trace_id, turn, answer, tool_count, "
+            f"INSERT INTO eval_samples (trace_id, {turn_col}, answer, tool_count, "
             "error_count, had_error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 trace_id,
@@ -463,13 +665,16 @@ class TraceStore:
             ),
         )
 
-    def update_eval_scores(self, sample_id: int, scores: dict[str, Any]) -> None:
+    def update_eval_scores(self, eval_sample_id: int, scores: dict[str, Any]) -> None:
         """把离线打分结果写回 eval_samples.scores（合上线上采集的闭环）。"""
         if not self.enabled:
             return
+        # 兼容 V1/V2: id/eval_sample_id
+        cols = self._get_eval_samples_columns()
+        id_col = "eval_sample_id" if "eval_sample_id" in cols else "id"
         self._write(
-            "UPDATE eval_samples SET scores = ? WHERE id = ?",
-            (_to_json(scores), sample_id),
+            f"UPDATE eval_samples SET scores = ? WHERE {id_col} = ?",
+            (_to_json(scores), eval_sample_id),
         )
 
     # ── 评测用例 / 运行（离线评测子系统） ───────────────────────────────────
@@ -535,38 +740,44 @@ class TraceStore:
     def start_eval_run(
         self,
         *,
-        run_id: str,
+        eval_run_id: str,
         label: str | None,
         model: str | None,
         prompt_version: str | None,
         git_commit: str | None,
         case_count: int,
-        baseline_run_id: str | None,
+        baseline_eval_run_id: str | None,
     ) -> None:
         if not self.enabled:
             return
+        # 兼容 V1/V2: run_id/eval_run_id
+        cols = self._get_eval_runs_columns()
+        id_col = "eval_run_id" if "eval_run_id" in cols else "run_id"
+        baseline_col = "baseline_eval_run_id" if "baseline_eval_run_id" in cols else "baseline_run_id"
         self._write(
-            "INSERT OR REPLACE INTO eval_runs (run_id, label, model, prompt_version, "
-            "git_commit, case_count, baseline_run_id, started_at) "
+            f"INSERT OR REPLACE INTO eval_runs ({id_col}, label, model, prompt_version, "
+            f"git_commit, case_count, {baseline_col}, started_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                run_id, label, model, prompt_version, git_commit,
-                case_count, baseline_run_id, _now_iso(),
+                eval_run_id, label, model, prompt_version, git_commit,
+                case_count, baseline_eval_run_id, _now_iso(),
             ),
         )
 
-    def finish_eval_run(self, run_id: str, *, avg_scores: dict[str, Any]) -> None:
+    def finish_eval_run(self, eval_run_id: str, *, avg_scores: dict[str, Any]) -> None:
         if not self.enabled:
             return
+        cols = self._get_eval_runs_columns()
+        id_col = "eval_run_id" if "eval_run_id" in cols else "run_id"
         self._write(
-            "UPDATE eval_runs SET avg_scores = ?, completed_at = ? WHERE run_id = ?",
-            (_to_json(avg_scores), _now_iso(), run_id),
+            f"UPDATE eval_runs SET avg_scores = ?, completed_at = ? WHERE {id_col} = ?",
+            (_to_json(avg_scores), _now_iso(), eval_run_id),
         )
 
     def add_eval_result(
         self,
         *,
-        run_id: str,
+        eval_run_id: str,
         case_id: str,
         trace_id: str | None,
         actual_output: str | None,
@@ -577,12 +788,15 @@ class TraceStore:
     ) -> None:
         if not self.enabled:
             return
+        # 兼容 V1/V2: run_id/eval_run_id
+        cols = self._get_eval_results_columns()
+        run_col = "eval_run_id" if "eval_run_id" in cols else "run_id"
         self._write(
-            "INSERT INTO eval_results (run_id, case_id, trace_id, actual_output, "
+            f"INSERT INTO eval_results ({run_col}, case_id, trace_id, actual_output, "
             "rule_scores, judge_scores, judge_reasoning, judge_model, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                run_id, case_id, trace_id, _truncate(actual_output),
+                eval_run_id, case_id, trace_id, _truncate(actual_output),
                 _to_json(rule_scores), _to_json(judge_scores),
                 _truncate(judge_reasoning), judge_model, _now_iso(),
             ),
@@ -602,14 +816,18 @@ class TraceStore:
             logger.exception("[TraceStore] list_eval_runs failed")
             return []
 
-    def get_eval_results(self, run_id: str) -> list[dict[str, Any]]:
+    def get_eval_results(self, eval_run_id: str) -> list[dict[str, Any]]:
         if not self.enabled:
             return []
         try:
+            # 兼容 V1/V2: run_id/eval_run_id
+            cols = self._get_eval_results_columns()
+            run_col = "eval_run_id" if "eval_run_id" in cols else "run_id"
+            id_col = "eval_result_id" if "eval_result_id" in cols else "id"
             with self._connect() as conn:
                 rows = conn.execute(
-                    "SELECT * FROM eval_results WHERE run_id = ? ORDER BY id",
-                    (run_id,),
+                    f"SELECT * FROM eval_results WHERE {run_col} = ? ORDER BY {id_col}",
+                    (eval_run_id,),
                 ).fetchall()
             return [dict(r) for r in rows]
         except Exception:
@@ -618,16 +836,17 @@ class TraceStore:
 
     # ── 回放 / 查询接口 ──────────────────────────────────────────────────
 
-    def get_turn(self, trace_id: str) -> dict[str, Any] | None:
-        """按 trace_id 重组一次完整 turn，供回放使用。"""
+    def get_trace(self, trace_id: str) -> dict[str, Any] | None:
+        """按 trace_id 重组一次完整 Trace，供回放使用。"""
         if not self.enabled:
             return None
         try:
+            table = "traces" if self._table_exists("traces") else "turns"
             with self._connect() as conn:
-                turn_row = conn.execute(
-                    "SELECT * FROM turns WHERE trace_id = ?", (trace_id,)
+                trace_row = conn.execute(
+                    f"SELECT * FROM {table} WHERE trace_id = ?", (trace_id,)
                 ).fetchone()
-                if turn_row is None:
+                if trace_row is None:
                     return None
                 llm = conn.execute(
                     "SELECT * FROM llm_calls WHERE trace_id = ? ORDER BY seq, id",
@@ -645,12 +864,16 @@ class TraceStore:
                     "SELECT * FROM security_events WHERE trace_id = ? ORDER BY id",
                     (trace_id,),
                 ).fetchall()
+                # 兼容 eval_samples 的 V1/V2 列名
+                cols = self._get_eval_samples_columns()
+                id_col = "eval_sample_id" if "eval_sample_id" in cols else "id"
+                turn_col = "turn_index" if "turn_index" in cols else "turn"
                 evals = conn.execute(
-                    "SELECT * FROM eval_samples WHERE trace_id = ? ORDER BY turn, id",
+                    f"SELECT * FROM eval_samples WHERE trace_id = ? ORDER BY {turn_col}, {id_col}",
                     (trace_id,),
                 ).fetchall()
             return {
-                "turn": dict(turn_row),
+                "trace": dict(trace_row),
                 "llm_calls": [dict(r) for r in llm],
                 "tool_calls": [dict(r) for r in tools],
                 "state_trace": [dict(r) for r in states],
@@ -658,51 +881,66 @@ class TraceStore:
                 "eval_samples": [dict(r) for r in evals],
             }
         except Exception:
-            logger.exception("[TraceStore] get_turn failed: %s", trace_id)
+            logger.exception("[TraceStore] get_trace failed: %s", trace_id)
             return None
 
-    def list_turns(self, session_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        """列出最近的 turn 汇总（可按 session 过滤），供概览/筛选。"""
+    def get_turn(self, trace_id: str) -> dict[str, Any] | None:
+        """[已废弃] 使用 get_trace() 代替。"""
+        data = self.get_trace(trace_id)
+        if data is None:
+            return None
+        # 兼容旧代码：将 "trace" 键改为 "turn"
+        data["turn"] = data.pop("trace")
+        return data
+
+    def list_traces(self, session_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """列出最近的 Trace 汇总（可按 session 过滤），供概览/筛选。"""
         if not self.enabled:
             return []
         try:
+            table = "traces" if self._table_exists("traces") else "turns"
             with self._connect() as conn:
                 if session_id:
                     rows = conn.execute(
-                        "SELECT * FROM turns WHERE session_id = ? "
+                        f"SELECT * FROM {table} WHERE session_id = ? "
                         "ORDER BY started_at DESC LIMIT ?",
                         (session_id, limit),
                     ).fetchall()
                 else:
                     rows = conn.execute(
-                        "SELECT * FROM turns ORDER BY started_at DESC LIMIT ?",
+                        f"SELECT * FROM {table} ORDER BY started_at DESC LIMIT ?",
                         (limit,),
                     ).fetchall()
             return [dict(r) for r in rows]
         except Exception:
-            logger.exception("[TraceStore] list_turns failed")
+            logger.exception("[TraceStore] list_traces failed")
             return []
 
-    def prune(self, keep_turns: int = _DEFAULT_KEEP_TURNS) -> None:
-        """限容：只保留最近 keep_turns 个 turn，级联清掉其子记录。"""
+    def list_turns(self, session_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """[已废弃] 使用 list_traces() 代替。"""
+        return self.list_traces(session_id, limit)
+
+    def prune(self, keep_traces: int = _DEFAULT_KEEP_TRACES) -> None:
+        """限容：只保留最近 keep_traces 个 Trace，级联清掉其子记录。"""
         if not self.enabled:
             return
         try:
+            table = "traces" if self._table_exists("traces") else "turns"
             with self._lock, self._connect() as conn:
                 stale = conn.execute(
-                    "SELECT trace_id FROM turns ORDER BY started_at DESC "
+                    f"SELECT trace_id FROM {table} ORDER BY started_at DESC "
                     "LIMIT -1 OFFSET ?",
-                    (keep_turns,),
+                    (keep_traces,),
                 ).fetchall()
                 if not stale:
                     return
                 ids = [(r["trace_id"],) for r in stale]
-                for table in (
+                for tbl in (
                     "llm_calls", "tool_calls", "state_trace",
-                    "security_events", "eval_samples", "turns",
+                    "security_events", "eval_samples", table,
                 ):
                     conn.executemany(
-                        f"DELETE FROM {table} WHERE trace_id = ?", ids
+                        f"DELETE FROM {tbl} WHERE trace_id = ?", ids
                     )
                 conn.commit()
         except Exception:
@@ -728,9 +966,12 @@ class TraceStore:
         if not self.enabled:
             return []
         try:
+            # 兼容 V1/V2: id/eval_sample_id
+            cols = self._get_eval_samples_columns()
+            id_col = "eval_sample_id" if "eval_sample_id" in cols else "id"
             with self._connect() as conn:
                 rows = conn.execute(
-                    "SELECT * FROM eval_samples ORDER BY id DESC LIMIT ?",
+                    f"SELECT * FROM eval_samples ORDER BY {id_col} DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
             return [dict(r) for r in rows]
@@ -743,10 +984,13 @@ class TraceStore:
         if not self.enabled:
             return []
         try:
+            # 兼容 V1/V2: id/eval_sample_id
+            cols = self._get_eval_samples_columns()
+            id_col = "eval_sample_id" if "eval_sample_id" in cols else "id"
             with self._connect() as conn:
                 rows = conn.execute(
-                    "SELECT * FROM eval_samples WHERE scores IS NULL "
-                    "ORDER BY id DESC LIMIT ?",
+                    f"SELECT * FROM eval_samples WHERE scores IS NULL "
+                    f"ORDER BY {id_col} DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
             return [dict(r) for r in rows]
@@ -771,6 +1015,42 @@ class TraceStore:
                 conn.commit()
         except Exception:
             logger.exception("[TraceStore] writemany failed")
+
+    def _table_exists(self, table_name: str) -> bool:
+        """检查表是否存在。"""
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (table_name,),
+                ).fetchone()
+                return row is not None
+        except Exception:
+            return False
+
+    def _get_eval_samples_columns(self) -> set[str]:
+        """获取 eval_samples 表的列名（用于兼容 V1/V2）。"""
+        try:
+            with self._connect() as conn:
+                return {r[1] for r in conn.execute("PRAGMA table_info(eval_samples)").fetchall()}
+        except Exception:
+            return set()
+
+    def _get_eval_runs_columns(self) -> set[str]:
+        """获取 eval_runs 表的列名（用于兼容 V1/V2）。"""
+        try:
+            with self._connect() as conn:
+                return {r[1] for r in conn.execute("PRAGMA table_info(eval_runs)").fetchall()}
+        except Exception:
+            return set()
+
+    def _get_eval_results_columns(self) -> set[str]:
+        """获取 eval_results 表的列名（用于兼容 V1/V2）。"""
+        try:
+            with self._connect() as conn:
+                return {r[1] for r in conn.execute("PRAGMA table_info(eval_results)").fetchall()}
+        except Exception:
+            return set()
 
 
 # 敏感参数键名（工具入参里出现就打码），避免把 key/token 落进遥测库。

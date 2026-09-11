@@ -80,17 +80,20 @@ def test_eval_cases_crud(tmp_path):
 def test_eval_run_lifecycle(tmp_path):
     store = _store(tmp_path)
     store.start_eval_run(
-        run_id="r1", label="L", model="m", prompt_version=None,
-        git_commit="abc", case_count=2, baseline_run_id=None,
+        eval_run_id="r1", label="L", model="m", prompt_version=None,
+        git_commit="abc", case_count=2, baseline_eval_run_id=None,
     )
     store.add_eval_result(
-        run_id="r1", case_id="c1", trace_id="tr1", actual_output="out",
+        eval_run_id="r1", case_id="c1", trace_id="tr1", actual_output="out",
         rule_scores={rc.DIM_COMPLETED: 1.0}, judge_scores={"helpfulness": 5},
     )
     store.finish_eval_run("r1", avg_scores={rc.DIM_COMPLETED: 1.0})
 
     runs = store.list_eval_runs()
-    assert len(runs) == 1 and runs[0]["run_id"] == "r1"
+    assert len(runs) == 1
+    # 兼容 V1/V2: run_id/eval_run_id
+    run_id_key = "eval_run_id" if "eval_run_id" in runs[0] else "run_id"
+    assert runs[0][run_id_key] == "r1"
     assert json.loads(runs[0]["avg_scores"])[rc.DIM_COMPLETED] == 1.0
     results = store.get_eval_results("r1")
     assert len(results) == 1 and results[0]["case_id"] == "c1"
