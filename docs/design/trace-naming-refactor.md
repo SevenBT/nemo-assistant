@@ -73,24 +73,25 @@
 
 **Commit:** `437c8bb` - feat(trace): Phase 1 - 实现 Schema V2 迁移基础设施
 
-### Phase 2: TraceStore API 重命名
-- [ ] 添加新方法（start_trace, finish_trace 等）
-- [ ] 保留旧方法调用新方法（兼容期）
-- [ ] 更新所有调用点
+### Phase 2: 更新其他模块调用 ✅ **已完成**
+- [x] AgentLoop (_trace_start, _trace_finish)
+- [x] Runner (trace_data, eval_run_id, get_trace, score_trace)
+- [x] Cases (get_trace)
+- [x] Judge (trace_data)
+- [x] 测试验证通过
 
-### Phase 3: 评测模块重命名
-- [ ] score_turn() → score_trace()
-- [ ] 更新 runner, scorer, judge
+**Commit:** `9b1436d` - feat(trace): Phase 2 - 更新核心模块调用新 API
 
-### Phase 4: AgentLoop 重命名
-- [ ] _trace_start_turn() → _trace_start()
-- [ ] _trace_finish_turn() → _trace_finish()
+### Phase 3: UI 层更新 ✅ **已完成**
+- [x] TracePage (_traces, _TraceDetailView, _make_trace_row)
+- [x] list_traces(), get_trace()
+- [x] _OverviewCard.set_trace()
+- [x] V1/V2 数据兼容
+- [x] 测试验证通过（597 passed）
 
-### Phase 5: UI 层重命名
-- [ ] TracePage 组件更新
-- [ ] i18n 键名更新（如需要）
+**Commit:** `d4f2876` - feat(trace): Phase 3 - 更新 UI 层命名
 
-### Phase 6: 清理与验证
+### Phase 4: 文档与清理（进行中）
 - [ ] 删除旧 API
 - [ ] 全量测试
 - [ ] 文档更新
