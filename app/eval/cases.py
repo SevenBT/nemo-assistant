@@ -43,11 +43,11 @@ def build_case_from_trace(
         logger.warning("[cases] empty user_input, refuse to build case")
         return None
 
-    data = trace_store.get_turn(trace_id) if trace_id else None
+    trace_data = trace_store.get_trace(trace_id) if trace_id else None
     expected_tools: list[str] = []
-    if data:
+    if trace_data:
         expected_tools = sorted({
-            t["name"] for t in (data.get("tool_calls") or [])
+            t["name"] for t in (trace_data.get("tool_calls") or [])
             if t.get("name") and t.get("status") != "error"
         })
 

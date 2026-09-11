@@ -42,7 +42,7 @@ def run_eval(
     progress_fn: ProgressFn | None = None,
     max_turns: int = 6,
 ) -> str | None:
-    """跑一遍启用的回归用例集，返回 run_id；无用例或遥测禁用返回 None。
+    """跑一遍启用的回归用例集，返回 eval_run_id；无用例或遥测禁用返回 None。
 
     prompt_builder（可选）：传入则用它把用例的 user 消息构建成完整 api_messages
     （带 system / 记忆等），更贴近真实运行；不传则直接用用例存的最小消息。
@@ -53,16 +53,16 @@ def run_eval(
     if not cases:
         return None
 
-    run_id = uuid.uuid4().hex
-    baseline_run_id = _latest_run_id(trace_store)
+    eval_run_id = uuid.uuid4().hex
+    baseline_eval_run_id = _latest_eval_run_id(trace_store)
     trace_store.start_eval_run(
-        run_id=run_id,
+        eval_run_id=eval_run_id,
         label=label,
         model=model,
         prompt_version=None,
         git_commit=_git_commit(),
         case_count=len(cases),
-        baseline_run_id=baseline_run_id,
+        baseline_eval_run_id=baseline_eval_run_id,
     )
 
     per_case_scores: list[dict[str, Any]] = []
@@ -73,7 +73,7 @@ def run_eval(
         try:
             scores = _run_one_case(
                 case, trace_store, llm_gateway, registry,
-                prompt_builder, run_id, judge_fn, max_turns,
+                prompt_builder, eval_run_id, judge_fn, max_turns,
             )
             if scores:
                 per_case_scores.append(scores)
@@ -81,10 +81,10 @@ def run_eval(
             logger.exception("[runner] case %s failed", case.get("case_id"))
 
     avg = metrics.aggregate(per_case_scores)
-    trace_store.finish_eval_run(run_id, avg_scores=avg)
+    trace_store.finish_eval_run(eval_run_id, avg_scores=avg)
     if progress_fn:
         progress_fn(total, total, "")
-    return run_id
+    return eval_run_id
 
 
 def _run_one_case(
@@ -93,7 +93,7 @@ def _run_one_case(
     llm_gateway,
     registry,
     prompt_builder,
-    run_id: str,
+    eval_run_id: str,
     judge_fn: JudgeFn | None,
     max_turns: int,
 ) -> dict[str, Any]:
@@ -109,28 +109,28 @@ def _run_one_case(
         trace_store=trace_store,
         hooks=[EvalHook(trace_store)],  # EvalHook 写入 eval_samples 供 judge 使用
     )
-    loop.run()  # 同步执行，阻塞至本 turn 结束
+    loop.run()  # 同步执行，阻塞至本 trace 结束
     trace_id = loop._trace_id  # AgentLoop 为本次 run 生成的统一 trace_id
 
-    turn_data = trace_store.get_turn(trace_id)
+    trace_data = trace_store.get_trace(trace_id)
     scores: dict[str, Any] = {}
     actual_output = None
-    if turn_data:
-        scores.update(rule_checks.score_turn(turn_data))
-        scores.update(_expected_tools_score(case, turn_data))
-        actual_output = _final_answer(turn_data)
+    if trace_data:
+        scores.update(rule_checks.score_trace(trace_data))
+        scores.update(_expected_tools_score(case, trace_data))
+        actual_output = _final_answer(trace_data)
 
     judge_scores = None
-    if judge_fn is not None and turn_data and (actual_output or "").strip():
+    if judge_fn is not None and trace_data and (actual_output or "").strip():
         try:
-            judge_scores = judge_fn(case, turn_data)
+            judge_scores = judge_fn(case, trace_data)
         except Exception:
             logger.exception("[runner] judge_fn raised for case %s", case.get("case_id"))
         if judge_scores:
             scores.update({f"judge_{k}": v for k, v in judge_scores.items()})
 
     trace_store.add_eval_result(
-        run_id=run_id,
+        eval_run_id=eval_run_id,
         case_id=case["case_id"],
         trace_id=trace_id,
         actual_output=actual_output,
@@ -165,7 +165,7 @@ def _build_messages(case: dict[str, Any], prompt_builder) -> list[dict]:
     return [{"role": "user", "content": user_input}]
 
 
-def _expected_tools_score(case: dict[str, Any], turn_data: dict) -> dict[str, float]:
+def _expected_tools_score(case: dict[str, Any], trace_data: dict) -> dict[str, float]:
     """期望工具命中率 = 实际调用到的期望工具 / 期望工具数。
 
     用例的 expected_tools 是行为基线；重跑时若漏调了基线工具，是退步信号。
@@ -179,23 +179,27 @@ def _expected_tools_score(case: dict[str, Any], turn_data: dict) -> dict[str, fl
         expected = []
     if not expected:
         return {}
-    actual = {t.get("name") for t in (turn_data.get("tool_calls") or [])}
+    actual = {t.get("name") for t in (trace_data.get("tool_calls") or [])}
     hit = sum(1 for name in expected if name in actual)
     return {"expected_tool_hit_rate": round(hit / len(expected), 4)}
 
 
-def _final_answer(turn_data: dict) -> str | None:
-    """取该 run 最后一轮的助手答复文本（评测最关心的产物）。"""
-    samples = turn_data.get("eval_samples") or []
+def _final_answer(trace_data: dict) -> str | None:
+    """取该 Trace 最后一轮的助手答复文本（评测最关心的产物）。"""
+    samples = trace_data.get("eval_samples") or []
     for s in reversed(samples):
         if s.get("answer"):
             return s["answer"]
     return None
 
 
-def _latest_run_id(trace_store) -> str | None:
+def _latest_eval_run_id(trace_store) -> str | None:
+    """获取最近一次评估运行的 ID 作为 baseline。"""
     runs = trace_store.list_eval_runs(limit=1)
-    return runs[0]["run_id"] if runs else None
+    if not runs:
+        return None
+    # 兼容 V1/V2: run_id/eval_run_id
+    return runs[0].get("eval_run_id") or runs[0].get("run_id")
 
 
 def _git_commit() -> str | None:
