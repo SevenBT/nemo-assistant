@@ -41,11 +41,16 @@ def score_unscored_samples(
         try:
             scores = _score_one(trace_store, sample, judge_fn)
             if scores:
-                trace_store.update_eval_scores(sample["id"], scores)
+                # 兼容 V1/V2: id/eval_sample_id
+                sample_id = sample.get("eval_sample_id") or sample.get("id")
+                if sample_id is None:
+                    logger.warning("[scorer] sample missing id: %s", sample)
+                    continue
+                trace_store.update_eval_scores(sample_id, scores)
                 scored += 1
         except Exception:
             logger.exception(
-                "[scorer] failed to score sample %s", sample.get("id")
+                "[scorer] failed to score sample %s", sample.get("eval_sample_id") or sample.get("id")
             )
     return scored
 
@@ -55,17 +60,18 @@ def _score_one(
 ) -> dict[str, Any]:
     """对单条样本算规则分（+ 可选 judge 分），合并成一个 scores dict。"""
     trace_id = sample.get("trace_id")
-    turn_data = trace_store.get_turn(trace_id) if trace_id else None
+    trace_data = trace_store.get_trace(trace_id) if trace_id else None
 
     scores: dict[str, Any] = {}
-    if turn_data:
-        scores.update(rule_checks.score_turn(turn_data))
+    if trace_data:
+        scores.update(rule_checks.score_trace(trace_data))
 
     if judge_fn is not None and (sample.get("answer") or "").strip():
         try:
             judged = judge_fn(sample)
         except Exception:
-            logger.exception("[scorer] judge_fn raised for sample %s", sample.get("id"))
+            sample_id = sample.get("eval_sample_id") or sample.get("id")
+            logger.exception("[scorer] judge_fn raised for sample %s", sample_id)
             judged = None
         if judged:
             scores.update({f"judge_{k}": v for k, v in judged.items()})
