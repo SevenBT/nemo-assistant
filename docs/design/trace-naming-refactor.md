@@ -60,11 +60,18 @@
 
 ## 实施阶段
 
-### Phase 1: 数据库 Schema 迁移（当前）
-- [ ] 实现 schema version 跟踪
-- [ ] 实现自动备份功能
-- [ ] 编写迁移 SQL（V2）
-- [ ] 测试迁移脚本
+### Phase 1: 数据库 Schema 迁移 ✅ **已完成**
+- [x] 实现 schema version 跟踪
+- [x] 实现自动备份功能
+- [x] 编写迁移 SQL（V2）
+- [x] 测试迁移脚本
+- [x] TraceStore 新 API（start_trace, finish_trace, get_trace, list_traces）
+- [x] 保留旧 API 兼容层（start_turn → start_trace）
+- [x] 动态列名检测（兼容 V1/V2）
+- [x] 更新 scorer 和 rule_checks
+- [x] 测试通过（test_eval_scorer_store.py）
+
+**Commit:** `437c8bb` - feat(trace): Phase 1 - 实现 Schema V2 迁移基础设施
 
 ### Phase 2: TraceStore API 重命名
 - [ ] 添加新方法（start_trace, finish_trace 等）
