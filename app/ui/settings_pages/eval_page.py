@@ -59,6 +59,8 @@ class _EvalRunWorker(QThread):
     runner.run_eval 会对每条用例同步执行一次 AgentLoop（真实 LLM 调用），
     耗时且阻塞。放到独立线程，进度/结果经 Qt 信号回主线程更新 UI。
     TraceStore 每次操作开独立短连接 + 进程内写锁，跨线程安全。
+
+    线程生命周期：独立于 UI 组件，即使页面关闭也继续运行。
     """
 
     progress = pyqtSignal(int, int, str)  # (完成数, 总数, 当前用例标题)
@@ -70,27 +72,38 @@ class _EvalRunWorker(QThread):
         self._llm = llm
         self._registry = registry
         self._prompt_builder = prompt_builder
+        self._cancelled = False
 
     def run(self):
         from app.eval import runner
+        import logging
+        logger = logging.getLogger(__name__)
 
         try:
+            def progress_callback(done, total, title):
+                if not self._cancelled:
+                    self.progress.emit(done, total, title)
+
             run_id = runner.run_eval(
                 trace_store=self._store,
                 llm_gateway=self._llm,
                 registry=self._registry,
                 prompt_builder=self._prompt_builder,
                 label="manual",
-                progress_fn=lambda done, total, title: self.progress.emit(
-                    done, total, title
-                ),
+                progress_fn=progress_callback,
             )
-            self.finished_run.emit(run_id, "")
-        except Exception as exc:  # 兜底：worker 内异常不得静默吞掉
-            import logging
+            if not self._cancelled:
+                self.finished_run.emit(run_id, "")
+            else:
+                logger.info("[eval] Worker cancelled, run completed in background")
+        except Exception as exc:
+            logger.exception("[eval] run_eval failed")
+            if not self._cancelled:
+                self.finished_run.emit(None, str(exc))
 
-            logging.getLogger(__name__).exception("[eval] run_eval failed")
-            self.finished_run.emit(None, str(exc))
+    def cancel(self):
+        """标记为已取消，不再发送信号（线程继续运行但不更新 UI）。"""
+        self._cancelled = True
 
 
 class EvalPage(QWidget):
@@ -121,6 +134,18 @@ class EvalPage(QWidget):
         self._run_worker: _EvalRunWorker | None = None
         self._build()
         self.reload()
+
+    def hideEvent(self, event):
+        """离开评测页面时取消 worker 的信号发送（后台继续运行）。"""
+        super().hideEvent(event)
+        if self._run_worker is not None and self._run_worker.isRunning():
+            self._run_worker.cancel()
+
+    def closeEvent(self, event):
+        """关闭时取消 worker 的信号发送（后台继续运行）。"""
+        super().closeEvent(event)
+        if self._run_worker is not None and self._run_worker.isRunning():
+            self._run_worker.cancel()
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -251,10 +276,17 @@ class EvalPage(QWidget):
         worker.start()
 
     def _on_run_progress(self, done: int, total: int, title: str):
+        """更新进度显示（只有 worker 未取消时才会收到）。"""
+        if self._run_worker is None or self._run_worker._cancelled:
+            return
         if total and done < total:
             self._run_btn.setText(t("settings.eval.running_progress", done=done, total=total))
 
     def _on_run_finished(self, run_id, error: str):
+        """处理运行完成（只有 worker 未取消时才会收到）。"""
+        if self._run_worker is None or self._run_worker._cancelled:
+            return
+
         from app.ui.toast import show_toast
 
         self._run_btn.setText(t("settings.eval.run"))
