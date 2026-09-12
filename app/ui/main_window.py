@@ -216,9 +216,13 @@ class MainWindow(FluentWindow):
         from app.core.consolidator import Consolidator
         from app.core.dream import Dream
 
+        # 获取当前模型名称用于上下文管理
+        model = cfg.get(cfg.litellmDefaultModel) or "default"
+
         self._consolidator = Consolidator(
             llm_gateway=self._llm_gateway,
             memory_mgr=self._memory_mgr,
+            model=model,
         )
         self._dream = Dream(
             llm_gateway=self._llm_gateway,

@@ -13,6 +13,7 @@ from PyQt6.QtGui import (
     QPalette,
     QTextCharFormat,
     QTextCursor,
+    QTextDocument,
     QTextFormat,
     QImage,
 )

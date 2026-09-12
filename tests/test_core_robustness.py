@@ -3,7 +3,7 @@ import unittest
 from unittest import mock
 
 from app.core import consolidator as cons
-from app.core.consolidator import _estimate_messages_tokens, _message_token_text
+from app.core.context_manager import message_to_token_text, count_messages_tokens
 from app.core.dream import Dream
 from app.models.message import Message, MessageRole, ToolCall
 
@@ -18,15 +18,15 @@ class ConsolidatorTokenTest(unittest.TestCase):
             content="",
             tool_calls=[ToolCall(id="1", name="search", arguments=big_args, result=big_result)],
         )
-        text = _message_token_text(msg)
+        text = message_to_token_text(msg)
         # content 为空，但 tool_calls 的参数与结果应进入估算文本
         self.assertIn("x" * 2000, text)
         self.assertIn("y" * 2000, text)
-        self.assertGreater(_estimate_messages_tokens([msg]), 500)
+        self.assertGreater(count_messages_tokens([msg]), 500)
 
     def test_plain_message_still_counted(self):
         msg = Message(role=MessageRole.USER, content="你好世界")
-        self.assertEqual(_message_token_text(msg), "你好世界")
+        self.assertEqual(message_to_token_text(msg), "你好世界")
 
 
 class _FakeMem:

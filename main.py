@@ -1,14 +1,16 @@
 """
 Application entry point.
 
-Startup flow: check dependencies -> configure crash logging ->
+Startup flow: check dependencies -> configure logging -> configure crash logging ->
 initialize the Qt application -> create the main window.
 
 应用程序入口。
-启动流程：检查依赖 → 配置崩溃日志 → 初始化 Qt 应用 → 创建主窗口。
+启动流程：检查依赖 → 配置日志 → 配置崩溃日志 → 初始化 Qt 应用 → 创建主窗口。
 """
 import sys
 import traceback
+import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 # PyInstaller onefile guard: a frozen child process re-executes this exe.
@@ -16,6 +18,39 @@ from pathlib import Path
 # falling through and launching another full app instance.
 import multiprocessing
 multiprocessing.freeze_support()
+
+# ── 日志配置（在任何其他导入前完成）──────────────────────────────────────
+def _setup_logging():
+    """Configure application-wide logging before any module imports."""
+    # 确定日志目录
+    if getattr(sys, "frozen", False):
+        # 打包后放在 exe 同级目录
+        log_dir = Path(sys.executable).parent / "logs"
+    else:
+        # 开发环境放在项目根目录
+        log_dir = Path(__file__).parent / "logs"
+
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        handlers=[
+            RotatingFileHandler(
+                log_dir / "nemo.log",
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=3,
+                encoding='utf-8'
+            ),
+            logging.StreamHandler()  # 同时输出到控制台
+        ]
+    )
+    logging.info("=" * 60)
+    logging.info("Nemo Assistant starting")
+    logging.info("=" * 60)
+
+_setup_logging()
+# ─────────────────────────────────────────────────────────────────────────
 
 # ── 依赖自动安装 ──────────────────────────────────────────────────────────
 # 每个元组: (import名, pip包名)

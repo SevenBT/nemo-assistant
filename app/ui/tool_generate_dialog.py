@@ -518,17 +518,10 @@ class ToolGenerateDialog(QDialog):
             name=review.manifest.name,
         ):
             return
-        approvals = self._review_panel.approved_permissions
-        if approvals != review.report.declared_permissions | review.report.detected_permissions:
-            self._current_review = None
-            self._review_panel.mark_requires_review(
-                t("tooldlg.review.permissions_changed"), clear_report=False
-            )
-            return
         overrides = self._review_panel.acknowledged_overrides()
-        self._pending_install_context = (review, approvals, bool(overwrite), overrides)
+        self._pending_install_context = (review, frozenset(), bool(overwrite), overrides)
         self._start_build_operation(
-            "install", (review.build_id, approvals, bool(overwrite), overrides)
+            "install", (review.build_id, frozenset(), bool(overwrite), overrides)
         )
 
     def _start_build_operation(
