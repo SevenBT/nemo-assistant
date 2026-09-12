@@ -13,7 +13,7 @@ def _store(tmp_path):
 
 
 def _seed_turn(store, trace_id, *, status="ok", tools=None):
-    store.start_turn(trace_id, "sess")
+    store.start_trace(trace_id, "sess")
     for tc in tools or []:
         store.record_tool_call(
             trace_id,
@@ -27,7 +27,7 @@ def _seed_turn(store, trace_id, *, status="ok", tools=None):
         trace_id, turn=0, answer="答复", tool_count=len(tools or []),
         error_count=0, had_error=False,
     )
-    store.finish_turn(trace_id, status=status, turn_count=1, duration_ms=10.0)
+    store.finish_trace(trace_id, status=status, turn_count=1, duration_ms=10.0)
 
 
 def test_scorer_fills_scores(tmp_path):
@@ -80,17 +80,19 @@ def test_eval_cases_crud(tmp_path):
 def test_eval_run_lifecycle(tmp_path):
     store = _store(tmp_path)
     store.start_eval_run(
-        run_id="r1", label="L", model="m", prompt_version=None,
-        git_commit="abc", case_count=2, baseline_run_id=None,
+        eval_run_id="r1", label="L", model="m", prompt_version=None,
+        git_commit="abc", case_count=2, baseline_eval_run_id=None,
     )
     store.add_eval_result(
-        run_id="r1", case_id="c1", trace_id="tr1", actual_output="out",
+        eval_run_id="r1", case_id="c1", trace_id="tr1", actual_output="out",
         rule_scores={rc.DIM_COMPLETED: 1.0}, judge_scores={"helpfulness": 5},
     )
     store.finish_eval_run("r1", avg_scores={rc.DIM_COMPLETED: 1.0})
 
     runs = store.list_eval_runs()
-    assert len(runs) == 1 and runs[0]["run_id"] == "r1"
+    assert len(runs) == 1
+    run_id_key = "eval_run_id" if "eval_run_id" in runs[0] else "run_id"
+    assert runs[0][run_id_key] == "r1"
     assert json.loads(runs[0]["avg_scores"])[rc.DIM_COMPLETED] == 1.0
     results = store.get_eval_results("r1")
     assert len(results) == 1 and results[0]["case_id"] == "c1"

@@ -135,7 +135,7 @@ class AgentLoop(QThread):
             tools=self._registry.get_openai_functions(),
             max_turns=self._max_turns,
         )
-        self._trace_start_turn()
+        self._trace_start()
         run_t0 = time.perf_counter()
         try:
             while ctx.state is not TurnState.DONE:
@@ -166,12 +166,12 @@ class AgentLoop(QThread):
                     ctx.state = next_state
         except Exception as e:
             logger.exception("[AgentLoop] Unhandled exception")
-            self._trace_finish_turn(ctx, "error", run_t0, error=str(e))
+            self._trace_finish(ctx, "error", run_t0, error=str(e))
             self.done.emit({"ok": False, "error": str(e), "trace": self._serialize_trace(ctx)})
             return
 
         status = "cancelled" if self._cancelled else ("error" if ctx.error_message else "ok")
-        self._trace_finish_turn(ctx, status, run_t0, error=ctx.error_message)
+        self._trace_finish(ctx, status, run_t0, error=ctx.error_message)
 
     # ── State Handlers ───────────────────────────────────────────────────
 
@@ -578,23 +578,25 @@ class AgentLoop(QThread):
         except Exception:
             logger.exception("[AgentLoop] after_iteration hook raised")
 
-    def _trace_start_turn(self) -> None:
+    def _trace_start(self) -> None:
+        """开始记录 Trace（一次完整的 Agent 运行）。"""
         if self._trace_store is None:
             return
         try:
-            self._trace_store.start_turn(self._trace_id, self._session_id)
+            self._trace_store.start_trace(self._trace_id, self._session_id)
         except Exception:
-            logger.debug("[AgentLoop] trace start_turn failed", exc_info=True)
+            logger.debug("[AgentLoop] trace start failed", exc_info=True)
 
-    def _trace_finish_turn(
+    def _trace_finish(
         self, ctx: TurnContext, status: str, run_t0: float, error: str | None = None
     ) -> None:
+        """完成 Trace 记录并写入状态机流转。"""
         if self._trace_store is None:
             return
         duration_ms = (time.perf_counter() - run_t0) * 1000
         try:
             self._trace_store.record_state_trace(self._trace_id, self._serialize_trace(ctx))
-            self._trace_store.finish_turn(
+            self._trace_store.finish_trace(
                 self._trace_id,
                 status=status,
                 turn_count=ctx.turn_count,
@@ -602,7 +604,7 @@ class AgentLoop(QThread):
                 error=error,
             )
         except Exception:
-            logger.debug("[AgentLoop] trace finish_turn failed", exc_info=True)
+            logger.debug("[AgentLoop] trace finish failed", exc_info=True)
 
     def _trace_tool_call(
         self, call_id: str, name: str, arguments: dict, result: dict | None, duration_ms: float

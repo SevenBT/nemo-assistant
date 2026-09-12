@@ -48,7 +48,7 @@ _JUDGE_PROMPT = """你是一个严格的评测员，评判 AI 助手单条回答
 def make_judge_fn(llm_gateway):
     """构造一个 judge 闭包，签名兼容 scorer / runner 的 judge_fn。
 
-    scorer 传单个 sample（含 answer）；runner 传 (case, turn_data)。两者都靠
+    scorer 传单个 sample（含 answer）；runner 传 (case, trace_data)。两者都靠
     本闭包的 *args 适配：从入参里取出 question 与 answer 再评分。
     """
     def judge_fn(*args) -> dict[str, Any] | None:
@@ -77,15 +77,16 @@ def _extract_qa(args: tuple) -> tuple[str, str]:
         sample = args[0]
         return sample.get("user_input") or "", sample.get("answer") or ""
     if len(args) == 2:
-        case, turn_data = args
+        case, trace_data = args
         question = (case or {}).get("user_input") or ""
-        answer = _final_answer(turn_data or {})
+        answer = _final_answer(trace_data or {})
         return question, answer or ""
     return "", ""
 
 
-def _final_answer(turn_data: dict) -> str | None:
-    for s in reversed(turn_data.get("eval_samples") or []):
+def _final_answer(trace_data: dict) -> str | None:
+    """从 Trace 数据中提取最终答复。"""
+    for s in reversed(trace_data.get("eval_samples") or []):
         if s.get("answer"):
             return s["answer"]
     return None

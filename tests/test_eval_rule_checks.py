@@ -70,24 +70,24 @@ def test_json_valid_rate_flags_malformed():
     assert rc.json_valid_rate(calls) == 0.5
 
 
-# ── score_turn ───────────────────────────────────────────────────────────
+# ── score_trace ──────────────────────────────────────────────────────────
 
-def test_score_turn_omits_inapplicable_dims():
-    turn_data = {"turn": {"status": "ok"}, "tool_calls": []}
-    scores = rc.score_turn(turn_data)
+def test_score_trace_omits_inapplicable_dims():
+    trace_data = {"trace": {"status": "ok"}, "tool_calls": []}
+    scores = rc.score_trace(trace_data)
     # 无工具调用：成功率/恢复率/冗余/JSON 都不适用，只剩 completed。
     assert scores == {rc.DIM_COMPLETED: 1.0}
 
 
-def test_score_turn_full():
-    turn_data = {
-        "turn": {"status": "ok"},
+def test_score_trace_full():
+    trace_data = {
+        "trace": {"status": "ok"},
         "tool_calls": [
             _tool("a", {"x": 1}, status="error"),
             _tool("a", {"x": 1}, status="success"),  # 重复 + 恢复
         ],
     }
-    scores = rc.score_turn(turn_data)
+    scores = rc.score_trace(trace_data)
     assert scores[rc.DIM_COMPLETED] == 1.0
     assert scores[rc.DIM_TOOL_SUCCESS] == 0.5
     assert scores[rc.DIM_ERROR_RECOVERY] == 1.0

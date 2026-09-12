@@ -212,14 +212,20 @@ class EvalPage(QWidget):
             self._detail.clear()
             return
         run = self._runs[index]
-        baseline = self._find_run(run.get("baseline_run_id"))
-        results = self._store.get_eval_results(run["run_id"])
+        baseline_id = run.get("baseline_eval_run_id") or run.get("baseline_run_id")
+        baseline = self._find_run(baseline_id)
+        run_id = run.get("eval_run_id") or run.get("run_id")
+        results = self._store.get_eval_results(run_id)
         self._detail.set_data(run, baseline, results)
 
     def _find_run(self, run_id: str | None) -> dict | None:
         if not run_id:
             return None
-        return next((r for r in self._runs if r.get("run_id") == run_id), None)
+        return next(
+            (r for r in self._runs
+             if r.get("eval_run_id") == run_id or r.get("run_id") == run_id),
+            None
+        )
 
     def _on_run(self):
         """后台线程跑回归集，不阻塞 UI（用例少但每条都跑真实 AgentLoop，仍很慢）。"""

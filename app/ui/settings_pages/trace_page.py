@@ -67,7 +67,7 @@ class TracePage(QWidget):
         super().__init__(parent)
         self._store = trace_store
         self._session_mgr = session_mgr
-        self._turns: list[dict] = []
+        self._traces: list[dict] = []
         self._build()
         self.reload()
 
@@ -116,7 +116,7 @@ class TracePage(QWidget):
         self._list.currentRowChanged.connect(self._on_select)
         body.addWidget(self._list)
 
-        self._detail = _TurnDetailView(self)
+        self._detail = _TraceDetailView(self)
         body.addWidget(self._detail, 1)
 
         self._body_container = QWidget(self)
@@ -124,18 +124,18 @@ class TracePage(QWidget):
         layout.addWidget(self._body_container, 1)
 
     def reload(self):
-        """从 TraceStore 重新拉取最近的 turn 列表并重渲染。"""
+        """从 TraceStore 重新拉取最近的 Trace 列表并重渲染。"""
         self._list.clear()
         self._detail.clear()
         if self._store is None or not getattr(self._store, "enabled", False):
-            self._turns = []
+            self._traces = []
             self._set_empty(True, t("settings.trace.disabled"))
             return
-        self._turns = self._store.list_turns(limit=_MAX_TURNS)
-        self._set_empty(not self._turns)
-        for turn in self._turns:
-            self._add_row(turn)
-        if self._turns:
+        self._traces = self._store.list_traces(limit=_MAX_TURNS)
+        self._set_empty(not self._traces)
+        for trace in self._traces:
+            self._add_row(trace)
+        if self._traces:
             self._list.setCurrentRow(0)
 
     def _on_score(self):
@@ -153,7 +153,7 @@ class TracePage(QWidget):
             self._score_btn.setEnabled(True)
         # 重渲染当前选中详情，让新分数立即显示。
         row = self._list.currentRow()
-        if 0 <= row < len(self._turns):
+        if 0 <= row < len(self._traces):
             self._on_select(row)
         from app.ui.toast import show_toast
 
@@ -164,39 +164,39 @@ class TracePage(QWidget):
         self._empty.setVisible(is_empty)
         self._body_container.setVisible(not is_empty)
 
-    def _add_row(self, turn: dict):
+    def _add_row(self, trace: dict):
         item = QListWidgetItem()
-        widget = _make_turn_row(turn, self)
+        widget = _make_trace_row(trace, self)
         item.setSizeHint(widget.sizeHint())
         self._list.addItem(item)
         self._list.setItemWidget(item, widget)
 
     def _on_select(self, index: int):
-        if index < 0 or index >= len(self._turns):
+        if index < 0 or index >= len(self._traces):
             self._detail.clear()
             self._save_case_btn.setEnabled(False)
             return
         self._save_case_btn.setEnabled(self._session_mgr is not None)
-        trace_id = self._turns[index].get("trace_id")
+        trace_id = self._traces[index].get("trace_id")
         if not trace_id:
             return
-        data = self._store.get_turn(trace_id)
+        data = self._store.get_trace(trace_id)
         self._detail.set_data(data)
 
     def _on_save_case(self):
-        """把当前选中的 turn 存为回归用例。
+        """把当前选中的 Trace 存为回归用例。
 
-        用户输入从该 turn 所属会话的最近一轮 user 消息取——trace 本身不存 user
+        用户输入从该 Trace 所属会话的最近一轮 user 消息取——trace 本身不存 user
         消息（trace_page 注释「不暴露可变内部结构」），所以靠 session_mgr 补。
         """
         if self._store is None or self._session_mgr is None:
             return
         row = self._list.currentRow()
-        if not (0 <= row < len(self._turns)):
+        if not (0 <= row < len(self._traces)):
             return
-        turn = self._turns[row]
-        trace_id = turn.get("trace_id")
-        session_id = turn.get("session_id") or ""
+        trace = self._traces[row]
+        trace_id = trace.get("trace_id")
+        session_id = trace.get("session_id") or ""
         user_input = _first_user_input(self._session_mgr, session_id)
         if not user_input:
             from app.ui.toast import show_toast
@@ -216,7 +216,7 @@ class TracePage(QWidget):
 
 # ── 列表行 ──────────────────────────────────────────────────────────────
 
-def _make_turn_row(turn: dict, parent: QWidget) -> QWidget:
+def _make_trace_row(trace: dict, parent: QWidget) -> QWidget:
     row = QWidget(parent)
     col = QVBoxLayout(row)
     col.setContentsMargins(8, 6, 8, 6)
@@ -224,19 +224,19 @@ def _make_turn_row(turn: dict, parent: QWidget) -> QWidget:
 
     top = QHBoxLayout()
     top.setSpacing(6)
-    label, color = _status_meta(turn.get("status", ""))
+    label, color = _status_meta(trace.get("status", ""))
     top.addWidget(_Dot(color, row))
     name = BodyLabel(label, row)
     top.addWidget(name)
     top.addStretch()
     col.addLayout(top)
 
-    started = (turn.get("started_at") or "")[:19].replace("T", " ")
+    started = (trace.get("started_at") or "")[:19].replace("T", " ")
     meta_bits = [started]
-    if turn.get("total_tokens"):
-        meta_bits.append(f"{turn['total_tokens']} tok")
-    if turn.get("duration_ms"):
-        meta_bits.append(f"{turn['duration_ms'] / 1000:.1f}s")
+    if trace.get("total_tokens"):
+        meta_bits.append(f"{trace['total_tokens']} tok")
+    if trace.get("duration_ms"):
+        meta_bits.append(f"{trace['duration_ms'] / 1000:.1f}s")
     col.addWidget(CaptionLabel("  ·  ".join(meta_bits), row))
     return row
 
@@ -261,7 +261,7 @@ class _Dot(QWidget):
 
 # ── 右侧详情：概览卡 + 分段切换 ──────────────────────────────────────────
 
-class _TurnDetailView(QWidget):
+class _TraceDetailView(QWidget):
     """单次运行详情：顶部概览卡，下方 SegmentedWidget 分页。"""
 
     _TABS = [
@@ -326,7 +326,8 @@ class _TurnDetailView(QWidget):
         self._pivot.setVisible(True)
         self._stack.setVisible(True)
 
-        self._overview.set_turn(data.get("turn", {}))
+        trace = data.get("trace") or {}
+        self._overview.set_trace(trace)
         counts = _fill_pages(self._pages, data)
         # 分段标题带计数；首个非空分页设为当前。
         first_key = None
@@ -368,30 +369,31 @@ class _OverviewCard(SimpleCardWidget):
         self._error.setTextColor(QColor("#d03050"), QColor("#ff7875"))
         layout.addWidget(self._error)
 
-    def set_turn(self, turn: dict):
-        status = turn.get("status", "")
+    def set_trace(self, trace: dict):
+        """设置 Trace 概览数据。"""
+        status = trace.get("status", "")
         label, color = _status_meta(status)
         # 重建徽章以套用语义色。
         self._badge.setText(label)
         self._badge.setCustomBackgroundColor(QColor(color), QColor(color))
 
-        sid = turn.get("session_id") or "—"
+        sid = trace.get("session_id") or "—"
         self._title.setText(t("settings.trace.session", sid=sid))
 
-        bits = [t("settings.trace.turns", n=turn.get('turn_count', 0))]
-        if turn.get("duration_ms"):
-            bits.append(f"{turn['duration_ms'] / 1000:.2f}s")
-        total = turn.get("total_tokens") or 0
+        bits = [t("settings.trace.turns", n=trace.get('turn_count', 0))]
+        if trace.get("duration_ms"):
+            bits.append(f"{trace['duration_ms'] / 1000:.2f}s")
+        total = trace.get("total_tokens") or 0
         if total:
             bits.append(
                 t("settings.trace.tokens_io", total=total,
-                  prompt=turn.get('prompt_tokens', 0),
-                  completion=turn.get('completion_tokens', 0))
+                  prompt=trace.get('prompt_tokens', 0),
+                  completion=trace.get('completion_tokens', 0))
             )
-        bits.append(t("settings.trace.trace_id", id=turn.get('trace_id', '')[:12]))
+        bits.append(t("settings.trace.trace_id", id=trace.get('trace_id', '')[:12]))
         self._metrics.setText("　·　".join(bits))
 
-        err = turn.get("error")
+        err = trace.get("error")
         self._error.setText(t("settings.trace.error", err=err) if err else "")
         self._error.setVisible(bool(err))
 
