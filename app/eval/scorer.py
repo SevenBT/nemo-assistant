@@ -41,7 +41,6 @@ def score_unscored_samples(
         try:
             scores = _score_one(trace_store, sample, judge_fn)
             if scores:
-                # 兼容 V1/V2: id/eval_sample_id
                 sample_id = sample.get("eval_sample_id") or sample.get("id")
                 if sample_id is None:
                     logger.warning("[scorer] sample missing id: %s", sample)

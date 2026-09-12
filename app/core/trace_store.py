@@ -453,10 +453,6 @@ class TraceStore:
             (trace_id, session_id or None, _now_iso()),
         )
 
-    def start_turn(self, trace_id: str, session_id: str = "") -> None:
-        """[已废弃] 使用 start_trace() 代替。"""
-        self.start_trace(trace_id, session_id)
-
     def finish_trace(
         self,
         trace_id: str,
@@ -499,19 +495,6 @@ class TraceStore:
                 conn.commit()
         except Exception:
             logger.exception("[TraceStore] finish_trace failed")
-
-    def finish_turn(
-        self,
-        trace_id: str,
-        *,
-        status: str,
-        turn_count: int = 0,
-        duration_ms: float | None = None,
-        error: str | None = None,
-    ) -> None:
-        """[已废弃] 使用 finish_trace() 代替。"""
-        self.finish_trace(trace_id, status=status, turn_count=turn_count,
-                         duration_ms=duration_ms, error=error)
 
     def record_llm_call(self, trace_id: str, seq: int, record: dict[str, Any]) -> None:
         """记录一次 LLM attempt 汇总（与网关 _write_log 同源字段）。"""
@@ -884,15 +867,6 @@ class TraceStore:
             logger.exception("[TraceStore] get_trace failed: %s", trace_id)
             return None
 
-    def get_turn(self, trace_id: str) -> dict[str, Any] | None:
-        """[已废弃] 使用 get_trace() 代替。"""
-        data = self.get_trace(trace_id)
-        if data is None:
-            return None
-        # 兼容旧代码：将 "trace" 键改为 "turn"
-        data["turn"] = data.pop("trace")
-        return data
-
     def list_traces(self, session_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         """列出最近的 Trace 汇总（可按 session 过滤），供概览/筛选。"""
         if not self.enabled:
@@ -915,10 +889,6 @@ class TraceStore:
         except Exception:
             logger.exception("[TraceStore] list_traces failed")
             return []
-
-    def list_turns(self, session_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        """[已废弃] 使用 list_traces() 代替。"""
-        return self.list_traces(session_id, limit)
 
     def prune(self, keep_traces: int = _DEFAULT_KEEP_TRACES) -> None:
         """限容：只保留最近 keep_traces 个 Trace，级联清掉其子记录。"""

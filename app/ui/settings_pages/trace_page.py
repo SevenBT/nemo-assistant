@@ -326,8 +326,7 @@ class _TraceDetailView(QWidget):
         self._pivot.setVisible(True)
         self._stack.setVisible(True)
 
-        # 兼容 V1/V2: turn/trace
-        trace = data.get("trace") or data.get("turn") or {}
+        trace = data.get("trace") or {}
         self._overview.set_trace(trace)
         counts = _fill_pages(self._pages, data)
         # 分段标题带计数；首个非空分页设为当前。

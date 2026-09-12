@@ -110,8 +110,7 @@ def score_trace(trace_data: dict) -> dict[str, float]:
     「无工具调用」误读成「成功率 0」。completed 用 0/1 表示，便于和其它比率
     一起做平均与对比。
     """
-    # 兼容 V1/V2: turn/trace
-    trace = trace_data.get("trace") or trace_data.get("turn") or {}
+    trace = trace_data.get("trace") or {}
     tool_calls = trace_data.get("tool_calls") or []
     completed = (trace.get("status") == "ok")
 
@@ -123,8 +122,3 @@ def score_trace(trace_data: dict) -> dict[str, float]:
         DIM_COMPLETED: 1.0 if completed else 0.0,
     }
     return {k: round(v, 4) for k, v in raw.items() if v is not None}
-
-
-def score_turn(turn_data: dict) -> dict[str, float]:
-    """[已废弃] 使用 score_trace() 代替。"""
-    return score_trace(turn_data)
