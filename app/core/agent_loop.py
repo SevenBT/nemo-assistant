@@ -587,10 +587,6 @@ class AgentLoop(QThread):
         except Exception:
             logger.debug("[AgentLoop] trace start failed", exc_info=True)
 
-    def _trace_start_turn(self) -> None:
-        """[已废弃] 使用 _trace_start() 代替。"""
-        self._trace_start()
-
     def _trace_finish(
         self, ctx: TurnContext, status: str, run_t0: float, error: str | None = None
     ) -> None:
@@ -609,12 +605,6 @@ class AgentLoop(QThread):
             )
         except Exception:
             logger.debug("[AgentLoop] trace finish failed", exc_info=True)
-
-    def _trace_finish_turn(
-        self, ctx: TurnContext, status: str, run_t0: float, error: str | None = None
-    ) -> None:
-        """[已废弃] 使用 _trace_finish() 代替。"""
-        self._trace_finish(ctx, status, run_t0, error)
 
     def _trace_tool_call(
         self, call_id: str, name: str, arguments: dict, result: dict | None, duration_ms: float

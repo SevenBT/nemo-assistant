@@ -212,10 +212,8 @@ class EvalPage(QWidget):
             self._detail.clear()
             return
         run = self._runs[index]
-        # 兼容 V1/V2: baseline_run_id/baseline_eval_run_id
         baseline_id = run.get("baseline_eval_run_id") or run.get("baseline_run_id")
         baseline = self._find_run(baseline_id)
-        # 兼容 V1/V2: run_id/eval_run_id
         run_id = run.get("eval_run_id") or run.get("run_id")
         results = self._store.get_eval_results(run_id)
         self._detail.set_data(run, baseline, results)
@@ -223,7 +221,6 @@ class EvalPage(QWidget):
     def _find_run(self, run_id: str | None) -> dict | None:
         if not run_id:
             return None
-        # 兼容 V1/V2: 尝试两种列名
         return next(
             (r for r in self._runs
              if r.get("eval_run_id") == run_id or r.get("run_id") == run_id),

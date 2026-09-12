@@ -13,7 +13,7 @@ def _store(tmp_path):
 
 
 def _seed_turn(store, trace_id, *, status="ok", tools=None):
-    store.start_turn(trace_id, "sess")
+    store.start_trace(trace_id, "sess")
     for tc in tools or []:
         store.record_tool_call(
             trace_id,
@@ -27,7 +27,7 @@ def _seed_turn(store, trace_id, *, status="ok", tools=None):
         trace_id, turn=0, answer="答复", tool_count=len(tools or []),
         error_count=0, had_error=False,
     )
-    store.finish_turn(trace_id, status=status, turn_count=1, duration_ms=10.0)
+    store.finish_trace(trace_id, status=status, turn_count=1, duration_ms=10.0)
 
 
 def test_scorer_fills_scores(tmp_path):
@@ -91,7 +91,6 @@ def test_eval_run_lifecycle(tmp_path):
 
     runs = store.list_eval_runs()
     assert len(runs) == 1
-    # 兼容 V1/V2: run_id/eval_run_id
     run_id_key = "eval_run_id" if "eval_run_id" in runs[0] else "run_id"
     assert runs[0][run_id_key] == "r1"
     assert json.loads(runs[0]["avg_scores"])[rc.DIM_COMPLETED] == 1.0

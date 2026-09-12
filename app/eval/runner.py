@@ -198,7 +198,6 @@ def _latest_eval_run_id(trace_store) -> str | None:
     runs = trace_store.list_eval_runs(limit=1)
     if not runs:
         return None
-    # 兼容 V1/V2: run_id/eval_run_id
     return runs[0].get("eval_run_id") or runs[0].get("run_id")
 
 
