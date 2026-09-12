@@ -18,6 +18,7 @@ import uuid
 from typing import Any, Callable
 
 from app.core.agent_loop import AgentLoop
+from app.core.audit_hooks import EvalHook
 from app.eval import metrics, rule_checks
 
 logger = logging.getLogger(__name__)
