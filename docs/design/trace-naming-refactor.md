@@ -73,7 +73,22 @@
 
 **Commit:** `437c8bb` - feat(trace): Phase 1 - 实现 Schema V2 迁移基础设施
 
-### Phase 2: 更新其他模块调用 ✅ **已完成**
+## 实施阶段
+
+### Phase 1: 数据库 Schema 迁移 ✅ **已完成**
+- [x] 实现 schema version 跟踪
+- [x] 实现自动备份功能
+- [x] 编写迁移 SQL（V2）
+- [x] 测试迁移脚本
+- [x] TraceStore 新 API（start_trace, finish_trace, get_trace, list_traces）
+- [x] 保留旧 API 兼容层（start_turn → start_trace）
+- [x] 动态列名检测（兼容 V1/V2）
+- [x] 更新 scorer 和 rule_checks
+- [x] 测试通过（test_eval_scorer_store.py）
+
+**Commit:** `437c8bb` - feat(trace): Phase 1 - 实现 Schema V2 迁移基础设施
+
+### Phase 2: 核心模块更新 ✅ **已完成**
 - [x] AgentLoop (_trace_start, _trace_finish)
 - [x] Runner (trace_data, eval_run_id, get_trace, score_trace)
 - [x] Cases (get_trace)
@@ -91,7 +106,29 @@
 
 **Commit:** `d4f2876` - feat(trace): Phase 3 - 更新 UI 层命名
 
-### Phase 4: 文档与清理（进行中）
+### Phase 4: 文档与清理 ✅ **已完成**
+- [x] 添加迁移指南文档
+- [x] 更新设计文档
+- [x] 修复 bug（EvalPage, EvalHook）
+
+**Commits:**
+- `d19459e` - docs: 添加 Trace 命名迁移指南
+- `e8a2939` - fix(eval): 修复 EvalPage 兼容 V1/V2 列名
+- `b6af5d1` - fix(eval): 添加缺失的 EvalHook 导入
+
+### Phase 5: 彻底清理 ✅ **已完成**
+- [x] 删除所有废弃 API (start_turn, finish_turn, get_turn, list_turns, score_turn)
+- [x] 删除所有兼容代码和注释
+- [x] 更新所有测试用例
+- [x] 测试验证通过（358 passed）
+
+**Commit:** `f90b9d3` - refactor: 彻底删除所有废弃 API 和兼容代码
+
+### 最终合并 ✅ **已完成**
+- [x] 合并到 main 分支
+- [x] 所有测试通过
+
+**Commit:** `28aa3bd` - Merge branch 'refactor/trace-naming-unification'
 - [ ] 删除旧 API
 - [ ] 全量测试
 - [ ] 文档更新
