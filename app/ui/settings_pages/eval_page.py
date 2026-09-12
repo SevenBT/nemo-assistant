@@ -66,13 +66,16 @@ class _EvalRunWorker(QThread):
     progress = pyqtSignal(int, int, str)  # (完成数, 总数, 当前用例标题)
     finished_run = pyqtSignal(object, str)  # (run_id 或 None, 错误信息)
 
-    def __init__(self, *, trace_store, llm, registry, prompt_builder, parent=None):
-        super().__init__(parent)
+    def __init__(self, *, trace_store, llm, registry, prompt_builder):
+        # 不设置 parent，让线程独立于 UI 组件生命周期
+        super().__init__(parent=None)
         self._store = trace_store
         self._llm = llm
         self._registry = registry
         self._prompt_builder = prompt_builder
         self._cancelled = False
+        # 线程结束后自动删除
+        self.finished.connect(self.deleteLater)
 
     def run(self):
         from app.eval import runner
@@ -136,16 +139,29 @@ class EvalPage(QWidget):
         self.reload()
 
     def hideEvent(self, event):
-        """离开评测页面时取消 worker 的信号发送（后台继续运行）。"""
+        """离开评测页面时断开信号连接，worker 继续后台运行。"""
         super().hideEvent(event)
         if self._run_worker is not None and self._run_worker.isRunning():
+            # 断开信号连接，避免对已销毁的 UI 发送信号
+            try:
+                self._run_worker.progress.disconnect(self._on_run_progress)
+                self._run_worker.finished_run.disconnect(self._on_run_finished)
+            except TypeError:
+                pass  # 信号已断开
             self._run_worker.cancel()
 
     def closeEvent(self, event):
-        """关闭时取消 worker 的信号发送（后台继续运行）。"""
+        """关闭时断开信号连接，worker 继续后台运行。"""
         super().closeEvent(event)
         if self._run_worker is not None and self._run_worker.isRunning():
+            try:
+                self._run_worker.progress.disconnect(self._on_run_progress)
+                self._run_worker.finished_run.disconnect(self._on_run_finished)
+            except TypeError:
+                pass
             self._run_worker.cancel()
+            # 不再持有引用，让线程独立存活
+            self._run_worker = None
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -268,7 +284,6 @@ class EvalPage(QWidget):
             llm=self._llm,
             registry=self._registry,
             prompt_builder=self._prompt_builder,
-            parent=self,
         )
         worker.progress.connect(self._on_run_progress)
         worker.finished_run.connect(self._on_run_finished)
