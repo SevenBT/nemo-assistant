@@ -426,10 +426,10 @@ ZH: dict[str, str] = {
 
     # ── 设置：评测集页 ──
     "settings.eval.title": "评测集",
-    "settings.eval.run": "跑回归",
+    "settings.eval.run": "运行评测",
     "settings.eval.run_tip": "用当前 model/prompt 重跑所有启用用例，规则打分并和上次对比。",
     "settings.eval.refresh": "刷新",
-    "settings.eval.hint": "从「运行记录」页把踩过坑的对话存为用例。换模型或改 prompt 后点「跑回归」，确认旧问题没复活、核心指标没退步。",
+    "settings.eval.hint": "从「运行记录」页把踩过坑的对话存为用例。换模型或改 prompt 后点「运行评测」，确认旧问题没复活、核心指标没退步。",
     "settings.eval.disabled": "遥测未启用，无评测集。",
     "settings.eval.cases": "回归用例",
     "settings.eval.runs": "历史运行",
@@ -437,7 +437,7 @@ ZH: dict[str, str] = {
     "settings.eval.running_progress": "运行中… {done}/{total}",
     "settings.eval.toast_title": "评测运行",
     "settings.eval.toast_failed": "运行失败：{error}",
-    "settings.eval.toast_done": "回归运行完成",
+    "settings.eval.toast_done": "评测运行完成",
     "settings.eval.toast_no_cases": "没有可运行的用例",
     "settings.eval.case_disabled": "（停用）{title}",
     "settings.eval.expected_tools": "期望工具 {tools}",
