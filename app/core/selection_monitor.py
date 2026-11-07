@@ -381,10 +381,17 @@ class SelectionMonitor(QObject):
         包围盒不可用时退回「按下点 + 松手点」推算的锚点（水平中点、垂直取较低
         者）——两者都与拖选方向无关，浮标不会因方向不同而偏移或盖住文字。
         """
+        capture_started = time.perf_counter()
         try:
             status, text = selection_uia.query_selection()
         except Exception:
             status, text = selection_uia.SelectionStatus.NO_TEXT_PATTERN, ""
+        logger.info(
+            "[SelectionTiming] stage=uia_capture elapsed_ms=%.2f status=%s chars=%d",
+            (time.perf_counter() - capture_started) * 1000,
+            getattr(status, "name", str(status)),
+            len(text or ""),
+        )
 
         emit = should_emit(status, self._press_text_cursor)
         # 综合 UIA 状态与按下时光标形状决定是否弹（拖标题栏/桌面被这里挡掉）。

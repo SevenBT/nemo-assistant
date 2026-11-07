@@ -530,6 +530,7 @@ EN: dict[str, str] = {
 
     # ── Result bubble ──
     "resultbubble.requestFailed": "LLM request failed",
+    "resultbubble.timeout": "Request timed out. Check your proxy or network and try again.",
     "resultbubble.copyTooltip": "Copy rewrite",
     "resultbubble.replaceTooltip": "Replace original (write back to source app)",
     "resultbubble.unsupportedAction": "Unsupported action",
@@ -830,7 +831,7 @@ EN: dict[str, str] = {
     # ── Text actions (selection → LLM) ──
     "textaction.explain.label": "Explain",
     "textaction.explain.title": "Explain selection",
-    "textaction.explain.prompt": "Please explain the meaning of the following text concisely:\n\n{text}",
+    "textaction.explain.prompt": "Briefly explain this text in Chinese:\n\n{text}",
     "textaction.continue.label": "Continue in session",
     "textaction.newContinue.label": "New session",
     "textaction.polish.label": "Polish",
@@ -838,7 +839,7 @@ EN: dict[str, str] = {
     "textaction.polish.prompt": "Polish the following text to make it smoother and more accurate, keeping the original meaning and language. Output only the polished text, with no explanation, prefix/suffix, or code-block wrapping:\n\n{text}",
     "textaction.translate.label": "Translate",
     "textaction.translate.title": "Translate",
-    "textaction.translate.prompt": "Translate the following text: if it is Chinese, translate to English; otherwise translate to Chinese. Output only the translation, with no explanation, prefix/suffix, or code-block wrapping:\n\n{text}",
+    "textaction.translate.prompt": "Translate Chinese to English and other languages to Chinese. Output only the translation:\n\n{text}",
     "textaction.fix.label": "Fix",
     "textaction.fix.title": "Fix rewrite",
     "textaction.fix.prompt": "Fix typos, punctuation, and grammar errors in the following text, keeping the original meaning, style, and language. Output only the corrected text, with no explanation, prefix/suffix, or code-block wrapping:\n\n{text}",

@@ -530,6 +530,7 @@ ZH: dict[str, str] = {
 
     # ── 结果气泡 ──
     "resultbubble.requestFailed": "LLM 请求失败",
+    "resultbubble.timeout": "请求超时，检查代理或网络后重试",
     "resultbubble.copyTooltip": "复制改写结果",
     "resultbubble.replaceTooltip": "替换原文（写回源应用）",
     "resultbubble.unsupportedAction": "不支持的动作",
@@ -830,7 +831,7 @@ ZH: dict[str, str] = {
     # ── 划词动作（选中文字 → LLM）──
     "textaction.explain.label": "解释",
     "textaction.explain.title": "解释选中",
-    "textaction.explain.prompt": "请用简洁的语言解释下面这段文字的含义：\n\n{text}",
+    "textaction.explain.prompt": "请用中文简要解释：\n\n{text}",
     "textaction.continue.label": "续入会话",
     "textaction.newContinue.label": "新建会话",
     "textaction.polish.label": "润色",
@@ -838,7 +839,7 @@ ZH: dict[str, str] = {
     "textaction.polish.prompt": "润色下面这段文字，使其更通顺自然、表达更准确，保持原意与语言。只输出润色后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}",
     "textaction.translate.label": "翻译",
     "textaction.translate.title": "翻译",
-    "textaction.translate.prompt": "翻译下面这段文字：是中文就译成英文，是其他语言就译成中文。只输出译文，不要任何解释、前后缀或代码块包裹：\n\n{text}",
+    "textaction.translate.prompt": "中文译英文，其他语言译中文，只输出译文：\n\n{text}",
     "textaction.fix.label": "订正",
     "textaction.fix.title": "订正改写",
     "textaction.fix.prompt": "修正下面这段文字里的错别字、标点和语法错误，保持原意、风格和语言不变。只输出修正后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}",

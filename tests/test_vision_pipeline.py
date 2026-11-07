@@ -59,6 +59,7 @@ def test_deepseek_images_use_transport_that_preserves_pixels(monkeypatch, base_u
     assert calls[0]["model"] == "openai/test-model"
     assert calls[0]["api_base"] == (base_url or "https://api.deepseek.com/beta")
     assert calls[0]["api_key"] == "test-key"
+    assert calls[0]["extra_body"] == {"thinking": {"type": "disabled"}}
     assert calls[0]["messages"] == original
     assert messages == original
 
@@ -72,6 +73,10 @@ def test_text_requests_keep_existing_provider_routing(monkeypatch, provider):
 
     assert calls[0]["model"] == f"{provider}/test-model"
     assert "api_base" not in calls[0]
+    if provider == "deepseek":
+        assert calls[0]["extra_body"] == {"thinking": {"type": "disabled"}}
+    else:
+        assert "extra_body" not in calls[0]
 
 
 def test_other_vision_provider_keeps_existing_routing(monkeypatch):

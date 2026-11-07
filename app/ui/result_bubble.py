@@ -13,6 +13,9 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
+import uuid
 
 from PyQt6.QtCore import QPoint, QRect, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QTextCursor
@@ -25,13 +28,9 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import TransparentToolButton, FluentIcon
 
-from app.core.agent_interface import AgentCallbacks
 from app.core.config import cfg
 from app.core.llm_gateway import CancellationToken, LLMGateway
-from app.core.agent import Agent
-from app.core.agent_context import AgentContext
 from app.i18n import t
-from app.tools.registry import ToolRegistry
 from app.ui import style
 from app.ui.global_click_watcher import GlobalClickWatcher
 from app.ui.non_activating_popup import NonActivatingPopup
@@ -48,18 +47,109 @@ _BUBBLE_MIN_HEIGHT = 80
 _BUBBLE_MAX_HEIGHT = 420
 _H_MARGIN = 16   # 内容区左右内边距之和（8 + 8）
 _V_CHROME = 44   # 上下内边距 + footer 工具栏高度的预留
+_PROMPT_STREAM_TIMEOUT_SECONDS = 30
 
-# 气泡场景无需工具；空的 ToolRegistry 仅用于满足 Agent 构造要求。
-_BUBBLE_REGISTRY = ToolRegistry()
+
+def _run_prompt_stream(
+    gateway, prompt, cancel_token, emit_text, emit_done, emit_error,
+    *, request_id, action_key, request_started, prompt_prepare_ms,
+):
+    """Send a standalone user prompt through the LLM gateway and forward events."""
+    try:
+        messages = [{"role": "user", "content": prompt}]
+        completed = False
+        worker_started = time.perf_counter()
+        gateway_started = None
+        first_token_at = None
+        ui_dispatch_started = None
+        logger.info(
+            "[SelectionTiming] request_id=%s stage=request_ready action=%s "
+            "prompt_chars=%d messages=1 system_messages=0 tools=0 prompt_prepare_ms=%.2f",
+            request_id,
+            action_key,
+            len(prompt),
+            prompt_prepare_ms,
+        )
+        logger.info(
+            "[SelectionTiming] request_id=%s stage=worker_started elapsed_ms=%.2f",
+            request_id,
+            (worker_started - request_started) * 1000,
+        )
+        gateway_started = time.perf_counter()
+        for event in gateway.chat_stream(
+            messages,
+            tools=None,
+            cancel_token=cancel_token,
+            trace_id=request_id,
+            stream_timeout=_PROMPT_STREAM_TIMEOUT_SECONDS,
+        ):
+            if cancel_token.is_cancelled():
+                return
+            if event.get("type") == "text":
+                token_at = time.perf_counter()
+                if first_token_at is None:
+                    first_token_at = token_at
+                    logger.info(
+                        "[SelectionTiming] request_id=%s stage=first_token gateway_ttft_ms=%.2f",
+                        request_id,
+                        (first_token_at - gateway_started) * 1000,
+                    )
+                ui_dispatch_started = token_at
+                emit_text(event.get("delta", ""), token_at)
+            elif event.get("type") == "error":
+                failed_at = time.perf_counter()
+                logger.warning(
+                    "[SelectionTiming] request_id=%s stage=gateway_error elapsed_ms=%.2f "
+                    "gateway_ms=%.2f error=%s",
+                    request_id,
+                    (failed_at - request_started) * 1000,
+                    (failed_at - gateway_started) * 1000,
+                    event.get("error_kind") or event.get("message", "unknown"),
+                )
+                emit_error(event.get("message", t("resultbubble.requestFailed")))
+                return
+            elif event.get("type") == "done":
+                completed = True
+        gateway_finished = time.perf_counter()
+        if not completed and not cancel_token.is_cancelled():
+            logger.warning(
+                "[SelectionTiming] request_id=%s stage=incomplete_stream elapsed_ms=%.2f "
+                "gateway_ms=%.2f ttft_ms=%s",
+                request_id,
+                (gateway_finished - request_started) * 1000,
+                (gateway_finished - gateway_started) * 1000,
+                "none" if first_token_at is None else f"{(first_token_at - gateway_started) * 1000:.2f}",
+            )
+            emit_error(t("resultbubble.timeout"))
+            return
+        if not cancel_token.is_cancelled():
+            completion_emitted = time.perf_counter()
+            logger.info(
+                "[SelectionTiming] request_id=%s stage=gateway_done gateway_ms=%.2f "
+                "ttft_ms=%s generation_after_first_ms=%s",
+                request_id,
+                (gateway_finished - gateway_started) * 1000,
+                "none" if first_token_at is None else f"{(first_token_at - gateway_started) * 1000:.2f}",
+                "none" if first_token_at is None else f"{(gateway_finished - first_token_at) * 1000:.2f}",
+            )
+            emit_done(request_id, completion_emitted, ui_dispatch_started)
+    except Exception as exc:
+        if not cancel_token.is_cancelled():
+            logger.exception(
+                "[SelectionTiming] request_id=%s stage=worker_error elapsed_ms=%.2f",
+                request_id,
+                (time.perf_counter() - request_started) * 1000,
+            )
+            emit_error(str(exc))
 
 
 class ResultBubble(NonActivatingPopup):
     """划词结果气泡：就地流式显示 LLM 快查结果。"""
 
     # 信号
-    _text_chunk = pyqtSignal(str)   # 从 agent 线程 marshal 到主线程
-    _stream_done = pyqtSignal()
-    _stream_error = pyqtSignal(str)
+    _text_chunk = pyqtSignal(int, str, float)
+    _stream_done = pyqtSignal(int, float, float)
+    _stream_error = pyqtSignal(int, str)
     _hide_requested = pyqtSignal()  # 全球点击监听
     replace_requested = pyqtSignal(str)  # rewrite：用户点「替换原文」，载荷为最终结果
     copy_requested = pyqtSignal(str)     # rewrite：用户点「复制」，载荷为最终结果
@@ -75,8 +165,13 @@ class ResultBubble(NonActivatingPopup):
         )
         self._bg_color = QColor("#1E1E1E")
         self._border_color = QColor("#333333")
-        self._ctx: AgentContext | None = None
-        self._agent: Agent | None = None
+        self._llm_gateway = LLMGateway()
+        self._cancel_token: CancellationToken | None = None
+        self._stream_thread: threading.Thread | None = None
+        self._stream_generation = 0
+        self._request_id = ""
+        self._request_started = 0.0
+        self._prompt_prepare_ms = 0.0
         self._streaming = False
         self._full_text = ""
         # 当前模式："oneshot"（只读快查）或 "rewrite"（可编辑 + footer 回填）。
@@ -243,8 +338,11 @@ class ResultBubble(NonActivatingPopup):
         self._start_stream(x, y, text, action_key)
 
     def _start_stream(self, x: int, y: int, text: str, action_key: str):
-        """共用的流式启动：复位状态、定位显示、渲染提示词、起 Agent。"""
+        """Reset the bubble and stream one user-only prompt in a worker thread."""
         self._cancel_current()
+        generation = self._stream_generation
+        self._request_id = uuid.uuid4().hex[:12]
+        self._request_started = time.perf_counter()
         # 起始：清空内容、复位宽度、定位、显示。
         self._full_text = ""
         self._streaming = True
@@ -262,24 +360,43 @@ class ResultBubble(NonActivatingPopup):
             self._content.setPlainText(t("resultbubble.unsupportedAction"))
             self._streaming = False
             return
+        prompt_started = time.perf_counter()
         prompt = action.render(text)
-
-        messages = [{"role": "user", "content": prompt}]
-
-        self._ctx = AgentContext(
-            callbacks=AgentCallbacks(
-                on_text_chunk=lambda delta: self._text_chunk.emit(delta),
-                on_done=lambda info: (
-                    self._stream_done.emit()
-                    if info.get("ok")
-                    else self._stream_error.emit(info.get("error", t("resultbubble.requestFailed")))
-                ),
-            ),
-            llm_gateway=LLMGateway(),
-            registry=_BUBBLE_REGISTRY,
+        self._prompt_prepare_ms = (time.perf_counter() - prompt_started) * 1000
+        logger.info(
+            "[SelectionTiming] request_id=%s stage=prompt_prepared action=%s "
+            "selection_chars=%d elapsed_ms=%.2f system_prompt=none history=none",
+            self._request_id,
+            action_key,
+            len(text),
+            self._prompt_prepare_ms,
         )
-        self._agent = Agent(self._ctx, messages)
-        self._agent.start()
+        cancel_token = CancellationToken()
+        self._cancel_token = cancel_token
+        self._stream_thread = threading.Thread(
+            target=_run_prompt_stream,
+            args=(
+                self._llm_gateway,
+                prompt,
+                cancel_token,
+                lambda delta, emitted_at: self._text_chunk.emit(
+                    generation, delta, emitted_at
+                ),
+                lambda request_id, finished_at, last_ui_at: self._stream_done.emit(
+                    generation, finished_at, last_ui_at or finished_at
+                ),
+                lambda message: self._stream_error.emit(generation, message),
+            ),
+            kwargs={
+                "request_id": self._request_id,
+                "action_key": action_key,
+                "request_started": self._request_started,
+                "prompt_prepare_ms": self._prompt_prepare_ms,
+            },
+            name="selection-prompt-stream",
+            daemon=True,
+        )
+        self._stream_thread.start()
 
     def _on_copy_clicked(self):
         self.copy_requested.emit(self._content.toPlainText().strip())
@@ -323,7 +440,16 @@ class ResultBubble(NonActivatingPopup):
 
     # ── 流式文本处理 ────────────────────────────────────────────────────
 
-    def _append_text(self, delta: str):
+    def _append_text(self, generation: int, delta: str, emitted_at: float):
+        if generation != self._stream_generation:
+            return
+        dispatch_ms = (time.perf_counter() - emitted_at) * 1000
+        if self._full_text == "":
+            logger.info(
+                "[SelectionTiming] request_id=%s stage=first_ui_chunk dispatch_ms=%.2f",
+                self._request_id,
+                dispatch_ms,
+            )
         self._full_text += delta
         self._content.setPlainText(self._full_text)
         # 滚动到底部
@@ -366,8 +492,22 @@ class ResultBubble(NonActivatingPopup):
 
         self._reposition()
 
-    def _on_stream_done(self):
+    def _on_stream_done(self, generation: int, finished_at: float, last_ui_at: float):
+        if generation != self._stream_generation:
+            return
+        ui_finished_at = time.perf_counter()
+        logger.info(
+            "[SelectionTiming] request_id=%s stage=ui_done total_ms=%.2f "
+            "ui_finalize_ms=%.2f ui_after_last_chunk_ms=%.2f result_chars=%d",
+            self._request_id,
+            (ui_finished_at - self._request_started) * 1000,
+            (ui_finished_at - finished_at) * 1000,
+            (ui_finished_at - last_ui_at) * 1000,
+            len(self._full_text),
+        )
         self._streaming = False
+        self._cancel_token = None
+        self._stream_thread = None
         self._content.setPlaceholderText("")
         if self._mode == "rewrite":
             # 改写完成：剥离常见前缀/代码块包裹后回填进编辑区，启用回填按钮。
@@ -380,18 +520,30 @@ class ResultBubble(NonActivatingPopup):
             self._replace_btn.setEnabled(has_text)
             self._copy_btn.setEnabled(has_text)
 
-    def _on_stream_error(self, msg: str):
+    def _on_stream_error(self, generation: int, msg: str):
+        if generation != self._stream_generation:
+            return
         self._streaming = False
+        logger.warning(
+            "[SelectionTiming] request_id=%s stage=ui_error total_ms=%.2f "
+            "result_chars=%d",
+            self._request_id,
+            (time.perf_counter() - self._request_started) * 1000,
+            len(self._full_text),
+        )
+        self._cancel_token = None
+        self._stream_thread = None
         if not self._full_text:
             self._content.setPlainText(t("resultbubble.error", msg=msg))
 
     # ── 取消 / 清理 ────────────────────────────────────────────────────
 
     def _cancel_current(self):
-        if self._ctx is not None:
-            self._ctx.cancel()
-            self._ctx = None
-        self._agent = None
+        self._stream_generation += 1
+        if self._cancel_token is not None:
+            self._cancel_token.cancel()
+            self._cancel_token = None
+        self._stream_thread = None
         self._streaming = False
 
     def hideEvent(self, event):
