@@ -368,7 +368,12 @@ class ScreenshotOverlay(QWidget):
             round(rect.width() * dpr),
             round(rect.height() * dpr),
         )
-        piece = self._frozen.copy(src)
+        # Convert to QImage before cropping to match the paste path encoding
+        # and avoid GPU-specific metadata that may confuse vision APIs.
+        image = self._frozen.toImage()
+        cropped_image = image.copy(src)
+        # Convert back to QPixmap for display (keeps interface unchanged)
+        piece = QPixmap.fromImage(cropped_image)
         piece.setDevicePixelRatio(dpr)
         return piece
 

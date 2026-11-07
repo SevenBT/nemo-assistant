@@ -820,6 +820,8 @@ ZH: dict[str, str] = {
     "prompt.timeHint": "[当前时间: {time}]",
     "prompt.fileLabel": "[文件: {name}]\n{content}",
     "prompt.imageLabel": "[图片: {name}]\n{content}",
+    "prompt.imageVisionDisabled": "图片已附加，但未发送图片像素：识图能力已关闭，或自动模式未确认当前模型支持视觉。下方如有内容，仅为 OCR 提取的文字。请说明此限制，并提示在设置中启用「识图能力」及选择支持视觉的模型；重复上传或搜索本地文件不能解决识图开关关闭的问题。",
+    "prompt.imageUnavailable": "图片附件无法读取，未发送图片像素。下方如有内容，仅为此前提取的 OCR 文字；请说明原图当前不可读取。",
     "prompt.defaultUser": "你是一个智能AI助手。你可以调用工具来帮助用户完成任务。\n\n请用中文回复。",
     "prompt.tool.scheduled_task": "\n【定时任务】统一用 scheduled_task 工具，通过 action 区分操作：\n- 创建：action=create。触发器配置示例：\n  · 每天9点: {\"trigger_type\": \"cron\", \"trigger_config\": {\"hour\": 9, \"minute\": 0}}\n  · 每小时: {\"trigger_type\": \"interval\", \"trigger_config\": {\"hours\": 1}}\n  · 一次性: {\"trigger_type\": \"date\", \"trigger_config\": {\"run_date\": \"2025-12-31 09:00:00\"}}\n- 列出：action=list。\n- 删除：action=delete，提供 job_id 参数。\n",
     "prompt.tool.note": "\n【笔记】使用 note 工具：\n- action=list 查看用户的笔记列表和内容预览。\n- action=create 新建笔记（需 title + content）。\n- 需要把当前对话总结成笔记时，自己生成总结文本作为 content，用 action=create 保存。\n",

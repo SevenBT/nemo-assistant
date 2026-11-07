@@ -67,6 +67,7 @@ _VISION_MODEL_MARKERS = (
     "claude-3", "claude-4", "claude-opus", "claude-sonnet", "claude-haiku",
     "claude-fable", "claude-mythos", "claude-sonnet-5", "claude-haiku-5",
     "gemini",
+    "deepseek",
     "vl", "vision", "llava", "qwen-vl", "qwen2-vl", "qwen2.5-vl", "qwen3",
     "pixtral", "internvl", "minicpm-v", "glm-4v", "glm-5v", "step-1v",
 )

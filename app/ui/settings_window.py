@@ -118,7 +118,8 @@ class SettingsWindow(QDialog):
         self._api_page = ApiPage(self)
         self._stack.addWidget(self._api_page)
         self._stack.addWidget(ToolsPage(self._registry, self))
-        self._stack.addWidget(HotkeysPage(self._hotkey_mgr, self))
+        self._hotkeys_page = HotkeysPage(self._hotkey_mgr, self)
+        self._stack.addWidget(self._hotkeys_page)
         self._stack.addWidget(WindowPage(self))
         self._selection_page = SelectionPage(self)
         self._stack.addWidget(self._selection_page)
@@ -151,12 +152,14 @@ class SettingsWindow(QDialog):
     def accept(self):
         self._api_page.save()
         self._selection_page.save()
+        self._hotkeys_page.save()
         cfg.save()
         super().accept()
 
     def closeEvent(self, event):
         self._api_page.save()
         self._selection_page.save()
+        self._hotkeys_page.save()
         cfg.set(cfg.settingsWidth, self.width())
         cfg.set(cfg.settingsHeight, self.height())
         cfg.set(cfg.settingsPage, self._nav.currentRow())

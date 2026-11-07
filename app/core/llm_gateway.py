@@ -558,11 +558,42 @@ class LiteLLMAdapter:
         }
         if request.base_url:
             kwargs["api_base"] = request.base_url
+        if request.provider == "deepseek" and any(
+            isinstance(message.get("content"), list)
+            and any(
+                isinstance(part, dict) and part.get("type") == "image_url"
+                for part in message["content"]
+            )
+            for message in request.messages
+        ):
+            # LiteLLM's DeepSeek transformer flattens content lists to text,
+            # dropping image_url parts. Use its OpenAI-compatible transport
+            # for image requests while retaining the DeepSeek endpoint/key.
+            kwargs["model"] = f"openai/{request.model}"
+            kwargs["api_base"] = request.base_url or "https://api.deepseek.com/beta"
         if request.tools:
             kwargs["tools"] = request.tools
             kwargs["tool_choice"] = "auto"
         if request.stream_timeout is not None:
             kwargs["timeout"] = request.stream_timeout
+
+        # DEBUG: 打印发送给模型的 messages 结构
+        logger.info(f"[LLM] 发送 {len(request.messages)} 条消息给模型")
+        for i, msg in enumerate(request.messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                logger.info(f"[LLM] msg[{i}] role={role}, content=list({len(content)} parts)")
+                for j, part in enumerate(content):
+                    part_type = part.get("type", "unknown")
+                    if part_type == "text":
+                        text = part.get("text", "")
+                        logger.info(f"[LLM]   part[{j}] type=text, len={len(text)}")
+                    elif part_type == "image_url":
+                        url = part.get("image_url", {}).get("url", "")
+                        logger.info(f"[LLM]   part[{j}] type=image_url, url_len={len(url)}")
+            else:
+                logger.info(f"[LLM] msg[{i}] role={role}, content_len={len(str(content))}")
 
         try:
             stream = litellm.completion(**kwargs)

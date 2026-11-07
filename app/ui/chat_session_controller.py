@@ -1,8 +1,13 @@
-"""Chat session and AgentLoop UI controller."""
+"""Chat session and AgentThread UI controller."""
+
+import logging
 
 from PyQt6.QtCore import QObject
 
-from app.core.agent_loop import AgentLoop
+logger = logging.getLogger(__name__)
+
+from app.core.agent_hooks import ConsolidatorHook
+from app.core.agent_thread import AgentThread
 from app.core.audit_hooks import EvalHook, SecurityAuditHook
 from app.core.config import cfg
 from app.i18n import t, all_translations
@@ -64,7 +69,7 @@ class ChatSessionController(QObject):
         self._trace_store = trace_store
 
         self._current_session_id: str | None = None
-        self._workers: dict[str, AgentLoop] = {}
+        self._workers: dict[str, AgentThread] = {}
         self._cancelling_sessions: set[str] = set()
         self._session_live: dict[str, dict] = {}
         # 待生效编辑：{sid: user message id}。普通发送永不截断历史；只有
@@ -154,13 +159,20 @@ class ChatSessionController(QObject):
     def start_vision_session(self, attachments: list, vision_action):
         """识图：为每次截图动作新建一个会话并切过去，附上图片。
 
-        有预设提示词的动作（解释/翻译/解题/转表格）直接连图带词发出去；
-        通用「问AI」预设为空，只把图挂上、光标停在输入框等用户输入。
+        所有识图动作（解释/翻译/解题/转表格/问AI）都会将图片添加到附件预览、
+        填充预设提示词（若有）、光标聚焦到输入框,等待用户点击发送按钮。
+        用户可以在发送前修改提示词或追加额外问题。
         """
         session = self._sessions.create(title=vision_action.session_title)
+        logger.info(f"[Vision] 创建新会话后 messages 数量: {len(session.messages)}")
+
         sessions = self._sessions.get_sessions()
         self._session_panel.load(sessions, session.id)
         self.switch_session(session.id)
+
+        # 验证切换后的状态
+        session_after_switch = self._sessions.get(session.id)
+        logger.info(f"[Vision] 切换会话后 messages 数量: {len(session_after_switch.messages)}")
 
         self._input.add_pending_attachments(attachments)
 
@@ -397,27 +409,24 @@ class ChatSessionController(QObject):
         self._begin_turn(sid)
 
     def _begin_turn(self, sid: str):
-        """启动一轮 AgentLoop：装配 live 状态、压缩历史、起 worker。
+        """启动一轮 AgentThread：装配 live 状态、起 worker。
 
         submit() 与 regenerate_last() 共用：两者都在会话尾部已有一条空的
         assistant 占位消息、并设好 live 状态后调用此方法，避免重复的
         worker 装配逻辑。
+
+        对话压缩已迁移至 ConsolidatorHook（before_turn），不再在此直接调用
+        consolidator。
         """
         self._input.set_running(True)
         self._tool_status.hide()
         self._chat.start_typing()
 
         session = self._sessions.get(sid)
-        if self._consolidator is not None:
-            original_msgs = session.messages[:-1]
-            compressed = self._consolidator.maybe_consolidate(original_msgs, sid)
-            if len(compressed) < len(original_msgs):
-                session.messages = compressed + [session.messages[-1]]
-                self._sessions.save_session(sid)
 
         api_msgs = self._prompt_builder.build(session.messages[:-1], sid)
 
-        worker = AgentLoop(
+        worker = AgentThread(
             llm_gateway=self._llm,
             registry=self._registry,
             api_messages=api_msgs,
@@ -510,17 +519,21 @@ class ChatSessionController(QObject):
         return None
 
     def _build_hooks(self) -> list:
-        """构建本次 turn 的生命周期 hook（安全审计 + 评测埋点）。
+        """构建本次 turn 的生命周期 hook（对话压缩 + 安全审计 + 评测埋点）。
 
-        trace_store 为 None（遥测禁用）时不挂任何 hook，省去无意义开销。
+        trace_store 为 None（遥测禁用）时不挂安全/评测 hook，省去无意义开销。
         安全 hook 默认只审计不拦截；后续若要按工具开关拦截，传 blocked_tools。
+        ConsolidatorHook 独立于 trace_store，有 consolidator 就挂。
         """
-        if self._trace_store is None:
-            return []
-        return [
-            SecurityAuditHook(self._trace_store),
-            EvalHook(self._trace_store),
-        ]
+        hooks: list = []
+        if self._trace_store is not None:
+            hooks.extend([
+                SecurityAuditHook(self._trace_store),
+                EvalHook(self._trace_store),
+            ])
+        if self._consolidator is not None:
+            hooks.append(ConsolidatorHook(self._consolidator))
+        return hooks
 
     # ── 划词「续入/新建会话」：填入快速会话输入框，等用户手动发 ──────────────
     def compose_in_reading(self, text: str, *, force_new: bool) -> str:
@@ -559,7 +572,7 @@ class ChatSessionController(QObject):
         for sid in list(self._workers):
             self.cancel_worker(sid, mark_cancelled=False)
 
-    def _connect_worker(self, sid: str, worker: AgentLoop):
+    def _connect_worker(self, sid: str, worker: AgentThread):
         worker.text_chunk.connect(
             lambda delta, s=sid, w=worker: self._on_text_chunk(s, delta, w)
         )
@@ -583,11 +596,11 @@ class ChatSessionController(QObject):
             lambda s=sid, w=worker: self._on_worker_finished(s, w)
         )
 
-    def _is_current_worker(self, sid: str, worker: AgentLoop | None) -> bool:
+    def _is_current_worker(self, sid: str, worker: AgentThread | None) -> bool:
         return worker is None or self._workers.get(sid) is worker
 
     def _on_text_chunk(
-        self, sid: str, delta: str, worker: AgentLoop | None = None
+        self, sid: str, delta: str, worker: AgentThread | None = None
     ):
         if not self._is_current_worker(sid, worker) or sid in self._cancelling_sessions:
             return
@@ -618,7 +631,7 @@ class ChatSessionController(QObject):
         call_id: str,
         phase: str,
         payload: dict,
-        worker: AgentLoop | None = None,
+        worker: AgentThread | None = None,
     ):
         if not self._is_current_worker(sid, worker):
             return
@@ -671,7 +684,7 @@ class ChatSessionController(QObject):
         call_id: str,
         tool_name: str,
         param_names: list,
-        source_worker: AgentLoop | None = None,
+        source_worker: AgentThread | None = None,
     ):
         worker = self._workers.get(sid)
         if (
@@ -688,7 +701,7 @@ class ChatSessionController(QObject):
         worker.supply_input(params)
 
     def _on_new_turn(
-        self, sid: str, turn_count: int, worker: AgentLoop | None = None
+        self, sid: str, turn_count: int, worker: AgentThread | None = None
     ):
         if not self._is_current_worker(sid, worker) or sid in self._cancelling_sessions:
             return
@@ -709,7 +722,7 @@ class ChatSessionController(QObject):
         self._chat.start_typing()
 
     def _on_done(
-        self, sid: str, info: dict, worker: AgentLoop | None = None
+        self, sid: str, info: dict, worker: AgentThread | None = None
     ):
         if not self._is_current_worker(sid, worker):
             return
@@ -801,7 +814,7 @@ class ChatSessionController(QObject):
             return f"{text}\n\n{marker}"
         return marker
 
-    def _on_worker_finished(self, sid: str, worker: AgentLoop) -> None:
+    def _on_worker_finished(self, sid: str, worker: AgentThread) -> None:
         if self._workers.get(sid) is not worker:
             return
         if sid not in self._cancelling_sessions:

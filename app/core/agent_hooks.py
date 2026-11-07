@@ -1,7 +1,7 @@
 """Agent 生命周期 Hook —— 把评测、安全审批等横切关注点从状态机核心解耦。
 
 设计动机（对照 nanobot 的 AgentHook，但适配我们的同步 QThread 状态机）：
-    AgentLoop 的核心状态机应保持精简稳定。评测埋点、工具执行前安全审批、
+    Agent 的核心状态机应保持精简稳定。评测埋点、工具执行前安全审批、
     指标上报这类横切逻辑，通过 hook 挂载而不是塞进状态机分支。新增能力 =
     新增一个 AgentHook 实现，零侵入核心路径。
 
@@ -15,12 +15,24 @@
     nanobot 的 before_execute_tools 只能读、不能拦截，要中止只能抛异常（硬失败）。
     这里支持「软拒绝」：返回 ToolDecision(action="reject") 时，该工具不执行，
     转而向 LLM 回灌一条拒绝说明，loop 照常继续——LLM 能看到拒绝并改走别的路。
+
+三个关键挂载点：
+    before_turn           每轮对话开始前，可读取/修改消息列表。
+                          —— 对话压缩（consolidation）的天然挂载点。
+    before_execute_tools  工具执行前，可读取 tool_calls 并裁决（放行/拒绝）。
+                          —— 安全审批的天然挂载点。
+    after_iteration       一轮 STREAM→EXECUTE 结束后，可读取工具结果。
+                          —— 评测埋点的天然挂载点。
 """
 from __future__ import annotations
 
+import json as _json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.models.message import Message
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +96,20 @@ class AfterIterationContext:
     error: str | None = None
 
 
+@dataclass
+class BeforeTurnContext:
+    """before_turn 的上下文：每轮对话开始前的快照。
+
+    hook 可返回新的消息列表来替换 ctx.messages（例如压缩后的消息）。
+    返回 None 表示不修改。
+    """
+
+    trace_id: str
+    session_id: str
+    turn_count: int
+    messages: list[dict[str, Any]]
+
+
 class AgentHook:
     """Hook 基类。子类按需覆盖挂载点，未覆盖的默认 no-op。
 
@@ -98,6 +124,10 @@ class AgentHook:
         self, ctx: BeforeToolsContext
     ) -> list[ToolDecision] | None:
         """工具执行前调用。返回裁决列表（按 call_id），None/空表示全部放行。"""
+        return None
+
+    def before_turn(self, ctx: BeforeTurnContext) -> list[dict[str, Any]] | None:
+        """每轮对话开始前调用。返回新的消息列表以替换，None 表示不修改。"""
         return None
 
     def after_iteration(self, ctx: AfterIterationContext) -> None:
@@ -139,6 +169,32 @@ class CompositeHook(AgentHook):
                 merged[decision.call_id] = decision
         return list(merged.values()) if merged else None
 
+    def before_turn(self, ctx: BeforeTurnContext) -> list[dict[str, Any]] | None:
+        """顺序执行各 hook 的 before_turn，将前一个 hook 修改后的消息传给下一个。"""
+        messages = ctx.messages
+        changed = False
+        for hook in self._hooks:
+            try:
+                result = hook.before_turn(
+                    BeforeTurnContext(
+                        trace_id=ctx.trace_id,
+                        session_id=ctx.session_id,
+                        turn_count=ctx.turn_count,
+                        messages=messages,
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "[Hook] %s.before_turn failed", type(hook).__name__
+                )
+                if hook.reraise:
+                    raise
+                continue
+            if result is not None:
+                messages = result
+                changed = True
+        return messages if changed else None
+
     def after_iteration(self, ctx: AfterIterationContext) -> None:
         for hook in self._hooks:
             try:
@@ -149,3 +205,62 @@ class CompositeHook(AgentHook):
                 )
                 if hook.reraise:
                     raise
+
+
+# ── 工具函数：API dict ↔ Message 转换 ──────────────────────────────────
+
+
+def _api_dicts_to_messages(api_dicts: list[dict[str, Any]]) -> list["Message"]:
+    """将 OpenAI API 格式的 dict 列表转换为 Message 对象列表（供 Consolidator 使用）。"""
+    from app.models.message import Message as _Msg, ToolCall
+
+    result: list["Message"] = []
+    for d in api_dicts:
+        tool_calls = []
+        if d.get("tool_calls"):
+            for tc in d["tool_calls"]:
+                args_str = tc.get("function", {}).get("arguments", "{}")
+                args = _json.loads(args_str) if isinstance(args_str, str) else args_str
+                tool_calls.append(ToolCall(id=tc["id"], name=tc["function"]["name"], arguments=args))
+        result.append(_Msg(
+            role=d["role"],
+            content=d.get("content") or "",
+            tool_calls=tool_calls,
+            tool_call_id=d.get("tool_call_id"),
+        ))
+    return result
+
+
+# ── 内置 Hook 实现 ─────────────────────────────────────────────────────
+
+
+class ConsolidatorHook(AgentHook):
+    """将 Consolidator 适配为 AgentHook，在每轮对话前自动压缩旧消息。
+
+    用法::
+
+        from app.core.consolidator import Consolidator
+        from app.core.agent_hooks import ConsolidatorHook
+
+        consolidator = Consolidator(llm_gateway, memory_mgr, model="gpt-4o")
+        hook = ConsolidatorHook(consolidator)
+        agent = AgentThread(..., hooks=[hook])
+    """
+
+    def __init__(self, consolidator):
+        from app.core.consolidator import Consolidator as _C
+
+        if not isinstance(consolidator, _C):
+            raise TypeError(f"Expected Consolidator, got {type(consolidator).__name__}")
+        self._consolidator = consolidator
+
+    def before_turn(self, ctx: BeforeTurnContext) -> list[dict[str, Any]] | None:
+        messages = _api_dicts_to_messages(ctx.messages)
+        compressed = self._consolidator.maybe_consolidate(messages, ctx.session_id)
+        if len(compressed) < len(messages):
+            logger.info(
+                "[ConsolidatorHook] Compressed %d → %d messages",
+                len(messages), len(compressed),
+            )
+            return [m.to_api_dict() for m in compressed]
+        return None

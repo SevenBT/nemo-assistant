@@ -66,10 +66,15 @@ class ConversationPromptBuilder:
         (text-only) if config can't be resolved.
         """
         from app.core.config import current_vision_enabled
+        import logging
+        logger = logging.getLogger(__name__)
 
         try:
-            return current_vision_enabled()
-        except (AttributeError, KeyError):
+            enabled = current_vision_enabled()
+            logger.info(f"[PromptBuilder] vision_enabled={enabled}, model={self._config.get(self._config.litellmDefaultModel)}")
+            return enabled
+        except (AttributeError, KeyError) as e:
+            logger.warning(f"[PromptBuilder] vision check failed: {e}")
             return False
 
     def _build_system_prompt(self, session_id: str | None) -> str:
@@ -137,14 +142,18 @@ def merge_attachments_to_content(
             text_atts = [a for a in msg.attachments if not a.is_image()]
             image_atts = [a for a in msg.attachments if a.is_image()]
 
-            text_block = _build_text_block(msg, text_atts, image_atts, vision_enabled)
-
             image_urls = []
-            if vision_enabled:
-                for att in image_atts:
-                    data_url = att.to_data_url()
-                    if data_url:
-                        image_urls.append(data_url)
+            fallback_image_atts = []
+            for att in image_atts:
+                data_url = att.to_data_url() if vision_enabled else None
+                if data_url:
+                    image_urls.append(data_url)
+                else:
+                    fallback_image_atts.append(att)
+
+            text_block = _build_text_block(
+                msg, text_atts, fallback_image_atts, vision_enabled,
+            )
 
             if image_urls:
                 content_parts: list[dict[str, Any]] = []
@@ -172,15 +181,16 @@ def _build_text_block(
     """Compose the textual portion: text-file contents, image OCR fallback, user text."""
     parts = [t("prompt.fileLabel", name=att.file_name, content=att.parsed_content) for att in text_atts]
 
-    # When vision can't carry the pixels, fall back to image OCR text so the
-    # model still gets *something*. OCR is computed lazily here (not at intake)
-    # so the vision path never pays for it. When vision is on, pixels go through
-    # image_url, so we skip OCR entirely.
-    if not vision_enabled:
-        for att in image_atts:
-            text = att.parsed_content or _ocr_image_text(att)
-            if text:
-                parts.append(t("prompt.imageLabel", name=att.file_name, content=text))
+    # Only images whose pixels were not sent arrive here. State the reason so
+    # OCR-only requests aren't mistaken for failed uploads or missing files.
+    # Successfully encoded images never run OCR.
+    for att in image_atts:
+        reason = t(
+            "prompt.imageUnavailable" if vision_enabled else "prompt.imageVisionDisabled"
+        )
+        text = att.parsed_content or _ocr_image_text(att)
+        fallback = f"{reason}\n{text}" if text else reason
+        parts.append(t("prompt.imageLabel", name=att.file_name, content=fallback))
 
     merged = "\n\n".join(parts)
     if msg.content:

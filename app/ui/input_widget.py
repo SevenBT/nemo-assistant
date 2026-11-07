@@ -193,12 +193,18 @@ class InputWidget(QWidget):
         self._changing_edit = True
         try:
             self._set_editing(False)
-            self._pending_bar.clear()
-            if clear and self._has_draft_snapshot:
-                self.set_text(self._draft_text)
-                self.add_pending_attachments(self._draft_attachments)
-            elif clear:
-                self._edit.clear()
+            if clear:
+                # clear=True: 清空当前内容并从快照还原（若有快照）
+                self._pending_bar.clear()
+                if self._has_draft_snapshot:
+                    self.set_text(self._draft_text)
+                    self.add_pending_attachments(self._draft_attachments)
+                else:
+                    self._edit.clear()
+            else:
+                # clear=False: 保留当前内容（文本和附件都不动）
+                # 不调用 self._pending_bar.clear()，保留已添加的附件
+                pass
             self._draft_text = ""
             self._draft_attachments = []
             self._has_draft_snapshot = False

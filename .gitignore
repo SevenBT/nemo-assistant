@@ -27,6 +27,9 @@ htmlcov/
 data/
 crash.log
 run_log.txt
+/app.log
+/eval_report.txt
+/eval_*.log
 
 # ── 用户配置（含 API Key，不入库）────────────────────────────────────
 config/*
