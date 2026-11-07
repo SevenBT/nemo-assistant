@@ -52,9 +52,11 @@ class ConversationPromptBuilder:
                     result.pop()
 
         # 精确到分钟的时间放在请求最末尾，避免污染前面可缓存的稳定前缀。
+        # 使用 user 而不是 system：LiteLLM 在转换 Anthropic/Gemini 请求时会把
+        # 所有 system 消息移到历史之前，尾部 system 反而会污染整个前缀。
         time_hint = self._time_hint_provider()
         if time_hint:
-            result.append({"role": "system", "content": time_hint})
+            result.append({"role": "user", "content": time_hint})
 
         return result
 
