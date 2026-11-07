@@ -4,8 +4,11 @@ Supports text files, markdown, and images (with OCR).
 """
 import logging
 from pathlib import Path
-from typing import Optional
 
+from app.core.ocr_engine import (
+    OcrEngineService,
+    get_shared_ocr_engine_service,
+)
 from app.models.attachment import Attachment
 
 logger = logging.getLogger(__name__)
@@ -36,16 +39,15 @@ class FileParser:
 
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
-    def __init__(self):
-        self._ocr_engine: Optional[RapidOCR] = None
+    def __init__(self, ocr_engine_service: OcrEngineService | None = None):
+        self._ocr_engine_service = (
+            ocr_engine_service or get_shared_ocr_engine_service()
+        )
 
     @property
     def ocr_engine(self):
-        """Lazy-load OCR engine on first use."""
-        if self._ocr_engine is None:
-            from rapidocr_onnxruntime import RapidOCR
-            self._ocr_engine = RapidOCR()
-        return self._ocr_engine
+        """Return the shared OCR engine, loading it if necessary."""
+        return self._ocr_engine_service.get_engine()
 
     def parse_file(self, file_path: str, *, ocr_images: bool = True) -> Attachment:
         """Parse a file and return an Attachment object.

@@ -14,11 +14,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from PyQt6.QtGui import QPixmap, QColor
 from PyQt6.QtWidgets import QApplication, QWidget
-from PyQt6.QtCore import QPoint
+from PyQt6.QtCore import QPoint, QPointF, QRect, Qt
 
 _app = QApplication.instance() or QApplication(sys.argv)
 
 from app.ui.screenshot_controller import ScreenshotController
+from app.ui.screenshot_overlay import ScreenshotOverlay
 from app.core.config import SCREENSHOTS_DIR
 
 
@@ -99,6 +100,138 @@ def test_vision_without_callbacks_is_safe():
     pm = _make_pixmap()
     # 不应抛异常
     ctrl._on_done(pm, "vision:explain", "", QPoint(0, 0))
+
+
+def test_save_action_hides_overlay_before_emitting_result(monkeypatch):
+    """The native save dialog must not open behind the topmost overlay."""
+    import app.ui.screenshot_overlay as overlay_mod
+
+    class _Captured:
+        def emit(self, pixmap, action, text, pos):
+            owner.emitted_after_hide = owner.hidden
+
+    class _Overlay:
+        hidden = False
+        closed = False
+        emitted_after_hide = None
+        captured = _Captured()
+
+        @staticmethod
+        def _clear_resize_cursor():
+            return None
+
+        @staticmethod
+        def _normalized_rect():
+            return QRect(0, 0, 10, 10)
+
+        @staticmethod
+        def _crop_frozen(rect):
+            return QPixmap(10, 10)
+
+        def hide(self):
+            self.hidden = True
+
+        def close(self):
+            self.closed = True
+
+    owner = _Overlay()
+    monkeypatch.setattr(overlay_mod.QTimer, "singleShot", lambda _ms, fn: fn())
+
+    ScreenshotOverlay._on_action(owner, "save")
+
+    assert owner.emitted_after_hide is True
+    assert owner.closed is True
+
+
+def test_left_click_outside_selection_cancels_capture():
+    class _Event:
+        @staticmethod
+        def button():
+            return Qt.MouseButton.LeftButton
+
+        @staticmethod
+        def position():
+            return QPointF(20, 20)
+
+        @staticmethod
+        def globalPosition():
+            return QPointF(20, 20)
+
+    class _Overlay:
+        _state = "SELECTED"
+        cancelled = False
+
+        @staticmethod
+        def _clear_resize_cursor():
+            return None
+
+        @staticmethod
+        def _is_on_panel(_pos):
+            return False
+
+        @staticmethod
+        def _edge_at(_pos):
+            return ""
+
+        @staticmethod
+        def _normalized_rect_local():
+            return QRect(0, 0, 10, 10)
+
+        @staticmethod
+        def _hide_toolbar():
+            return None
+
+        @staticmethod
+        def _hide_ocr_panel():
+            return None
+
+        def _cancel_capture(self):
+            self.cancelled = True
+
+    owner = _Overlay()
+
+    ScreenshotOverlay.mousePressEvent(owner, _Event())
+
+    assert owner.cancelled is True
+
+
+def test_plain_left_click_without_drag_cancels_capture():
+    class _Event:
+        @staticmethod
+        def button():
+            return Qt.MouseButton.LeftButton
+
+        @staticmethod
+        def globalPosition():
+            return QPointF(20, 20)
+
+    class _Overlay:
+        _state = "DRAGGING"
+        _dragging_panel = False
+        cancelled = False
+
+        @staticmethod
+        def _has_selection():
+            return False
+
+        def _cancel_capture(self):
+            self.cancelled = True
+
+    owner = _Overlay()
+
+    ScreenshotOverlay.mouseReleaseEvent(owner, _Event())
+
+    assert owner.cancelled is True
+
+
+def test_pixel_label_includes_origin_size_and_physical_pixels():
+    label = ScreenshotOverlay._format_pixel_label(
+        QPoint(100, 50),
+        QRect(100, 50, 200, 120),
+        1.5,
+    )
+
+    assert label == "150,75  300 × 180 px"
 
 
 if __name__ == "__main__":

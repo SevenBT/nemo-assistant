@@ -167,6 +167,7 @@ def main():
     custom_qss = apply_theme(cfg.get(cfg.theme), content_font_size=cfg.get(cfg.contentFontSize), editor_font_size=cfg.get(cfg.editorFontSize))
     app.setStyleSheet(custom_qss)
     window.show()
+    window.schedule_ocr_warmup()
 
     exit_code = app.exec()
     scheduler.stop()

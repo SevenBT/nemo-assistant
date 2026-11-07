@@ -9,6 +9,7 @@ import threading
 from PyQt6.QtCore import (
     QEvent,
     QPoint,
+    QPointF,
     QRect,
     Qt,
     QTimer,
@@ -38,11 +39,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.core.ocr_engine import OcrEngineService, get_shared_ocr_engine_service
 from app.i18n import t
 from app.ui import style
 
 OVERLAY_ALPHA = 80
 BORDER_WIDTH = 2
+HANDLE_RADIUS = 6
+SELECTION_ACCENT = QColor("#3388FF")
 RESIZE_MARGIN = 8  # pixels from edge that trigger resize cursor
 
 
@@ -91,18 +95,6 @@ def _toolbar_style(theme: dict) -> str:
         color: {theme["accent"]};
     }}
 """
-
-
-# Module-level RapidOCR singleton — loaded once, reused across calls
-_rapid_ocr_engine = None
-
-
-def _get_rapid_ocr():
-    global _rapid_ocr_engine
-    if _rapid_ocr_engine is None:
-        from rapidocr_onnxruntime import RapidOCR
-        _rapid_ocr_engine = RapidOCR()
-    return _rapid_ocr_engine
 
 
 # ── OCR layout reconstruction ──────────────────────────────────────────
@@ -227,8 +219,15 @@ class ScreenshotOverlay(QWidget):
     captured = pyqtSignal(QPixmap, str, str, QPoint)  # (pixmap, action, ocr_text, capture_pos)
     _ocr_done = pyqtSignal(str)  # internal signal for thread-safe OCR result delivery
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        ocr_engine_service: OcrEngineService | None = None,
+    ):
         super().__init__(parent)
+        self._ocr_engine_service = (
+            ocr_engine_service or get_shared_ocr_engine_service()
+        )
         # Snapshot theme so toolbar, OCR panel and selection accents all match
         # the active app theme.
         self._theme = style.get_current_theme()
@@ -256,8 +255,6 @@ class ScreenshotOverlay(QWidget):
         self._setup_window()
         self._capture_frozen()
         self._ocr_done.connect(self._on_ocr_ready)
-        # Warm up OCR engine in background so first recognition is instant
-        threading.Thread(target=_get_rapid_ocr, daemon=True).start()
 
     # ── Window ─────────────────────────────────────────────────────────
 
@@ -512,11 +509,17 @@ class ScreenshotOverlay(QWidget):
             self._toolbar.deleteLater()
             self._toolbar = None
 
+    def _cancel_capture(self):
+        """Close the screenshot overlay without requiring Esc or right-click."""
+        self._clear_resize_cursor()
+        self.hide()
+        self.captured.emit(QPixmap(), "cancel", "", QPoint())
+        self.close()
+
     def _on_action(self, action: str):
         self._clear_resize_cursor()
         if action == "cancel":
-            self.captured.emit(QPixmap(), "cancel", "", QPoint())
-            self.close()
+            self._cancel_capture()
             return
 
         r = self._normalized_rect()
@@ -531,8 +534,11 @@ class ScreenshotOverlay(QWidget):
         # vision actions carry the screenshot pixmap through to the AI path;
         # OCR (above) is a separate path that extracts text locally.
         pixmap = self._crop_frozen(r)
-        self.captured.emit(pixmap, action, "", QPoint(r.topLeft()))
         self.hide()
+        # Hide the topmost overlay before the synchronous consumer runs. The
+        # save action opens a modal native file dialog; emitting first leaves
+        # that dialog behind the fullscreen overlay while it holds focus.
+        self.captured.emit(pixmap, action, "", QPoint(r.topLeft()))
         QTimer.singleShot(0, self.close)
 
     # ── OCR ────────────────────────────────────────────────────────────
@@ -570,7 +576,7 @@ class ScreenshotOverlay(QWidget):
     def _run_ocr_from_array(self, bgr) -> str:
         """Run OCR on a BGR numpy array. Safe to call from any thread."""
         try:
-            engine = _get_rapid_ocr()
+            engine = self._ocr_engine_service.get_engine()
             result, _ = engine(bgr)
             if result:
                 return _reconstruct_layout(result).strip() or t("screenshot.ocr.empty")
@@ -719,82 +725,91 @@ class ScreenshotOverlay(QWidget):
             cutout.addRect(r_local.toRectF())
             p.fillPath(full.subtracted(cutout), overlay)
 
-            # ── Selection border ──
             is_dragging = self._state == "DRAGGING"
-            border_w = 3 if is_dragging else BORDER_WIDTH
-            border_color = QColor("#FFFFFF") if is_dragging else self._border_color
-            pen_style = Qt.PenStyle.SolidLine if is_dragging else Qt.PenStyle.DashLine
+            self._draw_center_guides(p, r_local)
 
-            pen = QPen(border_color, border_w, pen_style)
-            p.setPen(pen)
+            # ── Selection border ──
+            border_w = 3 if is_dragging else BORDER_WIDTH
+            border_pen = QPen(SELECTION_ACCENT, border_w)
+            border_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(border_pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
             # Inset by half the pen width so it sits inside the selection
             off = border_w / 2.0
             p.drawRect(r_local.toRectF().adjusted(off, off, -off, -off))
 
-            # ── Corner brackets (like Win11 snip) ──
-            self._draw_corners(p, r_local, border_color, border_w, is_dragging)
+            # ── Corner and edge-midpoint handles ──
+            self._draw_handles(p, r_local)
 
             # ── Size label ──
-            self._draw_size_label(p, r_local, is_dragging)
+            self._draw_size_label(p, r_local)
         else:
             p.fillRect(self.rect(), overlay)
 
-    def _draw_size_label(self, p: QPainter, r: QRect, bright: bool = False):
-        label = f"{r.width()} × {r.height()}"
+    def _draw_center_guides(self, p: QPainter, r: QRect):
+        """Draw the full-screen dashed cross through the selection center."""
+        pen = QPen(SELECTION_ACCENT, 2, Qt.PenStyle.CustomDashLine)
+        pen.setDashPattern([7, 5])
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        center = r.center()
+        p.drawLine(center.x(), 0, center.x(), self.height())
+        p.drawLine(0, center.y(), self.width(), center.y())
+
+    def _draw_handles(self, p: QPainter, r: QRect):
+        """Draw circular handles at all four corners and edge midpoints."""
+        points = (
+            r.topLeft(),
+            QPoint(r.center().x(), r.top()),
+            r.topRight(),
+            QPoint(r.left(), r.center().y()),
+            QPoint(r.right(), r.center().y()),
+            r.bottomLeft(),
+            QPoint(r.center().x(), r.bottom()),
+            r.bottomRight(),
+        )
+        p.setPen(QPen(SELECTION_ACCENT, 2))
+        p.setBrush(QColor("#F7FAFF"))
+        for point in points:
+            p.drawEllipse(QPointF(point), HANDLE_RADIUS, HANDLE_RADIUS)
+
+    def _draw_size_label(self, p: QPainter, r: QRect):
+        dpr = max(1.0, self._frozen.devicePixelRatio())
+        origin = self.mapToGlobal(r.topLeft())
+        label = self._format_pixel_label(origin, r, dpr)
         font = QFont()
-        font.setPointSize(11)
-        font.setBold(True)
+        font.setPointSize(10)
+        font.setWeight(QFont.Weight.DemiBold)
         p.setFont(font)
         fm = p.fontMetrics()
-        text_w = fm.horizontalAdvance(label) + 12
-        text_h = fm.height() + 6
+        text_w = fm.horizontalAdvance(label) + 20
+        text_h = fm.height() + 12
 
-        label_x = r.left() + 4
-        label_y = r.top() - text_h - 4
+        label_x = r.left()
+        label_y = r.top() - text_h
         if label_y < 0:
             label_y = r.top() + 4
         if label_x + text_w > self.width():
             label_x = self.width() - text_w - 4
 
         label_rect = QRect(int(label_x), int(label_y), text_w, text_h)
-        bg = QColor("#FFFFFF") if bright else self._border_color
-        fg = QColor("#1A1A1A") if bright else QColor("#FFFFFF")
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(bg)
-        p.drawRoundedRect(label_rect.toRectF(), 4, 4)
-        p.setPen(fg)
-        p.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
+        p.setBrush(QColor(0, 0, 0, 230))
+        p.drawRoundedRect(label_rect.toRectF(), 3, 3)
+        p.setPen(QColor("#FFFFFF"))
+        p.drawText(
+            label_rect.adjusted(10, 0, -10, 0),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            label,
+        )
 
-    def _draw_corners(self, p: QPainter, r: QRect, color: QColor, bw: int, bright: bool):
-        """Draw L-shaped corner bracket highlights."""
-        arm = 16  # arm length in pixels
-        w = 3 if bright else 2  # corner line width
-        c = QColor("#FFFFFF") if bright else color
-
-        pen = QPen(c, w, Qt.PenStyle.SolidLine)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen)
-
-        x, y, rw, rh = r.x(), r.y(), r.width(), r.height()
-        # Offset corners inward so brackets sit just inside the border
-        off = bw
-
-        # Top-left
-        p.drawLine(x + off, y + off + arm, x + off, y + off)
-        p.drawLine(x + off, y + off, x + off + arm, y + off)
-
-        # Top-right
-        p.drawLine(x + rw - off - arm, y + off, x + rw - off, y + off)
-        p.drawLine(x + rw - off, y + off, x + rw - off, y + off + arm)
-
-        # Bottom-left
-        p.drawLine(x + off, y + rh - off - arm, x + off, y + rh - off)
-        p.drawLine(x + off, y + rh - off, x + off + arm, y + rh - off)
-
-        # Bottom-right
-        p.drawLine(x + rw - off - arm, y + rh - off, x + rw - off, y + rh - off)
-        p.drawLine(x + rw - off, y + rh - off, x + rw - off, y + rh - off - arm)
+    @staticmethod
+    def _format_pixel_label(origin: QPoint, rect: QRect, dpr: float) -> str:
+        x = round(origin.x() * dpr)
+        y = round(origin.y() * dpr)
+        width = round(rect.width() * dpr)
+        height = round(rect.height() * dpr)
+        return f"{x},{y}  {width} × {height} px"
 
     # ── Mouse ──────────────────────────────────────────────────────────
 
@@ -845,9 +860,10 @@ class ScreenshotOverlay(QWidget):
                     self._state = "RESIZING"
                     self._set_resize_cursor(self._EDGE_CURSORS[edge])
                     return
-                # Click inside selection → start new selection
-                if self._normalized_rect_local().contains(pos):
-                    pass  # fall through to start new selection
+                if not self._normalized_rect_local().contains(pos):
+                    self._cancel_capture()
+                    return
+                # Click inside the selection starts a new selection.
 
             self._clear_resize_cursor()
             self._hide_toolbar()
@@ -862,8 +878,7 @@ class ScreenshotOverlay(QWidget):
                 # Allow context menu inside the panel (e.g. text selection)
                 super().mousePressEvent(event)
                 return
-            self.captured.emit(QPixmap(), "cancel", "", QPoint())
-            self.close()
+            self._cancel_capture()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._dragging_panel and self._ocr_panel:
@@ -935,18 +950,19 @@ class ScreenshotOverlay(QWidget):
                 return
             if self._state == "DRAGGING":
                 self._end = event.globalPosition().toPoint()
-                self._state = "SELECTED"
-                self.update()
                 if self._has_selection():
+                    self._state = "SELECTED"
+                    self.update()
                     self._show_toolbar()
+                else:
+                    # A plain left click without a drag is an explicit cancel.
+                    self._cancel_capture()
 
     # ── Keyboard ───────────────────────────────────────────────────────
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key.Key_Escape:
-            self._clear_resize_cursor()
-            self.captured.emit(QPixmap(), "cancel", "", QPoint())
-            self.close()
+            self._cancel_capture()
             return
         super().keyPressEvent(event)
 
