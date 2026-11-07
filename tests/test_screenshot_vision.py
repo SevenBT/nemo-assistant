@@ -56,7 +56,7 @@ def test_vision_action_attaches_image_and_passes_action():
     assert va.key == "explain", "应传递对应的识图动作"
     from app.i18n import t
     assert va.prompt == t("vision.explain.prompt"), f"提示词错误: {va.prompt}"
-    assert va.auto_send is True, "解释动作应自动发送"
+    assert va.auto_send is False, "识图动作应预填并等待用户发送"
     assert va.session_title, "应带会话标题"
 
     # 清理落盘文件

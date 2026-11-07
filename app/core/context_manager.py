@@ -126,6 +126,21 @@ def count_tokens(text: str, model: str = "default") -> int:
         return len(text) // 4
 
 
+def content_to_text(content: str | list | None) -> str:
+    """Extract multimodal text without tokenizing or exposing image data URLs."""
+    if not isinstance(content, list):
+        return content or ""
+    parts = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text":
+            parts.append(part.get("text") or "")
+        elif part.get("type") == "image_url":
+            parts.append("[image]")
+    return "\n".join(parts)
+
+
 def message_to_token_text(m: "Message") -> str:
     """
     提取单条消息用于 token 计数的全部文本。
@@ -141,7 +156,7 @@ def message_to_token_text(m: "Message") -> str:
     Returns:
         用于计数的完整文本
     """
-    parts = [m.content or ""]
+    parts = [content_to_text(m.content)]
 
     # 包含 tool_calls 的参数和结果
     for tc in getattr(m, "tool_calls", None) or []:

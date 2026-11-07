@@ -69,6 +69,21 @@ class InputWidgetEditModeTest(unittest.TestCase):
         self.assertEqual(requested, [True])
         self.assertFalse(self.widget.is_editing)
 
+    def test_finishing_edit_without_clear_keeps_pending_attachments(self):
+        attachment = Attachment(
+            file_path="screenshot.png",
+            file_name="screenshot.png",
+            file_type="image",
+            file_size=1024,
+        )
+        self.widget.add_pending_attachments([attachment])
+        self.widget.begin_edit("original", [])
+        self.widget.add_pending_attachments([attachment])
+
+        self.widget.end_edit(clear=False)
+
+        self.assertEqual(self.widget.take_pending_attachments(), [attachment])
+
     def test_cancelling_state_blocks_submit_and_second_cancel(self):
         submitted = []
         cancelled = []

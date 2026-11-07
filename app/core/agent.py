@@ -1,56 +1,57 @@
 """
-AgentLoop — a state-machine-driven agent execution loop.
+Agent — 纯 Python 状态机驱动的 Agent 执行循环（零 Qt 依赖）。
 
-Architecture:
-    AgentLoop subclasses QThread and runs the state machine on a background
-    thread. The machine has 5 states: PREPARE -> STREAM -> EXECUTE ->
-    FEEDBACK -> DONE. Each state maps to a _state_xxx method that returns an
-    event string to drive the transition. It communicates with the UI layer
-    via Qt signals to stay thread-safe.
+与 AgentThread 共享相同的 TurnState、TRANSITIONS、TurnContext 定义，
+但使用 threading.Thread + AgentCallbacks 替代 QThread + pyqtSignal。
+适用于 headless 场景、Web 服务、CLI 和测试。
 
-Tool execution:
-    All tools (built-in + external scripts) are dispatched through the
-    ToolManager. Read-only tools run concurrently; side-effecting tools run
-    serially.
+Usage:
+    from app.core.agent_context import AgentContext
+    from app.core.agent_interface import AgentCallbacks
+    from app.core.agent import Agent
 
-AgentLoop — 状态机驱动的 Agent 执行循环。
+    ctx = AgentContext(
+        callbacks=AgentCallbacks.print(),
+        llm_gateway=gateway,
+        registry=registry,
+    )
+    agent = Agent(ctx, messages)
+    agent.start()  # 异步后台运行
+    # 或
+    result = agent.run_sync()  # 同步阻塞运行
 
-整体架构：
-    AgentLoop 继承 QThread，在后台线程中运行状态机。
-    状态机包含 5 个状态：PREPARE → STREAM → EXECUTE → FEEDBACK → DONE
-    每个状态对应一个 _state_xxx 方法，返回事件字符串触发状态转移。
-    通过 Qt 信号与 UI 层通信，保持线程安全。
-
-工具执行：
-    所有工具（内置 + 外部脚本）统一通过 ToolManager 调度。
-    只读工具自动并发执行，有副作用工具串行执行。
+状态流转（与 AgentThread 一致）：
+    PREPARE → STREAM → EXECUTE → FEEDBACK → STREAM → ... → FINALIZE → DONE
+                 ↓ (no_tools)                  ↓ (max_turns)
+              FINALIZE                   WRAP_UP → FINALIZE
 """
+from __future__ import annotations
+
 import json
 import logging
 import queue
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from PyQt6.QtCore import QThread, pyqtSignal
-
-from app.core.llm_gateway import CancellationToken, LLMGateway
-from app.core.checkpoint import clear_checkpoint, save_checkpoint
 from app.core.agent_hooks import (
     AfterIterationContext,
-    AgentHook,
     BeforeToolsContext,
+    BeforeTurnContext,
     CompositeHook,
     ToolCallView,
     reject as _reject,
 )
-from app.tools.registry import ToolErrorType, ToolRegistry
+from app.core.checkpoint import clear_checkpoint, save_checkpoint
+from app.core.agent_context import AgentContext
 from app.core.turn_context import (
     TRANSITIONS,
     StateTraceEntry,
     TurnContext,
     TurnState,
 )
+from app.tools.registry import ToolErrorType, ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -63,73 +64,132 @@ _MAX_TOOL_FAILURES = 5
 _FATAL_ERROR_TYPES = {ToolErrorType.TOOL_NOT_FOUND, ToolErrorType.PERMISSION}
 
 
-class AgentLoop(QThread):
-    """
-    状态机驱动的 Agent 循环，每次 turn 一个实例。
+class Agent:
+    """纯 Python Agent 执行循环。
 
-    所有工具统一通过 ToolRegistry 执行。
-    """
+    提供与 AgentThread 完全相同的状态机逻辑，但：
+    - 使用 threading.Thread 替代 QThread
+    - 使用 AgentCallbacks 替代 pyqtSignal
+    - 零 PyQt 依赖
 
-    # ── Qt 信号 ──────────────────────────────────────────────────────────
-    text_chunk = pyqtSignal(str)
-    state_changed = pyqtSignal(str)
-    tool_event = pyqtSignal(str, str, dict)
-    need_input = pyqtSignal(str, str, list)
-    new_turn = pyqtSignal(int)
-    done = pyqtSignal(dict)
+    支持两种运行模式：
+    - start() → 异步后台线程运行
+    - run_sync() → 同步阻塞运行，返回结果 dict
+    """
 
     def __init__(
         self,
-        llm_gateway: LLMGateway,
-        registry: ToolRegistry,
-        api_messages: list[dict],
+        ctx: AgentContext,
+        messages: list[dict],
         session_id: str = "",
         max_turns: int = 10,
         trace_store=None,
-        hooks: list[AgentHook] | None = None,
-        parent=None,
     ):
-        super().__init__(parent)
-        self._llm = llm_gateway
-        self._registry = registry
-        self._messages = api_messages
+        """初始化 Agent。
+
+        Args:
+            ctx: 中央上下文，包含 callbacks、hooks、cancel_token、llm_gateway、registry。
+            messages: OpenAI API 格式的消息列表。
+            session_id: 可选的会话 ID（用于 checkpoint 和 trace）。
+            max_turns: 最大工具调用轮数。
+            trace_store: 可选的 trace 存储后端。
+
+        Raises:
+            ValueError: ctx.llm_gateway 或 ctx.registry 为 None。
+        """
+        if ctx.llm_gateway is None:
+            raise ValueError("AgentContext.llm_gateway is required for Agent")
+        if ctx.registry is None:
+            raise ValueError("AgentContext.registry is required for Agent")
+
+        self._ctx = ctx
+        self._llm = ctx.llm_gateway
+        self._registry: ToolRegistry = ctx.registry
+        self._messages = list(messages)
         self._session_id = session_id
         self._max_turns = max_turns
-        # 统一 trace：本次 run 一个 trace_id，贯穿 LLM 调用与工具调用。
         self._trace_store = trace_store
         self._trace_id = uuid.uuid4().hex
-        # 同一 turn 内 LLM 往返序号，供回放排序。
         self._llm_seq = 0
-        # 生命周期 hook（评测埋点 / 安全审批等横切关注点）。
-        self._hook = CompositeHook(hooks) if hooks else None
+        self._hook = ctx.composite_hook
 
-        self._cancelled = False
-        self._cancel_token = CancellationToken()
         self._input_queue: queue.Queue = queue.Queue()
         self._inject_queue: queue.Queue = queue.Queue()
-        # 工具连续失败计数：{tool_name: count}
         self._tool_failure_counts: dict[str, int] = {}
+
+        # 异步运行支持
+        self._thread: threading.Thread | None = None
+        self._result: dict | None = None
+        self._done_event = threading.Event()
 
     # ── 外部控制接口 ──────────────────────────────────────────────────────
 
     def cancel(self):
-        """请求取消当前 turn。"""
-        self._cancelled = True
-        self._cancel_token.cancel()
+        """请求取消当前 Agent 运行。
+
+        线程安全：可从任意线程调用。
+        """
+        self._ctx.cancel()
         self._input_queue.put({})
 
     def supply_input(self, params: dict):
-        """提供手动参数（响应 need_input 信号）。"""
+        """提供手动参数（响应 on_need_input 回调）。"""
         self._input_queue.put(params)
 
     def inject_message(self, message: dict):
         """Mid-turn 注入用户消息。"""
         self._inject_queue.put(message)
 
+    # ── 运行模式 ──────────────────────────────────────────────────────────
+
+    def start(self) -> None:
+        """在后台线程中启动状态机。
+
+        Raises:
+            RuntimeError: 如果 Agent 已在运行中。
+        """
+        if self._thread is not None and self._thread.is_alive():
+            raise RuntimeError("Agent is already running")
+        self._done_event.clear()
+        self._result = None
+        self._thread = threading.Thread(target=self._run, daemon=True, name="agent")
+        self._thread.start()
+
+    def run_sync(self) -> dict:
+        """同步运行状态机（阻塞当前线程），返回结果 dict。
+
+        Returns:
+            {"ok": bool, "error": str|None, "trace": list[dict]}
+        """
+        self._done_event.clear()
+        self._result = None
+        self._run()
+        return self._result or {"ok": False, "error": "Agent did not produce a result"}
+
+    def wait(self, timeout: float | None = None) -> dict | None:
+        """等待 Agent 运行完成（阻塞），返回结果或超时时返回 None。
+
+        Args:
+            timeout: 最大等待秒数，None 表示无限等待。
+        """
+        if not self._done_event.wait(timeout=timeout):
+            return None
+        return self._result
+
+    @property
+    def is_running(self) -> bool:
+        """Agent 是否正在运行。"""
+        return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def result(self) -> dict | None:
+        """获取运行结果（仅在运行完成后可用）。"""
+        return self._result
+
     # ── 状态机主驱动 ─────────────────────────────────────────────────────
 
-    def run(self):
-        """QThread 入口点 — 状态机主循环。"""
+    def _run(self):
+        """状态机主循环（在后台线程中执行）。"""
         ctx = TurnContext(
             messages=list(self._messages),
             tools=self._registry.get_openai_functions(),
@@ -139,12 +199,12 @@ class AgentLoop(QThread):
         run_t0 = time.perf_counter()
         try:
             while ctx.state is not TurnState.DONE:
-                if self._cancelled:
+                if self._ctx.is_cancelled:
                     ctx.error_message = None
                     ctx.state = TurnState.FINALIZE
-                # 取当前状态对应的handler
+
                 handler = getattr(self, f"_state_{ctx.state.name.lower()}")
-                self.state_changed.emit(ctx.state.name)
+                self._emit_state_change(ctx.state.name)
 
                 t0 = time.perf_counter()
                 event = handler(ctx)
@@ -153,11 +213,11 @@ class AgentLoop(QThread):
                 ctx.trace.append(StateTraceEntry(
                     state=ctx.state, event=event, duration_ms=elapsed_ms
                 ))
-                logger.debug("[AgentLoop] %s -> %s (%.1fms)", ctx.state.name, event, elapsed_ms)
+                logger.debug("[Agent] %s -> %s (%.1fms)", ctx.state.name, event, elapsed_ms)
 
                 next_state = TRANSITIONS.get((ctx.state, event))
                 if next_state is None:
-                    logger.error("[AgentLoop] No transition for (%s, %s)", ctx.state.name, event)
+                    logger.error("[Agent] No transition for (%s, %s)", ctx.state.name, event)
                     ctx.state = TurnState.FINALIZE
                     ctx.error_message = f"Invalid transition: ({ctx.state.name}, {event})"
                     event = self._state_finalize(ctx)
@@ -165,19 +225,31 @@ class AgentLoop(QThread):
                 else:
                     ctx.state = next_state
         except Exception as e:
-            logger.exception("[AgentLoop] Unhandled exception")
+            logger.exception("[Agent] Unhandled exception")
             self._trace_finish(ctx, "error", run_t0, error=str(e))
-            self.done.emit({"ok": False, "error": str(e), "trace": self._serialize_trace(ctx)})
+            self._result = {"ok": False, "error": str(e), "trace": self._serialize_trace(ctx)}
+            self._emit_done(self._result)
+            self._done_event.set()
             return
 
-        status = "cancelled" if self._cancelled else ("error" if ctx.error_message else "ok")
+        status = "cancelled" if self._ctx.is_cancelled else ("error" if ctx.error_message else "ok")
         self._trace_finish(ctx, status, run_t0, error=ctx.error_message)
+        self._result = {
+            "ok": status == "ok",
+            "error": ctx.error_message,
+            "trace": self._serialize_trace(ctx),
+        }
+        self._emit_done(self._result)
+        self._done_event.set()
 
     # ── State Handlers ───────────────────────────────────────────────────
 
     def _state_prepare(self, ctx: TurnContext) -> str:
         if not ctx.messages:
             return "empty"
+        new_messages = self._apply_before_turn_hook(ctx)
+        if new_messages is not None:
+            ctx.messages = new_messages
         ctx.reset_turn()
         return "ok"
 
@@ -189,16 +261,16 @@ class AgentLoop(QThread):
         for chunk in self._llm.chat_stream(
             ctx.messages,
             ctx.tools,
-            cancel_token=self._cancel_token,
+            cancel_token=self._ctx.cancel_token,
             trace_id=self._trace_id,
             seq=seq,
         ):
-            if self._cancelled:
+            if self._ctx.is_cancelled:
                 return "cancelled"
 
             if chunk["type"] == "text":
                 ctx.full_text += chunk["delta"]
-                self.text_chunk.emit(chunk["delta"])
+                self._emit_text_chunk(chunk["delta"])
             elif chunk["type"] == "tool_call":
                 ctx.tool_calls.append(chunk)
             elif chunk["type"] == "error":
@@ -210,7 +282,6 @@ class AgentLoop(QThread):
                 break
 
         if not ctx.tool_calls:
-            # 纯文本收尾轮（无工具）：也触发 after_iteration，让评测能捕获最终答复。
             self._fire_after_iteration(ctx, [])
             return "no_tools"
         return "has_tools"
@@ -236,9 +307,7 @@ class AgentLoop(QThread):
             assistant_msg["reasoning_content"] = ctx.reasoning_content
         ctx.messages.append(assistant_msg)
 
-        # 安全审批挂载点：hook 可对即将执行的工具调用裁决（放行/软拒绝）。
         rejections = self._apply_before_tools_hook(ctx)
-        # 收集本轮所有 (tool_call, result) 供 after_iteration 评测埋点使用。
         iteration_results: list[tuple[dict, dict]] = []
 
         # 被软拒绝的调用：不执行，直接回灌拒绝说明作为工具结果。
@@ -271,7 +340,7 @@ class AgentLoop(QThread):
         completed_results: list[dict] = []
 
         for mode, batch in batches:
-            if self._cancelled:
+            if self._ctx.is_cancelled:
                 self._fire_after_iteration(ctx, iteration_results)
                 return "cancelled"
 
@@ -280,7 +349,7 @@ class AgentLoop(QThread):
             else:
                 batch_results = []
                 for tc in batch:
-                    if self._cancelled:
+                    if self._ctx.is_cancelled:
                         self._fire_after_iteration(ctx, iteration_results)
                         return "cancelled"
                     result = self._execute_one(tc)
@@ -304,7 +373,7 @@ class AgentLoop(QThread):
 
                     if error_type in _FATAL_ERROR_TYPES:
                         logger.error(
-                            "[AgentLoop] Fatal tool error (%s): %s — %s",
+                            "[Agent] Fatal tool error (%s): %s — %s",
                             error_type.value, tool_name, result["data"].get("message"),
                         )
                         ctx.messages.append({
@@ -321,7 +390,7 @@ class AgentLoop(QThread):
 
                     if self._tool_failure_counts[tool_name] >= _MAX_TOOL_FAILURES:
                         logger.error(
-                            "[AgentLoop] Tool %s failed %d times, terminating loop",
+                            "[Agent] Tool %s failed %d times, terminating loop",
                             tool_name, _MAX_TOOL_FAILURES,
                         )
                         ctx.error_message = (
@@ -371,37 +440,32 @@ class AgentLoop(QThread):
         if ctx.turn_count >= ctx.max_turns:
             return "max_turns"
 
-        self.new_turn.emit(ctx.turn_count)
+        self._emit_new_turn(ctx.turn_count)
         return "continue"
 
     def _state_wrap_up(self, ctx: TurnContext) -> str:
         """强制收尾轮：达到 max_turns 后，去掉 tools 再调一次 LLM，
-
-        让模型基于已有工具结果产出纯文本最终答复，避免「工具跑完却无输出」。
-        本轮不提供 tools，模型只能输出文本；忽略任何残留的 tool_call。
+        让模型基于已有工具结果产出纯文本最终答复。
         """
         ctx.reset_turn()
-        # 独立成一条收尾消息：重置 UI 气泡，避免与上一轮调工具前的半截文字混淆。
-        self.new_turn.emit(ctx.turn_count)
+        self._emit_new_turn(ctx.turn_count)
 
         seq = self._llm_seq
         self._llm_seq += 1
-        # 关键：tools=None → 网关不下发 tools/tool_choice，模型只能纯文本收尾。
         for chunk in self._llm.chat_stream(
             ctx.messages,
             None,
-            cancel_token=self._cancel_token,
+            cancel_token=self._ctx.cancel_token,
             trace_id=self._trace_id,
             seq=seq,
         ):
-            if self._cancelled:
+            if self._ctx.is_cancelled:
                 return "cancelled"
 
             if chunk["type"] == "text":
                 ctx.full_text += chunk["delta"]
-                self.text_chunk.emit(chunk["delta"])
+                self._emit_text_chunk(chunk["delta"])
             elif chunk["type"] == "tool_call":
-                # 收尾轮不执行工具，丢弃。
                 continue
             elif chunk["type"] == "error":
                 ctx.error_message = chunk["message"]
@@ -413,7 +477,6 @@ class AgentLoop(QThread):
 
         self._fire_after_iteration(ctx, [])
         if not ctx.full_text.strip():
-            # 收尾轮仍无文字：给出明确提示，避免回到「静默无输出」。
             ctx.error_message = (
                 f"已达到最大工具调用轮数（{ctx.max_turns} 轮），任务尚未完成。"
                 f"可继续追问以推进。"
@@ -424,9 +487,9 @@ class AgentLoop(QThread):
     def _state_finalize(self, ctx: TurnContext) -> str:
         trace_data = self._serialize_trace(ctx)
         if ctx.error_message:
-            self.done.emit({"ok": False, "error": ctx.error_message, "trace": trace_data})
+            self._emit_done({"ok": False, "error": ctx.error_message, "trace": trace_data})
         else:
-            self.done.emit({"ok": True, "error": None, "trace": trace_data})
+            self._emit_done({"ok": True, "error": None, "trace": trace_data})
         return "ok"
 
     # ── 工具执行辅助 ─────────────────────────────────────────────────────
@@ -459,16 +522,14 @@ class AgentLoop(QThread):
         tool_name = tc["name"]
         ai_args = tc["arguments"]
 
-        # 注入 session_id 供 memory 等工具使用（不在 schema 中，LLM 不可见）
         if self._session_id:
             ai_args["_session_id"] = self._session_id
 
-        # 执行
-        self.tool_event.emit(call_id, "start", {"name": tool_name, "params": ai_args})
+        self._emit_tool_start(call_id, tool_name, ai_args)
         t0 = time.perf_counter()
         result = self._registry.execute(tool_name, ai_args)
         duration_ms = (time.perf_counter() - t0) * 1000
-        self.tool_event.emit(call_id, "done", {"name": tool_name, "result": result})
+        self._emit_tool_done(call_id, tool_name, result)
         self._trace_tool_call(call_id, tool_name, ai_args, result, duration_ms)
         return result
 
@@ -477,10 +538,9 @@ class AgentLoop(QThread):
         results: list[tuple[dict, dict] | None] = [None] * len(batch)
 
         for tc in batch:
-            # 注入 session_id 供 memory 等工具使用
             if self._session_id:
                 tc["arguments"]["_session_id"] = self._session_id
-            self.tool_event.emit(tc["id"], "start", {"name": tc["name"], "params": tc["arguments"]})
+            self._emit_tool_start(tc["id"], tc["name"], tc["arguments"])
 
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
             future_to_idx = {}
@@ -499,13 +559,11 @@ class AgentLoop(QThread):
                     result = {"status": "error", "data": {"message": str(e)}}
                 duration_ms = (time.perf_counter() - start_times[idx]) * 1000
                 results[idx] = (tc, result)
-                self.tool_event.emit(tc["id"], "done", {"name": tc["name"], "result": result})
+                self._emit_tool_done(tc["id"], tc["name"], result)
                 self._trace_tool_call(
                     tc["id"], tc["name"], tc["arguments"], result, duration_ms
                 )
 
-        # 理论上每个槽都会被 as_completed 填充；过滤 None 防御 submit 异常等边界，
-        # 避免上游 `for tc, result in batch_results` 解包 None 崩溃。
         return [r for r in results if r is not None]
 
     def _get_remaining_calls(
@@ -513,8 +571,6 @@ class AgentLoop(QThread):
         all_batches: list[tuple[str, list[dict]]]
     ) -> list[dict]:
         """获取当前批次之后尚未执行的工具调用。"""
-        done_ids = {tc["id"] for tc in current_batch}
-        # 找到当前批次在 all_batches 中的位置之后的所有调用
         found = False
         remaining = []
         for _, batch in all_batches:
@@ -525,14 +581,26 @@ class AgentLoop(QThread):
             remaining.extend(batch)
         return remaining
 
-    # ── 工具方法 ─────────────────────────────────────────────────────────
+    # ── Hook 辅助方法 ────────────────────────────────────────────────────
+
+    def _apply_before_turn_hook(self, ctx: TurnContext) -> list[dict] | None:
+        """调用 before_turn hook，返回修改后的消息列表或 None。"""
+        if self._hook is None:
+            return None
+        hook_ctx = BeforeTurnContext(
+            trace_id=self._trace_id,
+            session_id=self._session_id,
+            turn_count=ctx.turn_count,
+            messages=ctx.messages,
+        )
+        try:
+            return self._hook.before_turn(hook_ctx)
+        except Exception:
+            logger.exception("[Agent] before_turn hook raised")
+            return None
 
     def _apply_before_tools_hook(self, ctx: TurnContext) -> dict:
-        """调用 before_execute_tools，返回 {call_id: ToolDecision} 的拒绝映射。
-
-        hook 为 None 或全部放行时返回空 dict。安全 hook（reraise=True）抛出
-        异常时，记录致命错误并拒绝本轮全部工具调用，避免「审批失败却照常执行」。
-        """
+        """调用 before_execute_tools，返回 {call_id: ToolDecision} 的拒绝映射。"""
         if self._hook is None:
             return {}
         views = [
@@ -548,7 +616,7 @@ class AgentLoop(QThread):
         try:
             decisions = self._hook.before_execute_tools(hook_ctx)
         except Exception as exc:
-            logger.exception("[AgentLoop] before_execute_tools hook raised; rejecting all")
+            logger.exception("[Agent] before_execute_tools hook raised; rejecting all")
             msg = f"安全审批异常，工具调用被拒绝: {exc}"
             return {tc["id"]: _reject(tc["id"], msg) for tc in ctx.tool_calls}
         if not decisions:
@@ -558,7 +626,7 @@ class AgentLoop(QThread):
     def _fire_after_iteration(
         self, ctx: TurnContext, results: list[tuple[dict, dict]]
     ) -> None:
-        """触发 after_iteration 评测埋点。非 reraise hook 的异常已在内部隔离。"""
+        """触发 after_iteration 评测埋点。"""
         if self._hook is None:
             return
         hook_ctx = AfterIterationContext(
@@ -576,16 +644,17 @@ class AgentLoop(QThread):
         try:
             self._hook.after_iteration(hook_ctx)
         except Exception:
-            logger.exception("[AgentLoop] after_iteration hook raised")
+            logger.exception("[Agent] after_iteration hook raised")
+
+    # ── Trace 辅助 ───────────────────────────────────────────────────────
 
     def _trace_start(self) -> None:
-        """开始记录 Trace（一次完整的 Agent 运行）。"""
         if self._trace_store is None:
             return
         try:
             self._trace_store.start_trace(self._trace_id, self._session_id)
         except Exception:
-            logger.debug("[AgentLoop] trace start failed", exc_info=True)
+            logger.debug("[Agent] trace start failed", exc_info=True)
 
     def _trace_finish(
         self, ctx: TurnContext, status: str, run_t0: float, error: str | None = None
@@ -604,7 +673,7 @@ class AgentLoop(QThread):
                 error=error,
             )
         except Exception:
-            logger.debug("[AgentLoop] trace finish failed", exc_info=True)
+            logger.debug("[Agent] trace finish failed", exc_info=True)
 
     def _trace_tool_call(
         self, call_id: str, name: str, arguments: dict, result: dict | None, duration_ms: float
@@ -621,7 +690,7 @@ class AgentLoop(QThread):
                 duration_ms=duration_ms,
             )
         except Exception:
-            logger.debug("[AgentLoop] trace record_tool_call failed", exc_info=True)
+            logger.debug("[Agent] trace record_tool_call failed", exc_info=True)
 
     @staticmethod
     def _serialize_trace(ctx: TurnContext) -> list[dict]:
@@ -633,3 +702,53 @@ class AgentLoop(QThread):
             }
             for entry in ctx.trace
         ]
+
+    # ── Callback 发射辅助 ────────────────────────────────────────────────
+
+    def _emit_text_chunk(self, delta: str) -> None:
+        cb = self._ctx.callbacks.on_text_chunk
+        if cb is not None:
+            try:
+                cb(delta)
+            except Exception:
+                logger.debug("[Agent] on_text_chunk callback raised", exc_info=True)
+
+    def _emit_tool_start(self, call_id: str, name: str, params: dict) -> None:
+        cb = self._ctx.callbacks.on_tool_start
+        if cb is not None:
+            try:
+                cb(call_id, name, params)
+            except Exception:
+                logger.debug("[Agent] on_tool_start callback raised", exc_info=True)
+
+    def _emit_tool_done(self, call_id: str, name: str, result: dict) -> None:
+        cb = self._ctx.callbacks.on_tool_done
+        if cb is not None:
+            try:
+                cb(call_id, name, result)
+            except Exception:
+                logger.debug("[Agent] on_tool_done callback raised", exc_info=True)
+
+    def _emit_state_change(self, state_name: str) -> None:
+        cb = self._ctx.callbacks.on_state_change
+        if cb is not None:
+            try:
+                cb(state_name)
+            except Exception:
+                logger.debug("[Agent] on_state_change callback raised", exc_info=True)
+
+    def _emit_new_turn(self, turn_count: int) -> None:
+        cb = self._ctx.callbacks.on_new_turn
+        if cb is not None:
+            try:
+                cb(turn_count)
+            except Exception:
+                logger.debug("[Agent] on_new_turn callback raised", exc_info=True)
+
+    def _emit_done(self, info: dict) -> None:
+        cb = self._ctx.callbacks.on_done
+        if cb is not None:
+            try:
+                cb(info)
+            except Exception:
+                logger.debug("[Agent] on_done callback raised", exc_info=True)

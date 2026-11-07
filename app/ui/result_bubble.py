@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 
 from PyQt6.QtCore import QPoint, QRect, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QTextCursor
@@ -26,9 +25,13 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import TransparentToolButton, FluentIcon
 
+from app.core.agent_interface import AgentCallbacks
 from app.core.config import cfg
 from app.core.llm_gateway import CancellationToken, LLMGateway
+from app.core.agent import Agent
+from app.core.agent_context import AgentContext
 from app.i18n import t
+from app.tools.registry import ToolRegistry
 from app.ui import style
 from app.ui.global_click_watcher import GlobalClickWatcher
 from app.ui.non_activating_popup import NonActivatingPopup
@@ -46,54 +49,18 @@ _BUBBLE_MAX_HEIGHT = 420
 _H_MARGIN = 16   # 内容区左右内边距之和（8 + 8）
 _V_CHROME = 44   # 上下内边距 + footer 工具栏高度的预留
 
-
-class _BubbleWorker(threading.Thread):
-    """后台线程：调用 LLMGateway 流式获取结果。"""
-
-    def __init__(
-        self,
-        messages: list[dict],
-        cancel_token: CancellationToken,
-        on_chunk: callable,
-        on_done: callable,
-        on_error: callable,
-    ):
-        super().__init__(daemon=True)
-        self._messages = messages
-        self._cancel = cancel_token
-        self._on_chunk = on_chunk
-        self._on_done = on_done
-        self._on_error = on_error
-
-    def run(self):
-        try:
-            gateway = LLMGateway()
-            for event in gateway.chat_stream(
-                self._messages, tools=None, cancel_token=self._cancel
-            ):
-                if self._cancel.is_cancelled():
-                    break
-                if event["type"] == "text":
-                    self._on_chunk(event["delta"])
-                elif event["type"] == "error":
-                    self._on_error(event.get("message", t("resultbubble.requestFailed")))
-                    return
-                elif event["type"] == "done":
-                    break
-            self._on_done()
-        except Exception as e:
-            if not self._cancel.is_cancelled():
-                self._on_error(str(e))
+# 气泡场景无需工具；空的 ToolRegistry 仅用于满足 Agent 构造要求。
+_BUBBLE_REGISTRY = ToolRegistry()
 
 
 class ResultBubble(NonActivatingPopup):
     """划词结果气泡：就地流式显示 LLM 快查结果。"""
 
     # 信号
-    _text_chunk = pyqtSignal(str)   # 从 worker 线程 marshal 到主线程
+    _text_chunk = pyqtSignal(str)   # 从 agent 线程 marshal 到主线程
     _stream_done = pyqtSignal()
     _stream_error = pyqtSignal(str)
-    _hide_requested = pyqtSignal()  # 全局点击监听
+    _hide_requested = pyqtSignal()  # 全球点击监听
     replace_requested = pyqtSignal(str)  # rewrite：用户点「替换原文」，载荷为最终结果
     copy_requested = pyqtSignal(str)     # rewrite：用户点「复制」，载荷为最终结果
 
@@ -108,8 +75,8 @@ class ResultBubble(NonActivatingPopup):
         )
         self._bg_color = QColor("#1E1E1E")
         self._border_color = QColor("#333333")
-        self._cancel_token: CancellationToken | None = None
-        self._worker: _BubbleWorker | None = None
+        self._ctx: AgentContext | None = None
+        self._agent: Agent | None = None
         self._streaming = False
         self._full_text = ""
         # 当前模式："oneshot"（只读快查）或 "rewrite"（可编辑 + footer 回填）。
@@ -276,7 +243,7 @@ class ResultBubble(NonActivatingPopup):
         self._start_stream(x, y, text, action_key)
 
     def _start_stream(self, x: int, y: int, text: str, action_key: str):
-        """共用的流式启动：复位状态、定位显示、渲染提示词、起 worker。"""
+        """共用的流式启动：复位状态、定位显示、渲染提示词、起 Agent。"""
         self._cancel_current()
         # 起始：清空内容、复位宽度、定位、显示。
         self._full_text = ""
@@ -298,15 +265,21 @@ class ResultBubble(NonActivatingPopup):
         prompt = action.render(text)
 
         messages = [{"role": "user", "content": prompt}]
-        self._cancel_token = CancellationToken()
-        self._worker = _BubbleWorker(
-            messages=messages,
-            cancel_token=self._cancel_token,
-            on_chunk=lambda delta: self._text_chunk.emit(delta),
-            on_done=lambda: self._stream_done.emit(),
-            on_error=lambda msg: self._stream_error.emit(msg),
+
+        self._ctx = AgentContext(
+            callbacks=AgentCallbacks(
+                on_text_chunk=lambda delta: self._text_chunk.emit(delta),
+                on_done=lambda info: (
+                    self._stream_done.emit()
+                    if info.get("ok")
+                    else self._stream_error.emit(info.get("error", t("resultbubble.requestFailed")))
+                ),
+            ),
+            llm_gateway=LLMGateway(),
+            registry=_BUBBLE_REGISTRY,
         )
-        self._worker.start()
+        self._agent = Agent(self._ctx, messages)
+        self._agent.start()
 
     def _on_copy_clicked(self):
         self.copy_requested.emit(self._content.toPlainText().strip())
@@ -415,10 +388,10 @@ class ResultBubble(NonActivatingPopup):
     # ── 取消 / 清理 ────────────────────────────────────────────────────
 
     def _cancel_current(self):
-        if self._cancel_token is not None:
-            self._cancel_token.cancel()
-            self._cancel_token = None
-        self._worker = None
+        if self._ctx is not None:
+            self._ctx.cancel()
+            self._ctx = None
+        self._agent = None
         self._streaming = False
 
     def hideEvent(self, event):

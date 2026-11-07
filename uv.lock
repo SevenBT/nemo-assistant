@@ -1177,6 +1177,7 @@ dependencies = [
     { name = "pyqt6-fluent-widgets" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "rapidocr-onnxruntime" },
+    { name = "tiktoken" },
     { name = "uiautomation" },
 ]
 
@@ -1216,6 +1217,7 @@ requires-dist = [
     { name = "pytest-qt", marker = "extra == 'dev'", specifier = ">=4.4.0" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=306" },
     { name = "rapidocr-onnxruntime", specifier = ">=1.2.0,<1.5.0" },
+    { name = "tiktoken", specifier = ">=0.5.0" },
     { name = "tomli", marker = "python_full_version < '3.11' and extra == 'dev'", specifier = ">=2.0.0" },
     { name = "uiautomation", specifier = ">=2.0.18" },
 ]

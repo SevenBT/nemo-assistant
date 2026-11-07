@@ -820,6 +820,8 @@ EN: dict[str, str] = {
     "prompt.timeHint": "[Current time: {time}]",
     "prompt.fileLabel": "[File: {name}]\n{content}",
     "prompt.imageLabel": "[Image: {name}]\n{content}",
+    "prompt.imageVisionDisabled": "The image is attached, but its pixels were not sent: vision is disabled or auto detection did not confirm vision support for this model. Any content below is OCR text only. Explain this limitation and suggest enabling Vision capability in settings and selecting a vision-capable model; uploading again or searching local files cannot fix disabled vision.",
+    "prompt.imageUnavailable": "The image attachment could not be read, so its pixels were not sent. Any content below is previously extracted OCR text; explain that the original image is currently unreadable.",
     "prompt.defaultUser": "You are an intelligent AI assistant. You can call tools to help the user complete tasks.\n\nReply in English.",
     "prompt.tool.scheduled_task": "\n[Scheduled tasks] Use the single scheduled_task tool, distinguished by action:\n- Create: action=create. Trigger config examples:\n  * Daily at 9: {\"trigger_type\": \"cron\", \"trigger_config\": {\"hour\": 9, \"minute\": 0}}\n  * Hourly: {\"trigger_type\": \"interval\", \"trigger_config\": {\"hours\": 1}}\n  * One-off: {\"trigger_type\": \"date\", \"trigger_config\": {\"run_date\": \"2025-12-31 09:00:00\"}}\n- List: action=list.\n- Delete: action=delete with a job_id argument.\n",
     "prompt.tool.note": "\n[Notes] Use the note tool:\n- action=list to view the user's note list and content previews.\n- action=create to create a note (requires title + content).\n- To summarize the current conversation into a note, generate the summary text yourself as content and save with action=create.\n",

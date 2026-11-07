@@ -55,8 +55,17 @@ class VisionAction:
 
     @property
     def auto_send(self) -> bool:
-        """有预设提示词的动作自动发送；通用 "问AI" 留空，等用户输入。"""
-        return bool(self.prompt)
+        """识图动作统一填充提示词和图片，由用户决定何时发送。
+
+        所有识图按钮（解释/翻译/解题/转表格/问AI）都将：
+        1. 创建新会话并切换过去
+        2. 将截图添加到输入框附件预览
+        3. 将预设提示词填入输入框（若有）
+        4. 光标聚焦，等待用户点击发送按钮
+
+        这样用户可以在发送前修改提示词或追加额外问题，给予最大灵活性。
+        """
+        return False
 
 
 # Default action set. "ask" is the general catch-all; the rest are presets.

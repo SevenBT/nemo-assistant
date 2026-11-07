@@ -1,9 +1,9 @@
 """评测运行器 —— 用当前 model/prompt 重跑用例集，规则打分并落库。
 
-复用 AgentLoop（不另起一套执行逻辑）：AgentLoop 是 QThread，但 run() 可在当前
+复用 AgentThread（不另起一套执行逻辑）：AgentThread 是 QThread，但 run() 可在当前
 线程直接调用同步执行——它的 Qt 信号在无接收者时是 no-op，且每次 run 都会把全链路
 落进 TraceStore。所以运行器对每条用例：
-    1. 直接 new AgentLoop(...).run()（同步、阻塞）→ 产出一个新 trace_id。
+    1. 直接 new AgentThread(...).run()（同步、阻塞）→ 产出一个新 trace_id。
     2. 从 TraceStore 取回该 trace → rule_checks 算分 → metrics 聚合。
     3. 落 eval_runs / eval_results，供 compare 与 UI。
 
@@ -17,7 +17,7 @@ import subprocess
 import uuid
 from typing import Any, Callable
 
-from app.core.agent_loop import AgentLoop
+from app.core.agent_thread import AgentThread
 from app.core.audit_hooks import EvalHook
 from app.eval import metrics, rule_checks
 
@@ -100,7 +100,7 @@ def _run_one_case(
     """重跑一条用例 → 规则打分（+ 可选 judge）→ 落 eval_results。返回该用例分数。"""
     api_messages = _build_messages(case, prompt_builder)
 
-    loop = AgentLoop(
+    loop = AgentThread(
         llm_gateway=llm_gateway,
         registry=registry,
         api_messages=api_messages,
@@ -110,7 +110,7 @@ def _run_one_case(
         hooks=[EvalHook(trace_store)],  # EvalHook 写入 eval_samples 供 judge 使用
     )
     loop.run()  # 同步执行，阻塞至本 trace 结束
-    trace_id = loop._trace_id  # AgentLoop 为本次 run 生成的统一 trace_id
+    trace_id = loop._trace_id  # AgentThread 为本次 run 生成的统一 trace_id
 
     trace_data = trace_store.get_trace(trace_id)
     scores: dict[str, Any] = {}
@@ -141,7 +141,7 @@ def _run_one_case(
 
 
 def _build_messages(case: dict[str, Any], prompt_builder) -> list[dict]:
-    """构建喂给 AgentLoop 的消息。优先用 prompt_builder 贴近真实运行。
+    """构建喂给 AgentThread 的消息。优先用 prompt_builder 贴近真实运行。
 
     prompt_builder.build() 接收的是 Message 实体列表（内部会调 .to_api_dict()），
     不是 dict——所以这里把用例的 user 输入包成 Message 再交给它。

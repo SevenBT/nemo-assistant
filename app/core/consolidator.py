@@ -14,7 +14,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from app.core.context_manager import ContextManager
+from app.core.context_manager import ContextManager, content_to_text
 from app.models.memory import MemoryCategory, MemoryScope
 
 if TYPE_CHECKING:
@@ -42,8 +42,9 @@ def _messages_to_text(messages: list["Message"]) -> str:
     lines = []
     for m in messages:
         role_label = {"user": "用户", "assistant": "AI", "system": "系统"}.get(m.role, m.role)
-        if m.content:
-            lines.append(f"{role_label}: {m.content[:500]}")
+        content = content_to_text(m.content)
+        if content:
+            lines.append(f"{role_label}: {content[:500]}")
     return "\n".join(lines)
 
 

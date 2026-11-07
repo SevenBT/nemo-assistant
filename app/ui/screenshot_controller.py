@@ -1,9 +1,10 @@
 """Screenshot workflow controller for the main window."""
 
 import logging
+from io import BytesIO
 
-from PyQt6.QtCore import QObject, QPoint, QTimer
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import QObject, QPoint, QTimer, QBuffer, QIODevice
+from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtWidgets import QApplication, QFileDialog, QWidget
 
 from app.core.config import SCREENSHOTS_DIR
@@ -104,14 +105,71 @@ class ScreenshotController(QObject):
 
         self._vision_callback([attachment], vision_action)
 
+    @staticmethod
+    def _strip_metadata(image: QImage) -> bytes:
+        """Remove all metadata from QImage and return clean PNG bytes.
+
+        Returns raw PNG bytes without any metadata (DPI, ICC profile, etc.).
+        Falls back to original QImage.save() if PIL is unavailable.
+        """
+        try:
+            from PIL import Image
+            from io import BytesIO
+
+            # Convert QImage to PIL Image (pure pixel data)
+            buffer = QBuffer()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            image.save(buffer, "PNG")
+            buffer.close()
+
+            pil_image = Image.open(BytesIO(buffer.data()))
+
+            # Save without metadata
+            output = BytesIO()
+            pil_image.save(
+                output,
+                format="PNG",
+                optimize=False,  # Don't add optimization metadata
+                dpi=None,  # Explicitly remove DPI
+            )
+            return output.getvalue()
+
+        except ImportError:
+            logger.warning("元数据清除：PIL 未安装，使用原始保存（可能含元数据）")
+            buffer = QBuffer()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            image.save(buffer, "PNG")
+            buffer.close()
+            return buffer.data().data()
+        except Exception as e:
+            logger.warning("元数据清除：处理失败 %s，使用原始保存", e)
+            buffer = QBuffer()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            image.save(buffer, "PNG")
+            buffer.close()
+            return buffer.data().data()
+
     def _save_as_attachment(self, pixmap: QPixmap) -> Attachment | None:
-        """Save pixmap as PNG under SCREENSHOTS_DIR and wrap as image Attachment."""
+        """Save pixmap as PNG under SCREENSHOTS_DIR and wrap as image Attachment.
+
+        Strips all metadata (DPI, ICC profile, etc.) to ensure AI receives pure pixel data.
+        """
         self._shot_counter += 1
         # Monotonic counter (not time) keeps naming stable without Date.now.
         path = SCREENSHOTS_DIR / f"shot_{id(pixmap):x}_{self._shot_counter}.png"
-        if not pixmap.save(str(path), "PNG"):
-            logger.error("识图：截图保存失败 %s", path)
+
+        # Convert to QImage and strip metadata, get clean PNG bytes
+        image = pixmap.toImage()
+        clean_png_bytes = self._strip_metadata(image)
+
+        # Write clean PNG bytes to file
+        try:
+            with open(path, "wb") as f:
+                f.write(clean_png_bytes)
+        except OSError as e:
+            logger.error("识图：截图保存失败 %s: %s", path, e)
             return None
+
         try:
             size = path.stat().st_size
         except OSError:
