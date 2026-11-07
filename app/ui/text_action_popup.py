@@ -97,7 +97,7 @@ _AUTO_HIDE_MS = 2000
 class TextActionPopup(NonActivatingPopup):
     """无边框、不抢焦点的划词动作条。"""
 
-    action_chosen = pyqtSignal(str)       # 点击动作：气泡快查 / 存便签
+    action_chosen = pyqtSignal(str)       # 点击动作：气泡快查 / 存笔记
     _hide_requested = pyqtSignal()        # 内部：从 mouse hook 线程请求关闭
 
     def __init__(self, parent=None):

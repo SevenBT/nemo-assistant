@@ -110,12 +110,14 @@ def test_oneshot_action_shows_bubble(qapp):
 
 
 def test_local_action_saves_note(qapp):
-    controller, obs = _make_controller(qapp, captured="待存的便签内容")
+    controller, obs = _make_controller(qapp, captured="待存的笔记内容")
     controller._on_action_bubble("note")
     assert len(obs["notes"].created) == 1
     title, content, note_type = obs["notes"].created[0]
-    assert content == "待存的便签内容"
+    assert content == "待存的笔记内容"
     assert note_type == "note"
+    from app.i18n import t
+    assert obs["toasts"] == [(t("selection.ctrl.noteSaved"), title)]
     assert obs["note_saved"] == [True]
 
 

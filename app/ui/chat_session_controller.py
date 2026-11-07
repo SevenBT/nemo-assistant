@@ -187,7 +187,7 @@ class ChatSessionController(QObject):
 
         与识图（start_vision_session）平行：那边挂图片附件，这边把选中文字
         填入 prompt。解释/翻译等动作直接发出去，结果显示在浮窗聊天区。
-        「存便签」等无 prompt 的本地动作不应走到这里，由调用方按 key 分发。
+        「存笔记」等无 prompt 的本地动作不应走到这里，由调用方按 key 分发。
 
         - prefill_reply 为空：直接发出查询，等 LLM 回复。
         - prefill_reply 非空：注入气泡里已得到的问答，不重复请求 LLM。
