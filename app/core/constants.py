@@ -42,9 +42,11 @@ def get_current_datetime_info() -> str:
 
 
 def get_current_time_hint() -> str:
-    """获取精确到分钟的当前时间，附在最新一条消息尾部。
+    """获取精确到分钟的当前时间，作为可追加的尾部上下文消息。
 
     时间每分钟变化，单独放在请求末尾，避免污染前面可缓存的稳定前缀。
+    调用方不能把它作为 system 消息发送：部分 provider 转换器会提取所有
+    system 消息并前置合并，导致可变时间反而出现在历史之前。
     """
     now = datetime.datetime.now()
     return t("prompt.timeHint", time=now.strftime('%Y-%m-%d %H:%M'))
