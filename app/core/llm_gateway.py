@@ -556,6 +556,10 @@ class LiteLLMAdapter:
             "stream_options": {"include_usage": True},
             "api_key": request.api_key,
         }
+        if request.provider == "deepseek":
+            # DeepSeek enables thinking mode by default; keep standard chat
+            # calls in non-thinking mode unless the app exposes an explicit control.
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         if request.base_url:
             kwargs["api_base"] = request.base_url
         if request.provider == "deepseek" and any(

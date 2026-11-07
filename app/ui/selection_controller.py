@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from PyQt6.QtCore import QObject, QPoint
 from PyQt6.QtGui import QCursor
@@ -126,7 +127,21 @@ class SelectionController(QObject):
 
     def _get_text(self) -> str:
         """获取选中文字：优先 UIA 预取，兜底 Ctrl+C。"""
-        text = self._captured or capture_selection()
+        if self._captured:
+            text = self._captured
+            source = "uia_prefetch"
+            elapsed_ms = 0.0
+        else:
+            started = time.perf_counter()
+            text = capture_selection()
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            source = "clipboard_fallback"
+        logger.info(
+            "[SelectionTiming] stage=text_ready source=%s elapsed_ms=%.2f chars=%d",
+            source,
+            elapsed_ms,
+            len(text),
+        )
         if not text:
             self._toast(t("selection.ctrl.title"), t("selection.ctrl.noSelection"))
         return text
