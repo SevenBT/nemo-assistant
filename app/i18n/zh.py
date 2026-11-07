@@ -466,8 +466,8 @@ ZH: dict[str, str] = {
     "settings.selection.explain.desc": "浮标上显示解释动作（就地解释选中文字的含义）",
     "settings.selection.continue": "显示「续入会话」",
     "settings.selection.continue.desc": "浮标上显示续入会话与新建会话（把选中文填进快速会话，自己补指令再发）",
-    "settings.selection.note": "显示「存便签」",
-    "settings.selection.note.desc": "浮标上显示存便签动作（把选中文字直接存入笔记库）",
+    "settings.selection.note": "显示「存笔记」",
+    "settings.selection.note.desc": "浮标上显示存笔记动作（把选中文字直接存入笔记库）",
     "settings.selection.rewrite": "显示「改写回填」",
     "settings.selection.rewrite.desc": "浮标上显示润色 / 翻译 / 订正（AI 改写后写回原应用，覆盖选中文字）",
     "settings.selection.verify": "回填前校验选区",
@@ -517,16 +517,16 @@ ZH: dict[str, str] = {
     "screenshot.ocr.copyAndClose": "复制并关闭",
     "screenshot.saveDialogTitle": "保存截图",
 
-    # ── 划词控制器（改写/便签反馈）──
+    # ── 划词控制器（改写/笔记反馈）──
     "selection.ctrl.title": "划词",
     "selection.ctrl.noSelection": "未检测到选中的文字",
     "selection.ctrl.replaceFailed": "无法替换",
     "selection.ctrl.replaceFailedBody": "已复制改写结果，可手动粘贴",
     "selection.ctrl.copied": "已复制",
     "selection.ctrl.copiedBody": "改写结果已复制到剪贴板",
-    "selection.ctrl.noteTitleFallback": "划词便签",
-    "selection.ctrl.noteSaved": "已存便签",
-    "selection.ctrl.noteSaveFailed": "存便签失败",
+    "selection.ctrl.noteTitleFallback": "划词笔记",
+    "selection.ctrl.noteSaved": "已存笔记",
+    "selection.ctrl.noteSaveFailed": "存笔记失败",
 
     # ── 结果气泡 ──
     "resultbubble.requestFailed": "LLM 请求失败",
@@ -843,7 +843,7 @@ ZH: dict[str, str] = {
     "textaction.fix.label": "订正",
     "textaction.fix.title": "订正改写",
     "textaction.fix.prompt": "修正下面这段文字里的错别字、标点和语法错误，保持原意、风格和语言不变。只输出修正后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}",
-    "textaction.note.label": "存便签",
+    "textaction.note.label": "存笔记",
 
     # ── 内置工具（描述 / 参数 / 校验）──
     "tool.validate.missing_required": "缺少必需参数: {name}",

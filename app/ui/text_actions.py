@@ -6,7 +6,7 @@
 与识图动作（vision_actions.py）平行：那边发的是图片像素，这边发的是
 选中的纯文本。prompt 中用 {text} 占位，运行时填入选中内容。
 
-prompt 为空的动作（如「存便签」）不走 AI，由调用方按 key 自行处理。
+prompt 为空的动作（如「存笔记」）不走 AI，由调用方按 key 自行处理。
 
 显隐与提示词可由用户在「划词」设置页配置：get_active_text_actions() 返回
 当前启用的动作；render() 在有自定义提示词时优先采用它。
@@ -32,7 +32,7 @@ class TextAction:
         label_key: i18n key for the short button caption (also tooltip).
         prompt_key: i18n key for the text sent to chat, with ``{text}`` filled
             by the selection. 用户可在设置页覆盖（见 render）。空 key 表示该动作
-            不走 LLM（如「存便签」）——调用方按 key 自行处理。
+            不走 LLM（如「存笔记」）——调用方按 key 自行处理。
         title_key: i18n key for the fresh chat session's title (empty for local).
         mode: 处理方式——
             "oneshot"   一次性：气泡显示，不落库、无上下文（解释）；
@@ -41,7 +41,7 @@ class TextAction:
             "compose_new" 新建：新建并激活快速会话，再同 compose；
             "rewrite"   改写回填：气泡显示 AI 改写结果（可编辑），用户确认后
                         把结果写回源应用、覆盖原选区（润色/翻译/订正）；
-            "local"     本地：不走 LLM，调用方按 key 处理（存便签）。
+            "local"     本地：不走 LLM，调用方按 key 处理（存笔记）。
     """
     key: str
     icon: FluentIcon
@@ -67,7 +67,7 @@ class TextAction:
 
     @property
     def goes_to_ai(self) -> bool:
-        """有预设提示词的动作走 LLM；prompt 为空的（存便签）本地处理。"""
+        """有预设提示词的动作走 LLM；prompt 为空的（存笔记）本地处理。"""
         return bool(self.default_prompt)
 
     @property

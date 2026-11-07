@@ -110,8 +110,8 @@ def test_only_explain_uses_explain_prompt():
 
 def test_note_is_local_not_ai():
     note = get_text_action("note")
-    assert note.goes_to_ai is False, "存便签不应走 AI"
-    assert note.default_prompt == "", "存便签 prompt 应为空"
+    assert note.goes_to_ai is False, "存笔记不应走 AI"
+    assert note.default_prompt == "", "存笔记 prompt 应为空"
     assert note.mode == "local"
     assert note.is_compose is False
 

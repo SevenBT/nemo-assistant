@@ -5,7 +5,7 @@
     触发 → 弹出动作条 → 用户交互：
         点击 AI 动作 → 取词 → ResultBubble 就地显示结果（不建会话）
                        气泡里可再「转主窗」继续深入
-        📌 存便签     → 取词 → 直接写入笔记库（静默，仅 toast 提示）
+        📌 存笔记     → 取词 → 直接写入笔记库（静默，仅 toast 提示）
 
 与 ScreenshotController 平行：那边处理截图后动作，这边处理选中文字后动作。
 
@@ -31,7 +31,7 @@ from app.ui.text_actions import get_text_action
 
 logger = logging.getLogger(__name__)
 
-# 存便签时用选中文字开头若干字符作为标题。
+# 存笔记时用选中文字开头若干字符作为标题。
 _NOTE_TITLE_MAX = 20
 
 
@@ -50,11 +50,11 @@ class SelectionController(QObject):
         """
         Args:
             window: 主窗口，AI 动作需要 show/raise 它。
-            note_mgr: NoteManager，用于「存便签」。
+            note_mgr: NoteManager，用于「存笔记」。
             compose_callback: 形如 compose_in_reading(text, *, force_new)。续入/新建
                 把选中文填进（激活或新建的）快速会话输入框，等用户手动发。
             notify: 可选 (title, body) -> None，用于 toast 提示。
-            on_note_saved: 可选 () -> None，存便签后通知刷新笔记列表。
+            on_note_saved: 可选 () -> None，存笔记后通知刷新笔记列表。
         """
         super().__init__(window)
         self._window = window
@@ -149,7 +149,7 @@ class SelectionController(QObject):
     # ── 单击 → 气泡快查 ────────────────────────────────────────────────
 
     def _on_action_bubble(self, key: str):
-        """单击按钮：按动作 mode 分流——一次性气泡 / 续入会话 / 新建会话 / 存便签。"""
+        """单击按钮：按动作 mode 分流——一次性气泡 / 续入会话 / 新建会话 / 存笔记。"""
         action = get_text_action(key)
         if action is None:
             logger.warning("划词：未知动作 %s", key)
@@ -248,7 +248,7 @@ class SelectionController(QObject):
         self._window.raise_()
         self._window.activateWindow()
 
-    # ── 存便签 ────────────────────────────────────────────────────────
+    # ── 存笔记 ────────────────────────────────────────────────────────
 
     def _save_as_note(self, text: str):
         try:
@@ -259,7 +259,7 @@ class SelectionController(QObject):
             if self._on_note_saved is not None:
                 self._on_note_saved()
         except Exception as e:  # pragma: no cover - 防御性
-            logger.error("划词存便签失败：%s", e)
+            logger.error("划词存笔记失败：%s", e)
             self._toast(t("selection.ctrl.title"), t("selection.ctrl.noteSaveFailed"))
 
     def _toast(self, title: str, body: str):
