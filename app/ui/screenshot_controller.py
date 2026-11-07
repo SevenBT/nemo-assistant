@@ -8,6 +8,7 @@ from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtWidgets import QApplication, QFileDialog, QWidget
 
 from app.core.config import SCREENSHOTS_DIR
+from app.core.ocr_engine import OcrEngineService
 from app.i18n import t
 from app.models.attachment import Attachment
 from app.ui.pin_window import PinWindow
@@ -35,10 +36,12 @@ class ScreenshotController(QObject):
         window: QWidget,
         *,
         vision_callback=None,
+        ocr_engine_service: OcrEngineService | None = None,
     ):
         super().__init__(window)
         self._window = window
         self._vision_callback = vision_callback
+        self._ocr_engine_service = ocr_engine_service
         self._overlay: ScreenshotOverlay | None = None
         self._pin_windows: list[PinWindow] = []
         self._shot_counter = 0
@@ -54,7 +57,9 @@ class ScreenshotController(QObject):
         QTimer.singleShot(200, self._show_overlay)
 
     def _show_overlay(self):
-        self._overlay = ScreenshotOverlay()
+        self._overlay = ScreenshotOverlay(
+            ocr_engine_service=self._ocr_engine_service,
+        )
         self._overlay.captured.connect(self._on_done)
         self._overlay.show()
         self._overlay.activateWindow()

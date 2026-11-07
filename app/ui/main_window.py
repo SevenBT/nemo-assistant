@@ -32,6 +32,7 @@ from app.i18n import t
 from app.core.conversation_prompt_builder import ConversationPromptBuilder
 from app.core.llm_gateway import LLMGateway
 from app.core.note_manager import NoteManager
+from app.core.ocr_engine import get_shared_ocr_engine_service
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
 from app.core.trace_store import TraceStore
@@ -104,11 +105,15 @@ class MainWindow(FluentWindow):
         # 启动时清理一次历史 trace，防止 traces.db 无限增长耗尽磁盘。
         self._trace_store.prune()
         self._llm_gateway = LLMGateway(trace_sink=self._trace_store)
+        self._ocr_engine_service = get_shared_ocr_engine_service()
         self._snap_mgr: EdgeSnapManager | None = None
 
         self._build_window()
         self._build_ui()
-        self._screenshot_controller = ScreenshotController(self)
+        self._screenshot_controller = ScreenshotController(
+            self,
+            ocr_engine_service=self._ocr_engine_service,
+        )
         self._sticky_note_controller = StickyNoteController(
             note_mgr=self._notes,
             notes_panel=self._notes_panel,
@@ -174,6 +179,11 @@ class MainWindow(FluentWindow):
         # 启动时应用主题（palette + QSS + DWM 标题栏）
         self._reapply_theme()
 
+        self._ocr_warmup_timer = QTimer(self)
+        self._ocr_warmup_timer.setSingleShot(True)
+        self._ocr_warmup_timer.timeout.connect(self._warm_ocr_engine)
+        self._ocr_warmup_scheduled = False
+
     # ──────────────────────────────────────────── window setup
     # ──────────────────────────────────────────── window setup
     def _init_tools(self):
@@ -233,6 +243,16 @@ class MainWindow(FluentWindow):
         self._dream_timer = QTimer(self)
         self._dream_timer.timeout.connect(self._run_dream)
         self._dream_timer.start(3600_000)
+
+    def schedule_ocr_warmup(self, delay_ms: int = 2000) -> None:
+        """Warm OCR after the main window's first frame has had time to settle."""
+        if self._ocr_warmup_scheduled:
+            return
+        self._ocr_warmup_scheduled = True
+        self._ocr_warmup_timer.start(max(0, delay_ms))
+
+    def _warm_ocr_engine(self) -> None:
+        self._ocr_engine_service.warm_async()
 
     def _run_dream(self):
         """在后台线程执行 Dream，避免阻塞 UI。"""
