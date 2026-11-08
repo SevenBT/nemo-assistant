@@ -93,6 +93,10 @@ class SelectionController(QObject):
         热键无 UIA 预取（无关联的拖选手势），预取文字置空，点击时走 Ctrl+C。
         """
         pos = QCursor.pos()
+        logger.info(
+            "[SelectionTiming] stage=hotkey_received t=%.6f anchor_logical=(%d,%d)",
+            time.perf_counter(), pos.x(), pos.y(),
+        )
         self._trigger(pos.x(), pos.y(), captured="")
 
     def trigger_at(self, x: int, y: int, text: str = ""):
@@ -105,7 +109,14 @@ class SelectionController(QObject):
         text 为 SelectionMonitor 用 UIA 预取到的选中文字：非空则点击动作时直接
         用它，省去再发 Ctrl+C；为空（UIA 不可用）则点击时退回 Ctrl+C 兜底取词。
         """
+        logger.info(
+            "[SelectionTiming] stage=signal_received t=%.6f text_chars=%d anchor_physical=(%d,%d)",
+            time.perf_counter(), len(text or ""), x, y,
+        )
         # Convert physical pixels → logical pixels for Qt
+        physical_x, physical_y = x, y
+        scale = 1.0
+        screen = None
         try:
             screen = QApplication.screenAt(QPoint(x, y)) \
                 or QApplication.primaryScreen()
@@ -113,8 +124,16 @@ class SelectionController(QObject):
                 scale = screen.devicePixelRatio()
                 if scale > 1.0:
                     x, y = round(x / scale), round(y / scale)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.info(
+                "[SelectionTiming] stage=coordinate_error exception_type=%s",
+                type(exc).__name__,
+            )
+        logger.info(
+            "[SelectionTiming] stage=coordinate_conversion t=%.6f "
+            "anchor_physical=(%d,%d) anchor_logical=(%d,%d) scale=%.3f screen_found=%s",
+            time.perf_counter(), physical_x, physical_y, x, y, scale, screen is not None,
+        )
         self._trigger(x, y, captured=text)
 
     def _trigger(self, x: int, y: int, *, captured: str):
@@ -127,7 +146,16 @@ class SelectionController(QObject):
         self._captured = captured
         self._popup_x = x
         self._popup_y = y
+        started = time.perf_counter()
+        logger.info(
+            "[SelectionTiming] stage=popup_request_begin t=%.6f anchor_logical=(%d,%d)",
+            started, x, y,
+        )
         self._popup.show_at(x, y)
+        logger.info(
+            "[SelectionTiming] stage=popup_requested t=%.6f elapsed_ms=%.2f",
+            time.perf_counter(), (time.perf_counter() - started) * 1000,
+        )
 
     # ── 取词辅助 ────────────────────────────────────────────────────────
 
