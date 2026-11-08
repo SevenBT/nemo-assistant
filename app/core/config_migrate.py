@@ -54,6 +54,8 @@ def migrate_config(config_dir: Path) -> None:
     # with their own models are untouched. Idempotent: only acts when empty.
     _seed_default_models(data)
 
+    _migrate_selection_actions(data)
+
     # Write (possibly) migrated config
     _atomic_write(app_config_path, data)
 
@@ -63,6 +65,14 @@ def migrate_config(config_dir: Path) -> None:
         if bak.exists():
             bak.unlink()
         params_config_path.rename(bak)
+
+
+def _migrate_selection_actions(data: dict) -> None:
+    from app.core.selection_actions_config import default_selection_actions
+
+    selection = data.setdefault("Selection", {})
+    if "Actions" not in selection:
+        selection["Actions"] = default_selection_actions(selection)
 
 
 def _consolidate_to_litellm(data: dict) -> None:

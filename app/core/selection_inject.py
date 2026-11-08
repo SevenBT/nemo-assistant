@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
@@ -36,6 +37,40 @@ logger = logging.getLogger(__name__)
 
 # 粘贴是异步的，延迟这么久再还原剪贴板，给源应用留出读取窗口。
 _RESTORE_DELAY_MS = 300
+
+
+def foreground_window() -> int:
+    """Native source window identity; zero means unavailable."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        get_window = ctypes.windll.user32.GetForegroundWindow
+        get_window.restype = wintypes.HWND
+        return int(get_window() or 0)
+    except Exception:
+        logger.debug("Unable to read foreground window", exc_info=True)
+        return 0
+
+
+def restore_foreground_window(hwnd: int) -> bool:
+    """Return focus after an explicit result edit; never paste on restoration failure."""
+    if not hwnd or sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        activate = ctypes.windll.user32.SetForegroundWindow
+        activate.argtypes = [wintypes.HWND]
+        activate.restype = wintypes.BOOL
+        activate(hwnd)
+        return foreground_window() == hwnd
+    except Exception:
+        logger.debug("Unable to restore source window", exc_info=True)
+        return False
 
 
 def strip_ai_preamble(text: str) -> str:
