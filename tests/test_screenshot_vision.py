@@ -21,6 +21,7 @@ _app = QApplication.instance() or QApplication(sys.argv)
 from app.ui.screenshot_controller import ScreenshotController
 from app.ui.screenshot_overlay import ScreenshotOverlay
 from app.core.config import SCREENSHOTS_DIR
+from app.core.ocr_engine import OcrEngineService
 
 
 def _make_pixmap() -> QPixmap:
@@ -35,6 +36,7 @@ def _make_controller():
     ctrl = ScreenshotController(
         window,
         vision_callback=lambda atts, va: calls.append((atts, va)),
+        ocr_engine_service=OcrEngineService(),
     )
     return ctrl, calls
 
@@ -96,7 +98,10 @@ def test_cancel_does_nothing():
 
 def test_vision_without_callbacks_is_safe():
     window = QWidget()
-    ctrl = ScreenshotController(window)  # no callbacks
+    ctrl = ScreenshotController(
+        window,
+        ocr_engine_service=OcrEngineService(),
+    )  # no callbacks
     pm = _make_pixmap()
     # 不应抛异常
     ctrl._on_done(pm, "vision:explain", "", QPoint(0, 0))
@@ -125,7 +130,11 @@ def test_save_action_hides_overlay_before_emitting_result(monkeypatch):
             return QRect(0, 0, 10, 10)
 
         @staticmethod
-        def _crop_frozen(rect):
+        def _finish_text_edit():
+            return None
+
+        @staticmethod
+        def _annotated_crop(rect):
             return QPixmap(10, 10)
 
         def hide(self):
@@ -159,10 +168,15 @@ def test_left_click_outside_selection_cancels_capture():
 
     class _Overlay:
         _state = "SELECTED"
+        _active_tool = None
         cancelled = False
 
         @staticmethod
         def _clear_resize_cursor():
+            return None
+
+        @staticmethod
+        def _finish_text_edit():
             return None
 
         @staticmethod
@@ -208,6 +222,7 @@ def test_plain_left_click_without_drag_cancels_capture():
     class _Overlay:
         _state = "DRAGGING"
         _dragging_panel = False
+        _draft_annotation = None
         cancelled = False
 
         @staticmethod
