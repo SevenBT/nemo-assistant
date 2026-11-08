@@ -1,8 +1,7 @@
 """划词浮标监听 — 全局鼠标钩子，检测「拖选」手势。
 
-钩子线程只看鼠标的按下/松开动作和坐标，**不读取任何内容**（不碰剪贴板、
-无隐私顾虑）。判定为一次划词手势后，通过 pyqtSignal 把坐标 marshal 回 Qt
-主线程，由主线程在光标附近弹出浮标。取词只在用户真正点击浮标动作时才发生。
+鼠标事件驱动拖选状态机；命中后在后台用 UIA 静默读取选区，再通过 pyqtSignal
+通知 Qt 主线程显示浮标。只有 UIA 不可读时，才在点击动作后通过剪贴板取词。
 
 镜像 hotkey_manager.py 的「后台 hook 线程 → pyqtSignal → 主线程」模式。
 
@@ -15,7 +14,7 @@ import logging
 import time
 from ctypes import wintypes
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from app.core import selection_uia
 
@@ -40,6 +39,20 @@ except ImportError:
 _MIN_DRAG_DISTANCE = 40      # 按住期间累积轨迹下限（px）：低于此视为点击/手抖
 _MIN_DRAG_MOVES = 1          # 按住期间最少 move 事件数：0 个=纯点击，必非拖选
 _MAX_DRAG_DURATION = 5.0     # 起落最长耗时（s）：超时多半是拖窗/拖文件，非选字
+_DIAGNOSTIC_SAMPLE_SECONDS = 0.25  # 只采样正在拖动的 move，避免逐帧日志干扰时序
+
+
+def _foreground_identity() -> tuple[int, int]:
+    """仅供诊断的窗口/进程编号；不读取窗口标题或应用内容。"""
+    try:
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        hwnd = user32.GetForegroundWindow()
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))
+        return int(hwnd or 0), pid.value
+    except Exception:
+        return 0, 0
 
 # 标准 I 形（文本）光标句柄。可选文字区域悬停时系统光标为 IDC_IBEAM；
 # 标题栏、桌面、滚动条、图标拖动等非文本区域为箭头/手型/十字等。用它把
@@ -163,16 +176,15 @@ def is_text_cursor() -> bool:
         return True
 
 
-# 左键虚拟键码，用于在 up 事件时核实物理按键真实状态。
+# 左键虚拟键码，用于无 DOWN 事件的恢复与诊断。
 _VK_LBUTTON = 0x01
 
 
 def is_left_button_physically_down() -> bool:
     """查左键当前是否物理按下（GetAsyncKeyState 最高位）。
 
-    用于识别「幽灵 UP」：mouse 库钩子偶发在按下后、拖动前吐出一个停在按下点、
-    0 个 move 的假 UP 事件（实测日志证实）。此刻用户手其实还按着——物理按键
-    仍为下。据此把假 UP 与真释放区分开：真释放时按键确实抬起，返回 False。
+    注意：低级鼠标钩子的回调可能早于 Windows 更新异步按键状态，收到 UP 时
+    此值仍可能为 True。不能以它否决已有的 DOWN/UP 事件。
 
     API 失败时返回 False（fail-open：当作真释放正常处理，不卡住手势）。
     """
@@ -260,9 +272,9 @@ class SelectionMonitor(QObject):
         self._press_y = 0
         self._press_t = 0.0
         self._press_text_cursor = True  # 按下边沿记录的光标形状，门槛兜底路径用
-        # 手势状态：_press_pending 为「上一次事件时左键是否物理按下」，是状态机
-        # 的「上一态」。配合每次事件读到的物理按键真实状态做边沿检测（见
-        # _on_event）。不再依赖 mouse 库会丢/会假报的 down/up 事件标签。
+        self._release_text_cursor = True
+        self._drag_text_cursor_seen = True
+        # DOWN/double 开始，UP 结束；物理按键只用来恢复缺失的 DOWN。
         self._press_pending = False
         # 按住期间累积的真实移动轨迹：last_x/y 为上一个采样点，path_len 为累积
         # 轨迹总长，move_count 为按住期间事件数。按下边沿重置，持续按下时累加，
@@ -272,15 +284,41 @@ class SelectionMonitor(QObject):
         self._path_len = 0.0
         self._move_count = 0
         self._hook = None
+        self._gesture_sequence = 0
+        self._gesture_id = "none"
+        self._last_event_at = None
+        self._last_move_at = None
+        self._last_sample_at = 0.0
+        self._left_up_at = None
+        self._left_up_event_time = None
+        self._max_event_age_ms = 0.0
+        self._press_foreground = (0, 0)
+        self._release_probe_id = None
+        self._last_probe_at = None
+        # 独立于 mouse 事件流的只读探针，不结束手势、不取词、不发显示信号。
+        self._diagnostic_timer = QTimer(self)
+        self._diagnostic_timer.setInterval(100)
+        self._diagnostic_timer.timeout.connect(self._diagnostic_probe)
 
     # ------------------------------------------------------------------ 公开接口
     def start(self):
         """启用划词监听，安装鼠标钩子。"""
         if not _MOUSE_OK or self._enabled:
+            logger.info(
+                "[SelectionTiming] stage=monitor_start_skipped t=%.6f mouse_available=%s enabled=%s",
+                time.perf_counter(), _MOUSE_OK, self._enabled,
+            )
             return
         try:
             self._hook = _mouse.hook(self._on_event)
             self._enabled = True
+            self._last_probe_at = time.perf_counter()
+            self._diagnostic_timer.start()
+            logger.info(
+                "[SelectionTiming] stage=monitor_started t=%.6f "
+                "min_path_px=%d min_moves=%d max_duration_s=%.1f",
+                time.perf_counter(), _MIN_DRAG_DISTANCE, _MIN_DRAG_MOVES, _MAX_DRAG_DURATION,
+            )
         except Exception:  # pragma: no cover - 依赖系统钩子
             logger.warning(
                 "SelectionMonitor: 安装鼠标钩子失败", exc_info=True
@@ -298,6 +336,12 @@ class SelectionMonitor(QObject):
         finally:
             self._hook = None
             self._enabled = False
+            self._diagnostic_timer.stop()
+            self._press_pending = False
+            logger.info(
+                "[SelectionTiming] stage=monitor_stopped t=%.6f gesture_id=%s pending=%s",
+                time.perf_counter(), self._gesture_id, self._press_pending,
+            )
 
     def set_enabled(self, enabled: bool):
         """根据配置开关启用/停用。"""
@@ -311,19 +355,151 @@ class SelectionMonitor(QObject):
         return self._enabled
 
     # ------------------------------------------------------------------ 内部实现
+    def _diagnostic_probe(self):
+        """即使没有新的鼠标事件，也保留松开已发生/Qt 事件循环迟到的证据。"""
+        now = time.perf_counter()
+        gap_ms = ((now - self._last_probe_at) * 1000
+                  if self._last_probe_at is not None else 0.0)
+        self._last_probe_at = now
+        if gap_ms > 350:
+            logger.info(
+                "[SelectionTiming] stage=qt_probe_late t=%.6f gesture_id=%s "
+                "tick_gap_ms=%.2f expected_ms=100 pending=%s",
+                now, self._gesture_id, gap_ms, self._press_pending,
+            )
+        gesture_id = self._gesture_id
+        if (self._press_pending and self._release_probe_id != gesture_id
+                and not is_left_button_physically_down()):
+            self._release_probe_id = gesture_id
+            logger.info(
+                "[SelectionTiming] stage=release_probe t=%.6f gesture_id=%s "
+                "physical_down=False pending=True up_seen=%s last_event_gap_ms=%.2f",
+                now, gesture_id, self._left_up_at is not None,
+                (now - self._last_event_at) * 1000 if self._last_event_at is not None else -1.0,
+            )
+
+    def _begin_gesture(self, mx, my, *, callback_at, event_type, button, event_age_ms):
+        """记录一次按下边沿；事件标签优先，物理状态只作兜底。"""
+        self._press_pending = True
+        self._press_x, self._press_y = mx, my
+        self._press_t = time.monotonic()
+        self._press_text_cursor = is_text_cursor()
+        self._release_text_cursor = self._press_text_cursor
+        self._drag_text_cursor_seen = self._press_text_cursor
+        self._last_x, self._last_y = mx, my
+        self._path_len = 0.0
+        self._move_count = 0
+        self._gesture_sequence += 1
+        self._gesture_id = f"{id(self):x}-{self._gesture_sequence}"
+        self._left_up_at = None
+        self._left_up_event_time = None
+        self._last_move_at = None
+        self._last_sample_at = callback_at
+        self._max_event_age_ms = event_age_ms
+        self._press_foreground = _foreground_identity()
+        logger.info(
+            "[SelectionTiming] stage=press_detected t=%.6f gesture_id=%s "
+            "event=%s button=%s event_age_ms=%.2f start=(%d,%d) "
+            "press_cursor_text=%s foreground_hwnd=%s foreground_pid=%s",
+            callback_at, self._gesture_id, event_type, button, event_age_ms, mx, my,
+            self._press_text_cursor, *self._press_foreground,
+        )
+
+    def _record_drag_move(self, mx, my, *, callback_at, event_type, event_age_ms, down_now):
+        self._path_len += max(abs(mx - self._last_x), abs(my - self._last_y))
+        self._last_x, self._last_y = mx, my
+        self._move_count += 1
+        self._max_event_age_ms = max(self._max_event_age_ms, event_age_ms)
+        current_cursor_text = is_text_cursor()
+        self._drag_text_cursor_seen |= current_cursor_text
+        if event_type == "move":
+            self._last_move_at = callback_at
+            if callback_at - self._last_sample_at >= _DIAGNOSTIC_SAMPLE_SECONDS:
+                self._last_sample_at = callback_at
+                logger.info(
+                    "[SelectionTiming] stage=drag_sample t=%.6f gesture_id=%s "
+                    "event_age_ms=%.2f physical_down=%s pos=(%d,%d) "
+                    "path_px=%.1f moves=%d cursor_text=%s up_seen=%s",
+                    callback_at, self._gesture_id, event_age_ms, down_now, mx, my,
+                    self._path_len, self._move_count, current_cursor_text,
+                    self._left_up_at is not None,
+                )
+
+    def _finish_gesture(self, mx, my, *, callback_at, event_type, button, event_time,
+                        event_age_ms, event_gap_ms):
+        if not self._press_pending:
+            return
+        self._press_pending = False
+        self._release_text_cursor = is_text_cursor()
+        self._drag_text_cursor_seen |= self._release_text_cursor
+        duration = time.monotonic() - self._press_t
+        accepted = is_drag_selection(self._path_len, self._move_count, duration)
+        reason = ("accepted" if accepted else "no_moves" if self._move_count < _MIN_DRAG_MOVES
+                  else "short_path" if self._path_len < _MIN_DRAG_DISTANCE else "too_long")
+        up_to_release_ms = ((callback_at - self._left_up_at) * 1000
+                            if self._left_up_at is not None else -1.0)
+        last_move_gap_ms = ((callback_at - self._last_move_at) * 1000
+                            if self._last_move_at is not None else -1.0)
+        logger.info(
+            "[SelectionTiming] stage=gesture t=%.6f gesture_id=%s accepted=%s "
+            "path_px=%.1f moves=%d duration_ms=%.2f "
+            "start=(%d,%d) end=(%d,%d) delta=(%d,%d) press_cursor_text=%s "
+            "release_cursor_text=%s drag_cursor_text_seen=%s reason=%s end_event=%s end_button=%s "
+            "event_time=%s event_age_ms=%.2f max_event_age_ms=%.2f "
+            "event_gap_ms=%.2f last_move_gap_ms=%.2f up_seen=%s "
+            "up_event_time=%s up_to_release_ms=%.2f "
+            "press_foreground=%s release_foreground=%s",
+            callback_at, self._gesture_id, accepted, self._path_len, self._move_count,
+            duration * 1000, self._press_x, self._press_y, mx, my,
+            mx - self._press_x, my - self._press_y, self._press_text_cursor,
+            self._release_text_cursor, self._drag_text_cursor_seen, reason,
+            event_type, button, event_time, event_age_ms,
+            max(self._max_event_age_ms, event_age_ms), event_gap_ms, last_move_gap_ms,
+            self._left_up_at is not None, self._left_up_event_time, up_to_release_ms,
+            self._press_foreground, _foreground_identity(),
+        )
+        if accepted:
+            self._maybe_emit(mx, my)
+
+    def _fallback_state_event(self, mx, my, *, callback_at, event_type, button,
+                              event_age_ms, event_gap_ms, down_now, was_down, event_time):
+        """无事件标签时保留旧的物理按键兜底路径。"""
+        if down_now and not was_down:
+            self._begin_gesture(
+                mx, my, callback_at=callback_at, event_type=event_type,
+                button=button, event_age_ms=event_age_ms,
+            )
+        elif down_now and was_down:
+            self._record_drag_move(
+                mx, my, callback_at=callback_at, event_type=event_type,
+                event_age_ms=event_age_ms, down_now=down_now,
+            )
+        elif not down_now and was_down:
+            self._finish_gesture(
+                mx, my, callback_at=callback_at, event_type=event_type,
+                button=button, event_time=event_time, event_age_ms=event_age_ms,
+                event_gap_ms=event_gap_ms,
+            )
+
     def _on_event(self, event):
-        """钩子线程回调。**不信任** mouse 库的 down/up 事件标签——实测它会丢
-        DOWN、吐幽灵 UP、重复 UP，逐症打补丁治不完。改用 GetAsyncKeyState 的
-        物理左键真实状态驱动状态机：钩子事件只当「有事发生」的触发器，每次事件
-        读一次真实按键状态，按边沿转换处理。
+        """按事件顺序处理 DOWN/double、move、UP。
 
-          - 上次未按、现在按下（按下边沿）：手势开始，重置轨迹累积器。
-          - 持续按下：累积移动轨迹。
-          - 上次按下、现在松开（松开边沿）：手势结束，判定是否拖选。
-
-        这样丢 DOWN（靠第一个仍按着的事件救回起点）、幽灵 UP（物理键仍按着→无
-        松开边沿）、重复 UP 全部自然化解，因为判据是硬件状态而非钩子标签。
+        低级钩子投递事件时，GetAsyncKeyState 可能还未更新。正常 UP 必须直接
+        结束手势，否则静止鼠标会一直等下一次 move。无轨迹的 UP 不弹窗，后续
+        仍按着的 move 可以恢复手势；重复 UP 则忽略。
         """
+        callback_at = time.perf_counter()
+        callback_wall = time.time()
+        raw_event_type = getattr(event, "event_type", None)
+        labeled_event = raw_event_type is not None or (hasattr(event, "x") and hasattr(event, "time"))
+        event_type = raw_event_type or ("move" if hasattr(event, "x") else "unknown")
+        button = getattr(event, "button", "none")
+        event_time = getattr(event, "time", None)
+        event_age_ms = ((callback_wall - event_time) * 1000
+                        if isinstance(event_time, (float, int)) and event_time > 0 else -1.0)
+        event_gap_ms = ((callback_at - self._last_event_at) * 1000
+                        if self._last_event_at is not None else -1.0)
+        self._last_event_at = callback_at
         # 取当前坐标：MoveEvent 自带 x/y；ButtonEvent 用 get_position()。
         mx = getattr(event, "x", None)
         my = getattr(event, "y", None)
@@ -331,47 +507,76 @@ class SelectionMonitor(QObject):
             try:
                 mx, my = _mouse.get_position()
             except Exception:
+                logger.warning(
+                    "[SelectionTiming] stage=event_skipped t=%.6f reason=position_unavailable "
+                    "event=%s button=%s", callback_at, event_type, button,
+                )
                 return
 
         down_now = is_left_button_physically_down()
         was_down = self._press_pending
-
-        if down_now and not was_down:
-            # 按下边沿：手势开始。
-            self._press_pending = True
-            self._press_x, self._press_y = mx, my
-            self._press_t = time.monotonic()
-            # 按下瞬间记录光标形状：在文字上是 I-beam，拖标题栏/桌面是箭头。
-            self._press_text_cursor = is_text_cursor()
-            self._last_x, self._last_y = mx, my
-            self._path_len = 0.0
-            self._move_count = 0
-        elif down_now and was_down:
-            # 持续按下：累积真实移动轨迹（判定拖选的依据，不受坐标毛刺影响）。
-            self._path_len += max(
-                abs(mx - self._last_x), abs(my - self._last_y)
+        # 保留标签与物理状态不一致的诊断证据，但不再用物理状态否决 UP。
+        if button == "left":
+            logger.info(
+                "[SelectionTiming] stage=button_event t=%.6f gesture_id=%s event=%s "
+                "button=%s event_time=%s event_age_ms=%.2f event_gap_ms=%.2f "
+                "physical_down=%s pending=%s pos=(%d,%d)",
+                callback_at, self._gesture_id, event_type, button, event_time,
+                event_age_ms, event_gap_ms, down_now, was_down, mx, my,
             )
-            self._last_x, self._last_y = mx, my
-            self._move_count += 1
-        elif not down_now and was_down:
-            # 松开边沿：手势结束，判定。
-            self._press_pending = False
-            duration = time.monotonic() - self._press_t
-            if is_drag_selection(self._path_len, self._move_count, duration):
-                self._maybe_emit(mx, my)
-        # not down_now and not was_down：空闲期的杂散事件，忽略。
+
+        labeled = labeled_event and event_type in {"down", "up", "double", "move"}
+        left_button = button == "left" or button == getattr(_mouse, "LEFT", "__missing__")
+        if labeled and left_button and event_type in {"down", "double"}:
+            if self._press_pending:
+                logger.info(
+                    "[SelectionTiming] stage=gesture_cancelled t=%.6f gesture_id=%s "
+                    "reason=new_press_before_release",
+                    callback_at, self._gesture_id,
+                )
+            self._begin_gesture(
+                mx, my, callback_at=callback_at, event_type=event_type,
+                button=button, event_age_ms=event_age_ms,
+            )
+        elif labeled and left_button and event_type == "up":
+            self._left_up_at = callback_at
+            self._left_up_event_time = event_time
+            self._finish_gesture(
+                mx, my, callback_at=callback_at, event_type=event_type,
+                button=button, event_time=event_time, event_age_ms=event_age_ms,
+                event_gap_ms=event_gap_ms,
+            )
+        elif labeled and event_type == "move":
+            if self._press_pending:
+                self._record_drag_move(
+                    mx, my, callback_at=callback_at, event_type=event_type,
+                    event_age_ms=event_age_ms, down_now=down_now,
+                )
+            elif down_now:
+                # DOWN 丢失或前置空 UP：靠仍按着的 move 恢复起点，不把 UP 当 DOWN。
+                self._begin_gesture(
+                    mx, my, callback_at=callback_at, event_type=event_type,
+                    button=button, event_age_ms=event_age_ms,
+                )
+        elif not labeled:
+            self._fallback_state_event(
+                mx, my, callback_at=callback_at, event_type=event_type, button=button,
+                event_age_ms=event_age_ms, event_gap_ms=event_gap_ms,
+                down_now=down_now, was_down=was_down, event_time=event_time,
+            )
+        # 空闲 move、重复 UP 与其他按键不触发动作条。
 
     def _maybe_emit(self, x: int, y: int):
         """手势命中后用 UIA 查前台选区，决定是否弹窗。
 
-        ★ 在钩子线程同步查 UIA（uiautomation 按线程自动 CoInitialize）——必须
-        趁源应用仍持前台、选区仍在时立刻查。按 UIA 状态 + 按下时光标形状分流
+        ★ 在鼠标事件线程同步查 UIA（显式初始化该线程的 COM 上下文）——必须
+        趁源应用仍持前台、选区仍在时立刻查。按 UIA 状态 + 全程光标证据分流
         （见 should_emit）：
 
           - HAS_TEXT：取到文字，带文字发信号、弹窗。
           - NO_TEXT_PATTERN / UNAVAILABLE：控件读不到选区（Canvas 网页、浏览器
-            内置 PDF、跨域 iframe、自绘控件，或 UIA 库缺失）。**仅当按下时为文本
-            光标**才带空文字发信号、弹动作条，点击时用 Ctrl+C 兜底取词；否则
+            内置 PDF、跨域 iframe、自绘控件，或 UIA 库缺失）。仅当按下、拖动或
+            松开时采到文本光标才带空文字弹出动作条，点击时用 Ctrl+C 兜底；否则
             （拖标题栏/桌面/滚动条，箭头光标）静默，消除误弹。
           - EMPTY_SELECTION / NO_FOCUS：控件支持 TextPattern 但没选区（切标签 /
             拖滚动条），或拿不到焦点控件 → 静默不弹。
@@ -382,20 +587,40 @@ class SelectionMonitor(QObject):
         者）——两者都与拖选方向无关，浮标不会因方向不同而偏移或盖住文字。
         """
         capture_started = time.perf_counter()
+        logger.info(
+            "[SelectionTiming] stage=uia_capture_begin t=%.6f gesture_id=%s",
+            capture_started, self._gesture_id,
+        )
         try:
-            status, text = selection_uia.query_selection()
-        except Exception:
+            status, text = selection_uia.query_selection(point=(x, y))
+        except Exception as exc:
+            logger.warning(
+                "[SelectionTiming] stage=uia_capture_error gesture_id=%s exception_type=%s",
+                self._gesture_id, type(exc).__name__,
+            )
             status, text = selection_uia.SelectionStatus.NO_TEXT_PATTERN, ""
         logger.info(
-            "[SelectionTiming] stage=uia_capture elapsed_ms=%.2f status=%s chars=%d",
+            "[SelectionTiming] stage=uia_capture t=%.6f gesture_id=%s elapsed_ms=%.2f status=%s chars=%d",
+            time.perf_counter(), self._gesture_id,
             (time.perf_counter() - capture_started) * 1000,
             getattr(status, "name", str(status)),
             len(text or ""),
         )
 
-        emit = should_emit(status, self._press_text_cursor)
-        # 综合 UIA 状态与按下时光标形状决定是否弹（拖标题栏/桌面被这里挡掉）。
+        cursor_evidence = (
+            self._press_text_cursor
+            or self._release_text_cursor
+            or self._drag_text_cursor_seen
+        )
+        emit = should_emit(status, cursor_evidence)
+        # 没有选区确认、也从未出现文本光标的拖动仍静默，避免拖窗/桌面误弹。
         if not emit:
+            logger.info(
+                "[SelectionTiming] stage=filtered t=%.6f gesture_id=%s status=%s "
+                "press_cursor_text=%s release_cursor_text=%s drag_cursor_text_seen=%s",
+                time.perf_counter(), self._gesture_id, getattr(status, "name", str(status)),
+                self._press_text_cursor, self._release_text_cursor, self._drag_text_cursor_seen,
+            )
             return
 
         # 回退锚点：用「按下点 + 松手点」的包围盒，水平取中点、垂直取较低者
@@ -411,14 +636,35 @@ class SelectionMonitor(QObject):
         # 读不到选区的分支（无 TextPattern / UIA 不可用）没有可查的位置，
         # 直接用包围盒锚点定位。
         if status == selection_uia.SelectionStatus.HAS_TEXT:
+            bounds_started = time.perf_counter()
+            logger.info(
+                "[SelectionTiming] stage=uia_bounds_begin t=%.6f gesture_id=%s",
+                bounds_started, self._gesture_id,
+            )
+            bounds = None
             try:
                 bounds = selection_uia.get_selection_bounds()
                 if bounds is not None:
                     left, top, right, bottom = bounds
                     px = (left + right) // 2  # 水平居中于整片选区
                     py = bottom               # 紧贴选区底边
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "[SelectionTiming] stage=uia_bounds_error gesture_id=%s exception_type=%s",
+                    self._gesture_id, type(exc).__name__,
+                )
+            logger.info(
+                "[SelectionTiming] stage=uia_bounds t=%.6f gesture_id=%s elapsed_ms=%.2f found=%s",
+                time.perf_counter(), self._gesture_id,
+                (time.perf_counter() - bounds_started) * 1000,
+                bounds is not None,
+            )
         # marshal 回主线程：Qt 信号跨线程自动用 queued connection。
         # text 为空时（NO_TEXT_PATTERN / UNAVAILABLE）控制器点击时走 Ctrl+C 兜底。
+        logger.info(
+            "[SelectionTiming] stage=signal_emit t=%.6f gesture_id=%s status=%s "
+            "anchor_physical=(%d,%d) chars=%d",
+            time.perf_counter(), self._gesture_id, getattr(status, "name", str(status)),
+            px, py, len(text or ""),
+        )
         self.selection_gesture.emit(px, py, text)

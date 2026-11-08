@@ -16,6 +16,7 @@ ResultBubble 的 _hide_requested 信号）。
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 
 from PyQt6.QtCore import QRect
@@ -54,6 +55,7 @@ class GlobalClickWatcher:
         self._on_hide_requested = on_hide_requested
         self._owner_name = owner_name
         self._hook: Callable | None = None
+        self.diagnostic_id = "none"  # 由浮窗设置，只读日志上下文，不参与命中判断
 
     def install(self) -> None:
         """安装全局 mouse hook。重复调用安全（已装则忽略）。"""
@@ -93,12 +95,34 @@ class GlobalClickWatcher:
         if event_type != "down":
             return
         button = getattr(event, "button", None)
+        now = time.perf_counter()
+        event_time = getattr(event, "time", None)
+        event_age_ms = ((time.time() - event_time) * 1000
+                        if isinstance(event_time, (float, int)) and event_time > 0 else -1.0)
         if button == _mouse.RIGHT:
+            logger.info(
+                "[SelectionTiming] stage=hide_requested t=%.6f popup_id=%s owner=%s "
+                "reason=right_click event_time=%s event_age_ms=%.2f",
+                now, self.diagnostic_id, self._owner_name, event_time, event_age_ms,
+            )
             self._on_hide_requested()
             return
         if button == _mouse.LEFT:
             geo = self._geometry_provider()  # 物理像素几何，本地引用避免竞争
             if geo is not None:
                 x, y = _mouse.get_position()
-                if not geo.contains(x, y):
+                inside = geo.contains(x, y)
+                logger.info(
+                    "[SelectionTiming] stage=popup_global_click t=%.6f popup_id=%s owner=%s "
+                    "inside=%s pos=(%d,%d) geo=(%d,%d,%d,%d) event_time=%s event_age_ms=%.2f",
+                    now, self.diagnostic_id, self._owner_name, inside, x, y,
+                    geo.x(), geo.y(), geo.width(), geo.height(), event_time, event_age_ms,
+                )
+                if not inside:
+                    logger.info(
+                        "[SelectionTiming] stage=hide_requested t=%.6f popup_id=%s owner=%s "
+                        "reason=outside_click pos=(%d,%d) geo=(%d,%d,%d,%d)",
+                        now, self.diagnostic_id, self._owner_name, x, y, geo.x(), geo.y(),
+                        geo.width(), geo.height(),
+                    )
                     self._on_hide_requested()

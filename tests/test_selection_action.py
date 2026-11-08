@@ -319,11 +319,10 @@ def test_drag_too_slow_rejected():
     assert is_drag_selection(path_len=200, move_count=20, duration=10.0) is False
 
 
-# ── selection_monitor: _on_event 物理按键状态机（点击 vs 拖选 vs 钩子故障）────
+# ── selection_monitor: 无标签事件的物理按键兼容路径 ────────────────────────
 #
-# 新实现不信任 mouse 库的 down/up 标签，改用 GetAsyncKeyState 物理按键状态驱动。
-# 测试据此建模：每个事件附一个「此刻按键是否物理按下」的布尔，喂给被 stub 的
-# is_left_button_physically_down。事件本身只是「有事发生」的触发器。
+# 这些替身没有 mouse 库的事件标签，只覆盖 GetAsyncKeyState 兜底路径。
+# 真实 DOWN/UP/MoveEvent 的时序回归见 test_selection_diagnostics.py。
 
 class _Ev:
     """带坐标的假事件。kind 仅用于可读性，被测代码不依赖它。"""
@@ -396,7 +395,6 @@ def test_click_without_moves_ignored(monkeypatch):
 
 def test_dropped_down_recovered_by_first_move(monkeypatch):
     # 钩子丢了 DOWN 事件：第一个仍按着的 move 事件被识别为按下边沿、救回起点。
-    # 这是「右向左漏弹」的主因——丢 DOWN 导致旧实现真 up 成孤立 up 被忽略。
     monitor, emitted = _make_monitor()
     _drive(monkeypatch, monitor, [
         # 没有 down 事件；第一个事件就是按住状态下的 move

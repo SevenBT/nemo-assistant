@@ -24,8 +24,60 @@ CoInitialize，查到的文字由调用方 marshal 回 Qt 主线程再用。
 from __future__ import annotations
 
 from enum import Enum, auto
+import logging
+import time
+from contextlib import nullcontext
+from threading import current_thread, main_thread
 
 from app.core.selection_capture import MAX_SELECTION_CHARS, clean_selection
+
+logger = logging.getLogger(__name__)
+
+
+def _diagnostic_call(query_id, operation, callback):
+    """记录现有 UIA 调用的边界，不增加查询，不输出文本或异常消息。"""
+    started = time.perf_counter()
+    logger.info(
+        "[SelectionTiming] stage=uia_step_begin t=%.6f query_id=%s operation=%s",
+        started, query_id, operation,
+    )
+    try:
+        result = callback()
+    except Exception as exc:
+        logger.info(
+            "[SelectionTiming] stage=uia_step_error t=%.6f query_id=%s "
+            "operation=%s elapsed_ms=%.2f exception_type=%s",
+            time.perf_counter(), query_id, operation,
+            (time.perf_counter() - started) * 1000, type(exc).__name__,
+        )
+        raise
+    logger.info(
+        "[SelectionTiming] stage=uia_step_done t=%.6f query_id=%s "
+        "operation=%s elapsed_ms=%.2f result_present=%s",
+        time.perf_counter(), query_id, operation,
+        (time.perf_counter() - started) * 1000, result is not None,
+    )
+    return result
+
+
+def _get_text_pattern(control):
+    """兼容 uiautomation 的具体控件类与通用 Control。"""
+    method = getattr(control, "GetTextPattern", None)
+    if callable(method):
+        return method()
+    pattern_id = getattr(getattr(_auto, "PatternId", None), "TextPattern", None)
+    if pattern_id is None:
+        return None
+    return control.GetPattern(pattern_id)
+
+
+def _get_bounding_rectangles(text_range):
+    """uiautomation 2.x 使用 GetBoundingRectangles()，兼容旧属性形式。"""
+    method = getattr(text_range, "GetBoundingRectangles", None)
+    if callable(method):
+        return method()
+    value = getattr(text_range, "BoundingRectangles", None)
+    return value() if callable(value) else value
 
 try:
     import uiautomation as _auto
@@ -55,7 +107,15 @@ def is_available() -> bool:
     return _UIA_OK
 
 
-def query_selection() -> tuple[SelectionStatus, str]:
+def _uia_context():
+    """uiautomation 要求调用线程先初始化 COM；只在后台线程配对初始化。"""
+    if current_thread() is main_thread():
+        return nullcontext()
+    initializer = getattr(_auto, "UIAutomationInitializerInThread", None)
+    return initializer() if initializer is not None else nullcontext()
+
+
+def query_selection(*, point: tuple[int, int] | None = None) -> tuple[SelectionStatus, str]:
     """查询前台聚焦控件当前选中的文字，返回三态结果。
 
     纯查询：不发按键、不读写剪贴板、不改变焦点。
@@ -66,13 +126,46 @@ def query_selection() -> tuple[SelectionStatus, str]:
     """
     if not _UIA_OK:
         return (SelectionStatus.UNAVAILABLE, "")
+    with _uia_context():
+        return _query_selection(point=point)
+
+
+def _query_selection(*, point=None):
+    query_id = f"text-{time.perf_counter_ns():x}"
     try:
-        control = _auto.GetFocusedControl()
+        control = _diagnostic_call(query_id, "focused_control", _auto.GetFocusedControl)
     except Exception:
         return (SelectionStatus.NO_FOCUS, "")
     if control is None:
         return (SelectionStatus.NO_FOCUS, "")
-    return _selection_via_text_pattern(control)
+    logger.info(
+        "[SelectionTiming] stage=uia_control query_id=%s control_class=%s",
+        query_id, type(control).__name__,
+    )
+    result = _selection_via_text_pattern(control, query_id=query_id)
+    # Electron/浏览器可能聚焦外层 Pane；在拖选末点找实际文本及其祖先。
+    # 只在焦点控件根本不可读时兜底，真实空选区不扩大查询，以保留防误弹规则。
+    if result[0] is not SelectionStatus.NO_TEXT_PATTERN or point is None:
+        return result
+    try:
+        target = _diagnostic_call(query_id, "control_at_point", lambda: _auto.ControlFromPoint(*point))
+        source_pid = control.ProcessId
+        for depth in range(4):
+            if target is None or target.ProcessId != source_pid:
+                break
+            candidate = _selection_via_text_pattern(target, query_id=f"{query_id}-point{depth}")
+            if candidate[0] is SelectionStatus.HAS_TEXT:
+                return candidate
+            # 空 TextPattern 不再沿祖先查询，避免抓到别处保留的旧选区。
+            if candidate[0] is SelectionStatus.EMPTY_SELECTION:
+                return candidate
+            target = _diagnostic_call(query_id, "point_parent", target.GetParentControl)
+    except Exception as exc:
+        logger.info(
+            "[SelectionTiming] stage=uia_point_fallback_error query_id=%s exception_type=%s",
+            query_id, type(exc).__name__,
+        )
+    return result
 
 
 def get_selection_bounds() -> tuple[int, int, int, int] | None:
@@ -90,20 +183,26 @@ def get_selection_bounds() -> tuple[int, int, int, int] | None:
     """
     if not _UIA_OK:
         return None
+    with _uia_context():
+        return _query_selection_bounds()
+
+
+def _query_selection_bounds():
+    query_id = f"bounds-{time.perf_counter_ns():x}"
     try:
-        control = _auto.GetFocusedControl()
+        control = _diagnostic_call(query_id, "focused_control", _auto.GetFocusedControl)
     except Exception:
         return None
     if control is None:
         return None
     try:
-        pattern = control.GetTextPattern()
+        pattern = _diagnostic_call(query_id, "text_pattern", lambda: _get_text_pattern(control))
     except Exception:
         return None
     if pattern is None:
         return None
     try:
-        ranges = pattern.GetSelection()
+        ranges = _diagnostic_call(query_id, "selection_ranges", pattern.GetSelection)
     except Exception:
         return None
     if not ranges:
@@ -112,10 +211,14 @@ def get_selection_bounds() -> tuple[int, int, int, int] | None:
     # 合并所有 range 的所有矩形为一个并集包围盒，与选择方向无关。
     left = top = None
     right = bottom = None
-    for rng in ranges:
+    for index, rng in enumerate(ranges):
         try:
-            rects = rng.BoundingRectangles
+            rects = _diagnostic_call(
+                query_id, f"bounding_rectangles:{index}", lambda: _get_bounding_rectangles(rng),
+            )
         except Exception:
+            continue
+        if not rects:
             continue
         for rect in rects:
             if left is None:
@@ -130,7 +233,7 @@ def get_selection_bounds() -> tuple[int, int, int, int] | None:
     return (left, top, right, bottom)
 
 
-def _selection_via_text_pattern(control) -> tuple[SelectionStatus, str]:
+def _selection_via_text_pattern(control, *, query_id=None) -> tuple[SelectionStatus, str]:
     """文档 / 富文本 / 输入框：TextPattern.GetSelection 拿选中区间的文字。
 
     返回三态：
@@ -142,14 +245,15 @@ def _selection_via_text_pattern(control) -> tuple[SelectionStatus, str]:
     不用 ValuePattern 兜底——它返回控件的**全部**内容而非选区，会把没选中的
     部分也带出来，造成错误取词。宁可此处取不到（漏弹），不可取错。
     """
+    query_id = query_id or f"text-{time.perf_counter_ns():x}"
     try:
-        pattern = control.GetTextPattern()
+        pattern = _diagnostic_call(query_id, "text_pattern", lambda: _get_text_pattern(control))
     except Exception:
         return (SelectionStatus.NO_TEXT_PATTERN, "")
     if pattern is None:
         return (SelectionStatus.NO_TEXT_PATTERN, "")
     try:
-        ranges = pattern.GetSelection()
+        ranges = _diagnostic_call(query_id, "selection_ranges", pattern.GetSelection)
     except Exception:
         # pattern 在但取选区失败，仍属「读不到」，给兜底机会。
         return (SelectionStatus.NO_TEXT_PATTERN, "")
@@ -157,9 +261,11 @@ def _selection_via_text_pattern(control) -> tuple[SelectionStatus, str]:
         return (SelectionStatus.EMPTY_SELECTION, "")
 
     parts = []
-    for rng in ranges:
+    for index, rng in enumerate(ranges):
         try:
-            parts.append(rng.GetText(MAX_SELECTION_CHARS))
+            parts.append(_diagnostic_call(
+                query_id, f"range_text:{index}", lambda: rng.GetText(MAX_SELECTION_CHARS),
+            ))
         except Exception:
             continue
     text = clean_selection("".join(parts))

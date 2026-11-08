@@ -4,7 +4,7 @@ import json
 import time
 
 import pytest
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QApplication, QDialog, QWidget
 from qfluentwidgets import FluentIcon
 
@@ -205,6 +205,36 @@ def test_more_expands_without_activating_or_recapturing_selection(qapp, actions_
     assert chosen == ["custom_test"]
     assert not popup.isVisible()
     popup.deleteLater()
+
+
+@pytest.mark.parametrize("hide_between", [False, True])
+def test_popup_keeps_button_size_when_quickly_reselected(qapp, actions_config, hide_between):
+    from app.ui.text_action_popup import TextActionPopup
+
+    config = install_custom()
+    config["buttons"]["explain"] = {"enabled": True, "pinned": False}
+    cfg.set(cfg.selectionActions, config)
+    popup = TextActionPopup()
+    try:
+        initial_size = None
+        for attempt in range(20):
+            if hide_between:
+                popup.hide()  # 新拖选会请求隐藏，但下一次 show 可能紧接着到达
+            popup.show_at(400 + attempt, 300)
+            qapp.processEvents()
+            if initial_size is None:
+                initial_size = popup.size()
+            assert popup.size() == initial_size
+            assert popup._cached_geo.size() == popup.size()
+            for index in range(popup._row.count()):
+                button = popup._row.itemAt(index).widget()
+                if button is not None and hasattr(button, "iconSize"):
+                    assert button.size() == QSize(28, 28)
+                    assert button.minimumSize() == button.maximumSize() == QSize(28, 28)
+                    assert button.iconSize() == QSize(14, 14)
+    finally:
+        popup.hide()
+        popup.deleteLater()
 
 
 def test_view_result_can_copy_and_edited_result_does_not_request_ai(qapp, actions_config):
