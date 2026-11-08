@@ -9,6 +9,7 @@ Features:
 - Right-click context menu: copy / save-as / close
 - Double-click to close
 - Placed at the capture position, full resolution
+- Blue glow only while the pin is the active window
 
 Follows the frameless window conventions from CLAUDE.md.
 """
@@ -17,13 +18,18 @@ from PyQt6.QtCore import (
     QEvent,
     QPoint,
     QRect,
+    QRectF,
     Qt,
     pyqtSignal,
 )
 from PyQt6.QtGui import (
+    QColor,
+    QLinearGradient,
     QMouseEvent,
     QPainter,
+    QPen,
     QPixmap,
+    QRadialGradient,
     QWheelEvent,
 )
 from PyQt6.QtWidgets import (
@@ -38,6 +44,9 @@ from app.i18n import t
 _RESIZE_BORDER = 8
 _MIN_W = 80
 _MIN_H = 60
+_GLOW_MARGIN = 10
+_FRAME_PADDING = _GLOW_MARGIN * 2
+_GLOW_STOPS = ((0.0, 155), (0.15, 110), (0.4, 52), (0.7, 13), (1.0, 0))
 
 
 class PinWindow(QWidget):
@@ -45,13 +54,13 @@ class PinWindow(QWidget):
 
     closed = pyqtSignal()
 
-    def __init__(self, pixmap: QPixmap, pos: QPoint = QPoint(), parent=None):
+    def __init__(self, pixmap: QPixmap, pos: QPoint | None = None, parent=None):
         super().__init__(parent)
         if pixmap.isNull():
             raise ValueError("PinWindow requires a valid pixmap")
         self._pixmap = pixmap
         self._opacity = 1.0
-        self._capture_pos = pos
+        self._capture_pos = QPoint(pos) if pos is not None else None
 
         # Drag state — don't startSystemMove immediately; wait for threshold
         self._drag_pos = QPoint()
@@ -86,17 +95,19 @@ class PinWindow(QWidget):
 
         # Cap to screen size to avoid window spilling off-screen
         sg = QApplication.primaryScreen().availableGeometry()
-        if pw > sg.width() or ph > sg.height():
-            scale = min(sg.width() / pw, sg.height() / ph)
+        available_w = max(1, sg.width() - _FRAME_PADDING)
+        available_h = max(1, sg.height() - _FRAME_PADDING)
+        if pw > available_w or ph > available_h:
+            scale = min(available_w / pw, available_h / ph)
             pw = int(pw * scale)
             ph = int(ph * scale)
 
-        self.resize(pw, ph)
-        self.setMinimumSize(_MIN_W, _MIN_H)
+        self.setMinimumSize(_MIN_W + _FRAME_PADDING, _MIN_H + _FRAME_PADDING)
+        self.resize(pw + _FRAME_PADDING, ph + _FRAME_PADDING)
 
         # Position at capture location or center
-        if not self._capture_pos.isNull():
-            self.move(self._capture_pos)
+        if self._capture_pos is not None:
+            self.move(self._capture_pos - QPoint(_GLOW_MARGIN, _GLOW_MARGIN))
         else:
             self.move(
                 (sg.width() - self.width()) // 2 + sg.x(),
@@ -107,8 +118,60 @@ class PinWindow(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        p.drawPixmap(self.rect(), self._pixmap)
+        image_rect = self._image_rect()
+        if self.isActiveWindow():
+            self._draw_glow(p, QRectF(image_rect))
+        p.drawPixmap(image_rect, self._pixmap)
+        # The bright core sits just outside the image; the pixels being pinned
+        # remain intact, and only the transparent window margin carries chrome.
+        if self.isActiveWindow():
+            p.setPen(QPen(QColor("#398BF2"), 1.0))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRect(QRectF(image_rect).adjusted(-0.5, -0.5, 0.5, 0.5))
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange:
+            self.update()
+
+    def _image_rect(self) -> QRect:
+        return self.rect().adjusted(
+            _GLOW_MARGIN, _GLOW_MARGIN, -_GLOW_MARGIN, -_GLOW_MARGIN
+        )
+
+    @staticmethod
+    def _draw_glow(p: QPainter, rect: QRectF) -> None:
+        """Continuous falloff on the sides and radial falloff at the corners."""
+        left, top = rect.left(), rect.top()
+        right, bottom = rect.right(), rect.bottom()
+        margin = _GLOW_MARGIN
+
+        def add_stops(gradient):
+            for offset, alpha in _GLOW_STOPS:
+                gradient.setColorAt(offset, QColor(51, 136, 255, alpha))
+            return gradient
+
+        for area, gradient in (
+            (QRectF(left - margin, top, margin, rect.height()),
+             QLinearGradient(left, top, left - margin, top)),
+            (QRectF(right, top, margin, rect.height()),
+             QLinearGradient(right, top, right + margin, top)),
+            (QRectF(left, top - margin, rect.width(), margin),
+             QLinearGradient(left, top, left, top - margin)),
+            (QRectF(left, bottom, rect.width(), margin),
+             QLinearGradient(left, bottom, left, bottom + margin)),
+        ):
+            p.fillRect(area, add_stops(gradient))
+        for cx, cy, x, y in (
+            (left, top, left - margin, top - margin),
+            (right, top, right, top - margin),
+            (left, bottom, left - margin, bottom),
+            (right, bottom, right, bottom),
+        ):
+            gradient = add_stops(QRadialGradient(cx, cy, margin))
+            p.fillRect(QRectF(x, y, margin, margin), gradient)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -148,8 +211,13 @@ class PinWindow(QWidget):
             img_h = round(self._pixmap.height() / dpr)
             aspect = img_w / img_h if img_h > 0 else 1.0
             scale = 1.1 if delta > 0 else 0.9
-            new_w = max(_MIN_W, int(self.width() * scale))
-            new_h = max(_MIN_H, round(new_w / aspect))
+            new_w = max(_MIN_W, int(self._image_rect().width() * scale))
+            new_h = round(new_w / aspect)
+            if new_h < _MIN_H:
+                new_h = _MIN_H
+                new_w = max(_MIN_W, round(new_h * aspect))
+            new_w += _FRAME_PADDING
+            new_h += _FRAME_PADDING
             # Keep center position
             cx = self.x() + self.width() // 2
             cy = self.y() + self.height() // 2
@@ -182,7 +250,7 @@ class PinWindow(QWidget):
 
     def _resize_edges_at(self, win_pos: QPoint):
         x, y, w, h = win_pos.x(), win_pos.y(), self.width(), self.height()
-        B = _RESIZE_BORDER
+        B = _RESIZE_BORDER + _GLOW_MARGIN
         on_l = x < B
         on_r = x > w - B
         on_t = y < B
@@ -241,14 +309,14 @@ class PinWindow(QWidget):
         e = self._resize_edges
         nx, ny, nw, nh = x, y, w, h
         if bool(e & Qt.Edge.RightEdge):
-            nw = max(_MIN_W, min(sg.width(), w + dx))
+            nw = max(self.minimumWidth(), min(sg.width(), w + dx))
         if bool(e & Qt.Edge.BottomEdge):
-            nh = max(_MIN_H, min(sg.height(), h + dy))
+            nh = max(self.minimumHeight(), min(sg.height(), h + dy))
         if bool(e & Qt.Edge.LeftEdge):
-            nw = max(_MIN_W, min(sg.width(), w - dx))
+            nw = max(self.minimumWidth(), min(sg.width(), w - dx))
             nx = x + w - nw
         if bool(e & Qt.Edge.TopEdge):
-            nh = max(_MIN_H, min(sg.height(), h - dy))
+            nh = max(self.minimumHeight(), min(sg.height(), h - dy))
             ny = y + h - nh
         self.setGeometry(nx, ny, nw, nh)
 

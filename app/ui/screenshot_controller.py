@@ -36,7 +36,7 @@ class ScreenshotController(QObject):
         window: QWidget,
         *,
         vision_callback=None,
-        ocr_engine_service: OcrEngineService | None = None,
+        ocr_engine_service: OcrEngineService,
     ):
         super().__init__(window)
         self._window = window
@@ -191,6 +191,7 @@ class ScreenshotController(QObject):
     def _pin_screenshot(self, pixmap: QPixmap, pos: QPoint):
         win = PinWindow(pixmap, pos=pos)
         win.show()
+        win.activateWindow()
         self._pin_windows.append(win)
         win.closed.connect(
             lambda w=win: self._pin_windows.remove(w)
