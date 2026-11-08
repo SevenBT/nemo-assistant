@@ -54,7 +54,9 @@ After clicking Explain, a lightweight result card appears near the original text
   <img src="assets/screenshots/selection-explain.png" alt="Selection explanation result" width="760">
 </p>
 
-Buttons in the selection action bar can be enabled or disabled in Settings. If you want to explore a selected passage in more depth, click Continue Session or New Session, and the content will be saved under Quick Sessions in the chat view.
+In **Settings → Selection**, manage built-in and custom buttons. Add an AI button with a name, an icon and a prompt, then choose **View result** or **Rewrite original**. Translation and grammar correction start as editable presets. Use `{text}` to place the selection in your prompt, or let the app append it automatically. Rewrite results can be previewed, edited and explicitly confirmed before replacing the original text; copying remains available if the source selection cannot be verified after editing.
+
+The bar stays icon-only, with names on hover. Put buttons on the bar, in **More**, or hide them. Drag buttons or use the arrows to set their order; the app preserves that order and appends new buttons at the end. Continue Session and New Session bring the selection into Quick Sessions for follow-up questions.
 
 <p align="center">
   <img src="assets/screenshots/select.png" alt="Selection button settings" width="760">

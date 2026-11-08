@@ -17,12 +17,15 @@ from __future__ import annotations
 import logging
 import time
 
-from PyQt6.QtCore import QObject, QPoint
+from PyQt6 import sip
+from PyQt6.QtCore import QObject, QPoint, Qt
 from PyQt6.QtGui import QCursor
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QLabel, QPlainTextEdit, QVBoxLayout
 
 from app.core.selection_capture import capture_selection
-from app.core.selection_inject import replace_selection
+from app.core.selection_inject import (
+    foreground_window, replace_selection, restore_foreground_window, selection_unchanged,
+)
 from app.core.config import cfg
 from app.i18n import t
 from app.ui.result_bubble import ResultBubble
@@ -69,12 +72,15 @@ class SelectionController(QObject):
         self._bubble = ResultBubble(window)
         self._bubble.replace_requested.connect(self._on_replace_requested)
         self._bubble.copy_requested.connect(self._on_copy_requested)
+        self._bubble.edit_requested.connect(self._on_edit_requested)
 
         # UIA 在手势命中时已取到的选中文字（若可用）；点击动作时优先消费它，
         # 取不到才退回 Ctrl+C 兜底。热键路径无此预取，恒为空。
         self._captured = ""
         # 改写回填：记下当前改写动作的原始选中文字，回填时校验选区未变。
         self._rewrite_original = ""
+        self._source_window = 0
+        self._rewrite_needs_verification = False
         # 弹出位置记忆，供气泡定位
         self._popup_x = 0
         self._popup_y = 0
@@ -184,6 +190,8 @@ class SelectionController(QObject):
         记下原始选中文字，供 _on_replace_requested 回填时校验选区未变。
         """
         self._rewrite_original = text
+        self._source_window = foreground_window()
+        self._rewrite_needs_verification = False
         self._bubble.show_rewrite(
             self._popup_x, self._popup_y, text, action_key
         )
@@ -198,9 +206,19 @@ class SelectionController(QObject):
         if not result:
             return
         verify = bool(cfg.get(cfg.selectionRewriteVerify))
-        ok = replace_selection(
-            result, original=self._rewrite_original, verify=verify
-        )
+        source_matches = not self._source_window or foreground_window() == self._source_window
+        ok = False
+        if source_matches:
+            if self._rewrite_needs_verification:
+                # Editing activates a dialog, so an empty/unreadable selection
+                # must not be treated as permission to paste at the caret.
+                confirmed = bool(self._source_window) and selection_unchanged(
+                    self._rewrite_original, capture_selection()
+                )
+                if confirmed:
+                    ok = replace_selection(result, original=self._rewrite_original, verify=False)
+            else:
+                ok = replace_selection(result, original=self._rewrite_original, verify=verify)
         self._bubble.hide()
         # 成功静默（结果已写回原文，用户肉眼可见，无需打扰）；只在失败走兜底
         # 复制时通知，告知去哪儿找结果、要手动粘贴。
@@ -208,8 +226,45 @@ class SelectionController(QObject):
             self._copy_to_clipboard(result)
             self._toast(t("selection.ctrl.replaceFailed"), t("selection.ctrl.replaceFailedBody"))
 
+    def _on_edit_requested(self, result: str):
+        if not result:
+            return
+        source_focus = QApplication.focusWidget()
+        if source_focus is not None and int(source_focus.window().winId()) != self._source_window:
+            source_focus = None
+        self._bubble.hide()
+        dialog = QDialog(self._window)
+        dialog.setWindowTitle(t("resultbubble.editTitle"))
+        dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
+        dialog.resize(520, 360)
+        layout = QVBoxLayout(dialog)
+        hint = QLabel(t("resultbubble.editHint"), dialog)
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        editor = QPlainTextEdit(dialog)
+        editor.setPlainText(result)
+        layout.addWidget(editor)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+        save_button.setEnabled(bool(result.strip()))
+        editor.textChanged.connect(lambda: save_button.setEnabled(bool(editor.toPlainText().strip())))
+        layout.addWidget(buttons)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            result = editor.toPlainText()
+        # Even cancelling the dialog may have affected the source selection.
+        self._rewrite_needs_verification = True
+        if source_focus is not None and not sip.isdeleted(source_focus):
+            source_focus.setFocus()
+        restore_foreground_window(self._source_window)
+        self._bubble.show_rewrite_result(
+            self._popup_x, self._popup_y, self._rewrite_original, result
+        )
+        dialog.deleteLater()
+
     def _on_copy_requested(self, result: str):
-        """气泡「复制」：把改写结果复制到剪贴板，关闭气泡。"""
+        """气泡「复制」：把结果复制到剪贴板，关闭气泡。"""
         if not result:
             return
         self._copy_to_clipboard(result)

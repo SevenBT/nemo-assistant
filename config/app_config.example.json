@@ -1,16 +1,41 @@
 {
   "Selection": {
     "ActiveReadingSessionId": "",
-    "ContinueExplainEnabled": true,
-    "ExplainEnabled": true,
+    "Actions": {
+      "version": 1,
+      "custom": [
+        {
+          "id": "translate_inplace",
+          "preset": "translate_inplace",
+          "name": "",
+          "icon": "LANGUAGE",
+          "prompt": "",
+          "mode": "rewrite"
+        },
+        {
+          "id": "fix_grammar",
+          "preset": "fix_grammar",
+          "name": "",
+          "icon": "ACCEPT",
+          "prompt": "",
+          "mode": "rewrite"
+        }
+      ],
+      "order": ["explain", "continue_explain", "new_continue_explain", "polish", "translate_inplace", "fix_grammar", "note"],
+      "buttons": {
+        "explain": {"enabled": true, "pinned": true},
+        "continue_explain": {"enabled": true, "pinned": true},
+        "new_continue_explain": {"enabled": true, "pinned": true},
+        "polish": {"enabled": true, "pinned": true},
+        "translate_inplace": {"enabled": true, "pinned": true},
+        "fix_grammar": {"enabled": true, "pinned": true},
+        "note": {"enabled": true, "pinned": true}
+      }
+    },
     "ExplainPrompt": "请用简洁的语言解释下面这段文字的含义：\n\n{text}",
-    "FixGrammarPrompt": "修正下面这段文字里的错别字、标点和语法错误，保持原意、风格和语言不变。只输出修正后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}",
     "FloatEnabled": true,
-    "NoteEnabled": true,
     "PolishPrompt": "润色下面这段文字，使其更通顺自然、表达更准确，保持原意与语言。只输出润色后的文字，不要任何解释、前后缀或代码块包裹：\n\n{text}",
-    "RewriteEnabled": true,
-    "RewriteVerify": true,
-    "TranslatePrompt": "翻译下面这段文字：是中文就译成英文，是其他语言就译成中文。只输出译文，不要任何解释、前后缀或代码块包裹：\n\n{text}"
+    "RewriteVerify": true
   },
   "API": {
     "ApiType": "litellm",

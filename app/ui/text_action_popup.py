@@ -40,10 +40,14 @@ from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
+    QPushButton,
+    QScrollArea,
     QVBoxLayout,
+    QWidget,
 )
-from qfluentwidgets import TransparentToolButton
+from qfluentwidgets import FluentIcon, TransparentToolButton
 
+from app.i18n import t
 from app.ui import style
 from app.ui.float_tooltip import FloatTooltip
 from app.ui.global_click_watcher import GlobalClickWatcher
@@ -58,37 +62,58 @@ logger = logging.getLogger(__name__)
 def _build_popup_style(theme: dict) -> str:
     """根据主题生成浮标 QSS。
 
-    紧凑无文字浮标：图标 14px，内边距 2px 起。背景用浮起面、文字用主文本色、
-    hover 用强调色淡底，与应用整体主题一致。
+    紧凑无文字浮标：统一按钮尺寸与留白，仅在「更多」前使用短分隔线。
+    背景用浮起面、文字用主文本色，hover 用强调色淡底。
 
     底色/边框仍跟随主题；浮标靠实边框从网页背景里「浮」出来，不靠颜色对比。
     """
     return f"""
     #textActionCard {{
         background: {theme["surface_raised"]};
-        border-radius: 5px;
+        border-radius: {_CARD_RADIUS_PX}px;
         border: 1px solid {theme["border_solid"]};
     }}
     #textActionCard TransparentToolButton {{
         background: transparent;
         border: none;
         color: {theme["text"]};
-        padding: 2px 3px;
-        border-radius: 4px;
-        min-width: 20px;
-        min-height: 20px;
+        padding: 0;
+        border-radius: 5px;
+        min-width: 0;
+        min-height: 0;
     }}
     #textActionCard TransparentToolButton:hover {{
         background: {theme["accent_subtle"]};
         color: {theme["accent"]};
     }}
+    #textActionDivider {{
+        background: {theme["border_solid"]};
+        border: none;
+    }}
+    #textActionCard QPushButton {{
+        background: transparent;
+        border: none;
+        color: {theme["text"]};
+        text-align: left;
+        padding: 5px 8px;
+        border-radius: 5px;
+        min-height: 20px;
+    }}
+    #textActionCard QPushButton:hover {{
+        background: {theme["accent_subtle"]};
+    }}
+    #textActionCard QScrollArea, #textActionMoreContent {{
+        background: transparent;
+        border: none;
+    }}
 """
 
 # 卡片圆角半径（px），需与 QSS 的 border-radius 保持一致。
-_CARD_RADIUS_PX = 5
+_CARD_RADIUS_PX = 8
 
 # 按钮图标尺寸（px）。
 _ICON_PX = 14
+_TOOL_BUTTON_PX = 28
 
 # 鼠标移开后自动消失的延迟（ms）。
 _AUTO_HIDE_MS = 2000
@@ -104,6 +129,7 @@ class TextActionPopup(NonActivatingPopup):
         super().__init__(parent)
         self._cached_geo: QRect | None = None
         self._cached_geo_physical: QRect | None = None
+        self._anchor = QPoint()
         self._tooltip = FloatTooltip()
         self._click_watcher = GlobalClickWatcher(
             geometry_provider=lambda: self._cached_geo_physical,
@@ -140,39 +166,104 @@ class TextActionPopup(NonActivatingPopup):
         shell.addWidget(self._card)
 
         card_layout = QVBoxLayout(self._card)
-        card_layout.setContentsMargins(2, 2, 2, 2)
+        card_layout.setContentsMargins(4, 3, 4, 3)
         card_layout.setSpacing(0)
 
         self._row = QHBoxLayout()
         self._row.setContentsMargins(0, 0, 0, 0)
-        self._row.setSpacing(0)
+        self._row.setSpacing(2)
         card_layout.addLayout(self._row)
+
+        # Expand inside the same non-activating window. A native QMenu would
+        # activate the app and could clear the source selection before capture.
+        self._more_panel = QScrollArea(self._card)
+        self._more_panel.setWidgetResizable(True)
+        self._more_panel.setSizeAdjustPolicy(QScrollArea.SizeAdjustPolicy.AdjustToContents)
+        self._more_panel.setFrameShape(QFrame.Shape.NoFrame)
+        self._more_panel.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._more_panel.setMaximumHeight(300)
+        self._more_content = QWidget()
+        self._more_content.setObjectName("textActionMoreContent")
+        self._more_layout = QVBoxLayout(self._more_content)
+        self._more_layout.setContentsMargins(0, 4, 0, 0)
+        self._more_layout.setSpacing(1)
+        self._more_panel.setWidget(self._more_content)
+        self._more_panel.hide()
+        card_layout.addWidget(self._more_panel)
+
+    def _action_button(self, action, *, with_label=False):
+        btn = (QPushButton(action.icon.icon(), "", self._card) if with_label
+               else TransparentToolButton(action.icon, self._card))
+        btn.setIconSize(QSize(_ICON_PX, _ICON_PX))
+        if not with_label:
+            btn.setFixedSize(_TOOL_BUTTON_PX, _TOOL_BUTTON_PX)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setAccessibleName(action.label)
+        btn._action_key = action.key
+        btn._action_label = action.label
+        if with_label:
+            btn.setText(btn.fontMetrics().elidedText(action.label, Qt.TextElideMode.ElideRight, 200))
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.installEventFilter(self)
+        btn.clicked.connect(lambda _checked=False, k=action.key: self._on_clicked(k))
+        return btn
 
     def _rebuild_buttons(self) -> int:
         """按当前启用的动作重建按钮行，返回按钮数。
 
         每次 show_at 重建，使设置页改了显隐开关后能即时生效。
         """
-        while self._row.count():
-            child = self._row.takeAt(0)
-            w = child.widget()
-            if w is not None:
-                w.deleteLater()
+        self._more_panel.hide()
+        for layout in (self._row, self._more_layout):
+            while layout.count():
+                child = layout.takeAt(0)
+                w = child.widget()
+                if w is not None:
+                    w.hide()
+                    w.deleteLater()
 
-        actions = get_active_text_actions()
+        actions = get_active_text_actions(pinned=True)
         for action in actions:
-            btn = TransparentToolButton(action.icon, self)
+            self._row.addWidget(self._action_button(action))
+        more_actions = get_active_text_actions(pinned=False)
+        for action in more_actions:
+            self._more_layout.addWidget(self._action_button(action, with_label=True))
+        if more_actions:
+            if actions:
+                separator = QFrame(self._card)
+                separator.setObjectName("textActionDivider")
+                separator.setFrameShape(QFrame.Shape.NoFrame)
+                separator.setFixedSize(1, 14)
+                self._row.addSpacing(3)
+                self._row.addWidget(separator, alignment=Qt.AlignmentFlag.AlignVCenter)
+                self._row.addSpacing(3)
+            btn = TransparentToolButton(FluentIcon.MORE, self._card)
             btn.setIconSize(QSize(_ICON_PX, _ICON_PX))
-            # 不用原生 setToolTip（不抢焦点的浮标上不触发），改用自建 tooltip：
-            # 把标签记在按钮上，hover 时由 eventFilter 调度显示。
-            btn._action_label = action.label
+            btn.setFixedSize(_TOOL_BUTTON_PX, _TOOL_BUTTON_PX)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setAccessibleName(t("selection.actions.more"))
+            btn._action_label = t("selection.actions.more")
             btn.installEventFilter(self)
-            btn.clicked.connect(
-                lambda _checked=False, k=action.key: self._on_clicked(k)
-            )
+            btn.clicked.connect(self._toggle_more)
             self._row.addWidget(btn)
-        return len(actions)
+        return len(actions) + bool(more_actions)
+
+    def _toggle_more(self):
+        self._tooltip.cancel()
+        expanded = not self._more_panel.isVisible()
+        self._more_panel.setVisible(expanded)
+        if expanded:
+            content_height = self._more_content.sizeHint().height() + 6
+            screen = QApplication.screenAt(self._anchor) or QApplication.primaryScreen()
+            available = screen.availableGeometry().height() // 2 if screen else 300
+            self._more_panel.setFixedHeight(min(content_height, 300, available))
+        self.adjustSize()
+        self._place_at_anchor()
+        if self.underMouse():
+            self._auto_hide.stop()
+        else:
+            self._auto_hide.start(_AUTO_HIDE_MS)
 
     def eventFilter(self, obj, event):
         """按钮 hover 进/出 → 调度 / 取消自建 tooltip。"""
@@ -208,6 +299,13 @@ class TextActionPopup(NonActivatingPopup):
         """主线程 slot：收到 hook 线程的关闭请求后执行实际 hide。"""
         self.hide()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.isVisible():
+            # Qt may finish the scroll area's layout after adjustSize returns.
+            # Keep the global hook's hit rectangle in sync with the actual size.
+            self._place_at_anchor()
+
     # ── 动作处理 ──────────────────────────────────────────────────────────
 
     def _on_clicked(self, key: str):
@@ -233,11 +331,19 @@ class TextActionPopup(NonActivatingPopup):
         浮标居中对齐 x，顶边紧贴 y 下方 _GAP_PX 处。
         屏幕底边空间不足时自动翻到选区上方，左右超屏则贴边。
         """
+        self._anchor = QPoint(x, y)
         # 按当前显隐配置重建按钮；全部关闭则不弹。
         if self._rebuild_buttons() == 0:
             return
         self._apply_theme_style()
         self.adjustSize()
+        self._place_at_anchor()
+        self.show()
+        self.raise_()
+        self._auto_hide.start(_AUTO_HIDE_MS)
+
+    def _place_at_anchor(self):
+        x, y = self._anchor.x(), self._anchor.y()
         w, h = self.width(), self.height()
 
         # ★ 用目标坐标查屏幕，不能用 mapToGlobal(self.rect().center())——
@@ -258,9 +364,6 @@ class TextActionPopup(NonActivatingPopup):
         self._cached_geo_physical = placed.physical
 
         self.move(placed.logical.x(), placed.logical.y())
-        self.show()
-        self.raise_()
-        self._auto_hide.start(_AUTO_HIDE_MS)
 
     # ── 鼠标悬停计时 ────────────────────────────────────────────────────
 

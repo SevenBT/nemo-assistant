@@ -16,7 +16,9 @@ from dataclasses import dataclass
 from qfluentwidgets import FluentIcon
 
 from app.core.config import cfg
+from app.core.selection_actions_config import BUILTIN_IDS, normalize_selection_actions
 from app.i18n import t
+from app.ui.selection_icons import selection_icon
 
 
 @dataclass(frozen=True)
@@ -49,11 +51,13 @@ class TextAction:
     prompt_key: str
     title_key: str
     mode: str = "oneshot"
+    custom_label: str | None = None
+    custom_prompt: str | None = None
 
     @property
     def label(self) -> str:
         """按当前语言取按钮标签。"""
-        return t(self.label_key)
+        return self.custom_label if self.custom_label is not None else t(self.label_key)
 
     @property
     def default_prompt(self) -> str:
@@ -68,7 +72,7 @@ class TextAction:
     @property
     def goes_to_ai(self) -> bool:
         """有预设提示词的动作走 LLM；prompt 为空的（存笔记）本地处理。"""
-        return bool(self.default_prompt)
+        return bool(self._effective_prompt())
 
     @property
     def is_compose(self) -> bool:
@@ -91,6 +95,8 @@ class TextAction:
         续入/新建走 compose——不预设提示词，由用户在会话里自己输入指令，
         故它们没有 prompt，render 也不会被调用。
         """
+        if self.custom_prompt is not None:
+            return self.custom_prompt or self.default_prompt
         custom_item = _CUSTOM_PROMPT_ITEM.get(self.key)
         if custom_item is not None:
             custom = (cfg.get(getattr(cfg, custom_item)) or "").strip()
@@ -106,9 +112,11 @@ class TextAction:
         避免自定义文本里的其它花括号触发 KeyError。
         """
         prompt = self._effective_prompt()
-        if "{text}" in prompt:
-            return prompt.replace("{text}", text)
-        return f"{prompt}\n\n{text}"
+        rendered = (prompt.replace("{text}", text) if "{text}" in prompt
+                    else f"{prompt}\n\n{text}")
+        if self.is_rewrite:
+            rendered = f'{t("textaction.rewrite.constraint")}\n\n{rendered}'
+        return rendered
 
 
 # Default action set.
@@ -183,41 +191,46 @@ TEXT_ACTIONS: tuple[TextAction, ...] = (
 
 _ACTION_BY_KEY = {a.key: a for a in TEXT_ACTIONS}
 
-# 每个动作对应的显隐配置项（控制浮标上是否出现该按钮）。
-# 「连续解释」与「新开连续」共用一个开关（同一功能的两个入口）。
-# 三个改写动作共用一个总开关（同属「改写回填」一组）。
-_ENABLED_ITEM = {
-    "explain": "selectionExplainEnabled",
-    "continue_explain": "selectionContinueExplainEnabled",
-    "new_continue_explain": "selectionContinueExplainEnabled",
-    "polish": "selectionRewriteEnabled",
-    "translate_inplace": "selectionRewriteEnabled",
-    "fix_grammar": "selectionRewriteEnabled",
-    "note": "selectionNoteEnabled",
-}
-
 # 支持自定义提示词的动作 → 对应配置项（空串表示用内置默认）。
 _CUSTOM_PROMPT_ITEM = {
     "explain": "selectionExplainPrompt",
     "polish": "selectionPolishPrompt",
-    "translate_inplace": "selectionTranslatePrompt",
-    "fix_grammar": "selectionFixGrammarPrompt",
 }
 
 
-def get_text_action(key: str) -> TextAction | None:
-    """Look up a text action by its key."""
+def get_default_text_action(key: str) -> TextAction | None:
+    """Built-in definitions and preset templates, including deleted presets."""
     return _ACTION_BY_KEY.get(key)
 
 
-def get_active_text_actions() -> tuple[TextAction, ...]:
-    """返回当前启用的动作（按设置页的显隐开关过滤）。"""
-    active = []
-    for action in TEXT_ACTIONS:
-        item_name = _ENABLED_ITEM.get(action.key)
-        if item_name is None:
-            active.append(action)
-            continue
-        if cfg.get(getattr(cfg, item_name)):
-            active.append(action)
-    return tuple(active)
+def get_selection_actions_config() -> dict:
+    return normalize_selection_actions(cfg.get(cfg.selectionActions))
+
+
+def get_all_text_actions(config: dict | None = None) -> tuple[TextAction, ...]:
+    """Resolve built-ins and user definitions in the user's persisted order."""
+    config = normalize_selection_actions(config) if config is not None else get_selection_actions_config()
+    actions = {key: _ACTION_BY_KEY[key] for key in BUILTIN_IDS}
+    for record in config["custom"]:
+        preset = _ACTION_BY_KEY.get(record["preset"])
+        actions[record["id"]] = TextAction(
+            key=record["id"], icon=selection_icon(record["icon"]),
+            label_key=preset.label_key if preset else "",
+            prompt_key=preset.prompt_key if preset else "",
+            title_key=preset.title_key if preset else "",
+            mode=record["mode"], custom_label=record["name"] or None,
+            custom_prompt=record["prompt"],
+        )
+    return tuple(actions[key] for key in config["order"])
+
+
+def get_text_action(key: str) -> TextAction | None:
+    return next((action for action in get_all_text_actions() if action.key == key), None)
+
+
+def get_active_text_actions(*, pinned: bool | None = None) -> tuple[TextAction, ...]:
+    """Enabled actions, optionally restricted to the bar or the More list."""
+    config = get_selection_actions_config()
+    return tuple(action for action in get_all_text_actions(config)
+                 if config["buttons"][action.key]["enabled"]
+                 and (pinned is None or config["buttons"][action.key]["pinned"] == pinned))

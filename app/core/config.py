@@ -285,7 +285,9 @@ class AppConfig(QConfig):
     selectionFloatEnabled = ConfigItem(
         "Selection", "FloatEnabled", True, BoolValidator()
     )
-    # 各划词动作的显隐开关（控制浮标上是否出现对应按钮）。
+    # Ordered built-in/custom buttons, visibility and toolbar placement.
+    selectionActions = ConfigItem("Selection", "Actions", {})
+    # 旧版显隐开关仅用于首次迁移；新版逐按钮状态由 selectionActions 保存。
     selectionExplainEnabled = ConfigItem(
         "Selection", "ExplainEnabled", True, BoolValidator()
     )
@@ -303,7 +305,7 @@ class AppConfig(QConfig):
     # 「解释」动作的自定义提示词；空串表示用内置默认。
     # 含 {text} 占位，运行时填入选中文字；若不含 {text} 则自动在末尾附上选中文字。
     selectionExplainPrompt = ConfigItem("Selection", "ExplainPrompt", "")
-    # 三个改写动作的自定义提示词；空串表示用内置默认。占位规则同上。
+    # 润色仍为内置；翻译和订正提示词在首次迁移时转入 selectionActions。
     selectionPolishPrompt = ConfigItem("Selection", "PolishPrompt", "")
     selectionTranslatePrompt = ConfigItem("Selection", "TranslatePrompt", "")
     selectionFixGrammarPrompt = ConfigItem("Selection", "FixGrammarPrompt", "")

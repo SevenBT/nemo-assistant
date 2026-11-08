@@ -153,6 +153,7 @@ class ResultBubble(NonActivatingPopup):
     _hide_requested = pyqtSignal()  # 全球点击监听
     replace_requested = pyqtSignal(str)  # rewrite：用户点「替换原文」，载荷为最终结果
     copy_requested = pyqtSignal(str)     # rewrite：用户点「复制」，载荷为最终结果
+    edit_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -174,7 +175,7 @@ class ResultBubble(NonActivatingPopup):
         self._prompt_prepare_ms = 0.0
         self._streaming = False
         self._full_text = ""
-        # 当前模式："oneshot"（只读快查）或 "rewrite"（可编辑 + footer 回填）。
+        # 编辑通过单独的对话框完成，气泡自身始终不抢焦点。
         self._mode = "oneshot"
         # rewrite 模式下记下的原始选中文字（回填时校验选区未变）。
         self._original_text = ""
@@ -221,13 +222,19 @@ class ResultBubble(NonActivatingPopup):
         self._content.setObjectName("bubbleContent")
         layout.addWidget(self._content)
 
-        # Footer：仅 rewrite 模式显示。替换原文 / 复制。流式期间禁用，完成后启用。
+        # 查看结果可复制；改写结果额外提供编辑和替换，流式期间禁用。
         self._footer = QFrame(self)
         self._footer.setObjectName("bubbleFooter")
         footer_row = QHBoxLayout(self._footer)
         footer_row.setContentsMargins(0, 0, 0, 0)
         footer_row.setSpacing(2)
         footer_row.addStretch()
+        self._edit_btn = TransparentToolButton(FluentIcon.EDIT, self)
+        self._edit_btn.setToolTip(t("resultbubble.editTooltip"))
+        self._edit_btn.clicked.connect(
+            lambda: self.edit_requested.emit(self._content.toPlainText())
+        )
+        footer_row.addWidget(self._edit_btn)
         self._copy_btn = TransparentToolButton(FluentIcon.COPY, self)
         self._copy_btn.setToolTip(t("resultbubble.copyTooltip"))
         self._copy_btn.clicked.connect(self._on_copy_clicked)
@@ -236,7 +243,7 @@ class ResultBubble(NonActivatingPopup):
         self._replace_btn.setToolTip(t("resultbubble.replaceTooltip"))
         self._replace_btn.clicked.connect(self._on_replace_clicked)
         footer_row.addWidget(self._replace_btn)
-        self._footer.hide()
+        self._footer.show()
         layout.addWidget(self._footer)
 
     # ── 主题适配 ────────────────────────────────────────────────────────
@@ -300,7 +307,7 @@ class ResultBubble(NonActivatingPopup):
     # ── 公开 API ────────────────────────────────────────────────────────
 
     def show_oneshot(self, x: int, y: int, text: str, action_key: str):
-        """一次性解释：弹气泡、自行发起请求、流式显示，不落库、无按钮。
+        """弹气泡、自行发起请求、流式显示，不落库，完成后可复制。
 
         Args:
             x: 选区水平中心（逻辑像素）。
@@ -310,7 +317,10 @@ class ResultBubble(NonActivatingPopup):
         """
         self._mode = "oneshot"
         self._original_text = ""
-        self._footer.hide()
+        self._footer.show()
+        self._edit_btn.hide()
+        self._replace_btn.hide()
+        self._copy_btn.setEnabled(False)
         self._start_stream(x, y, text, action_key)
 
     def show_rewrite(self, x: int, y: int, text: str, action_key: str):
@@ -319,9 +329,8 @@ class ResultBubble(NonActivatingPopup):
         与 show_oneshot 共用流式机制，差异：显示 footer[复制 / 替换原文]、
         记下原始选中文字供回填时校验选区未变。
 
-        内容区**保持只读**：气泡是 WS_EX_NOACTIVATE 永不抢焦点（这正是 Ctrl+V
-        能落回源应用的前提），故无法接收键盘输入，不能就地编辑。需要微调改写
-        结果时走「续入会话」。
+        内容区保持只读以保住源应用焦点；编辑按钮通过控制器打开独立编辑框，
+        返回后重新校验源窗口与选区，再允许替换。
 
         Args:
             x: 选区水平中心（逻辑像素）。
@@ -332,10 +341,31 @@ class ResultBubble(NonActivatingPopup):
         self._mode = "rewrite"
         self._original_text = text
         self._footer.show()
+        self._edit_btn.show()
+        self._replace_btn.show()
         # 流式期间禁用回填按钮，完成后在 _on_stream_done 启用。
         self._replace_btn.setEnabled(False)
         self._copy_btn.setEnabled(False)
+        self._edit_btn.setEnabled(False)
         self._start_stream(x, y, text, action_key)
+
+    def show_rewrite_result(self, x: int, y: int, original: str, result: str):
+        """Redisplay a locally edited result without making another AI request."""
+        self._cancel_current()
+        self._mode = "rewrite"
+        self._original_text = original
+        self._full_text = result
+        self._content.setPlainText(result)
+        self._footer.show()
+        self._edit_btn.show()
+        self._replace_btn.show()
+        for button in (self._edit_btn, self._copy_btn, self._replace_btn):
+            button.setEnabled(bool(result.strip()))
+        self._apply_theme_style()
+        self._position_at(x, y)
+        self._adjust_size()
+        self.show()
+        self.raise_()
 
     def _start_stream(self, x: int, y: int, text: str, action_key: str):
         """Reset the bubble and stream one user-only prompt in a worker thread."""
@@ -518,7 +548,8 @@ class ResultBubble(NonActivatingPopup):
                 self._content.setPlainText(cleaned)
             has_text = bool(self._content.toPlainText().strip())
             self._replace_btn.setEnabled(has_text)
-            self._copy_btn.setEnabled(has_text)
+            self._edit_btn.setEnabled(has_text)
+        self._copy_btn.setEnabled(bool(self._content.toPlainText().strip()))
 
     def _on_stream_error(self, generation: int, msg: str):
         if generation != self._stream_generation:
