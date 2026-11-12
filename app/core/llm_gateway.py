@@ -581,23 +581,10 @@ class LiteLLMAdapter:
         if request.stream_timeout is not None:
             kwargs["timeout"] = request.stream_timeout
 
-        # DEBUG: 打印发送给模型的 messages 结构
-        logger.info(f"[LLM] 发送 {len(request.messages)} 条消息给模型")
-        for i, msg in enumerate(request.messages):
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                logger.info(f"[LLM] msg[{i}] role={role}, content=list({len(content)} parts)")
-                for j, part in enumerate(content):
-                    part_type = part.get("type", "unknown")
-                    if part_type == "text":
-                        text = part.get("text", "")
-                        logger.info(f"[LLM]   part[{j}] type=text, len={len(text)}")
-                    elif part_type == "image_url":
-                        url = part.get("image_url", {}).get("url", "")
-                        logger.info(f"[LLM]   part[{j}] type=image_url, url_len={len(url)}")
-            else:
-                logger.info(f"[LLM] msg[{i}] role={role}, content_len={len(str(content))}")
+        logger.debug(
+            "LLM request provider=%s model=%s messages=%d tools=%d",
+            request.provider, request.model, len(request.messages), len(request.tools or []),
+        )
 
         try:
             stream = litellm.completion(**kwargs)

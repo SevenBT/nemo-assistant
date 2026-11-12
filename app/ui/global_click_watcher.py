@@ -100,7 +100,7 @@ class GlobalClickWatcher:
         event_age_ms = ((time.time() - event_time) * 1000
                         if isinstance(event_time, (float, int)) and event_time > 0 else -1.0)
         if button == _mouse.RIGHT:
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=hide_requested t=%.6f popup_id=%s owner=%s "
                 "reason=right_click event_time=%s event_age_ms=%.2f",
                 now, self.diagnostic_id, self._owner_name, event_time, event_age_ms,
@@ -112,14 +112,14 @@ class GlobalClickWatcher:
             if geo is not None:
                 x, y = _mouse.get_position()
                 inside = geo.contains(x, y)
-                logger.info(
+                logger.debug(
                     "[SelectionTiming] stage=popup_global_click t=%.6f popup_id=%s owner=%s "
                     "inside=%s pos=(%d,%d) geo=(%d,%d,%d,%d) event_time=%s event_age_ms=%.2f",
                     now, self.diagnostic_id, self._owner_name, inside, x, y,
                     geo.x(), geo.y(), geo.width(), geo.height(), event_time, event_age_ms,
                 )
                 if not inside:
-                    logger.info(
+                    logger.debug(
                         "[SelectionTiming] stage=hide_requested t=%.6f popup_id=%s owner=%s "
                         "reason=outside_click pos=(%d,%d) geo=(%d,%d,%d,%d)",
                         now, self.diagnostic_id, self._owner_name, x, y, geo.x(), geo.y(),

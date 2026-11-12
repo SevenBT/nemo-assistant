@@ -304,7 +304,7 @@ class SelectionMonitor(QObject):
     def start(self):
         """启用划词监听，安装鼠标钩子。"""
         if not _MOUSE_OK or self._enabled:
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=monitor_start_skipped t=%.6f mouse_available=%s enabled=%s",
                 time.perf_counter(), _MOUSE_OK, self._enabled,
             )
@@ -312,13 +312,10 @@ class SelectionMonitor(QObject):
         try:
             self._hook = _mouse.hook(self._on_event)
             self._enabled = True
-            self._last_probe_at = time.perf_counter()
-            self._diagnostic_timer.start()
-            logger.info(
-                "[SelectionTiming] stage=monitor_started t=%.6f "
-                "min_path_px=%d min_moves=%d max_duration_s=%.1f",
-                time.perf_counter(), _MIN_DRAG_DISTANCE, _MIN_DRAG_MOVES, _MAX_DRAG_DURATION,
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                self._last_probe_at = time.perf_counter()
+                self._diagnostic_timer.start()
+            logger.info("Selection monitor started")
         except Exception:  # pragma: no cover - 依赖系统钩子
             logger.warning(
                 "SelectionMonitor: 安装鼠标钩子失败", exc_info=True
@@ -338,10 +335,7 @@ class SelectionMonitor(QObject):
             self._enabled = False
             self._diagnostic_timer.stop()
             self._press_pending = False
-            logger.info(
-                "[SelectionTiming] stage=monitor_stopped t=%.6f gesture_id=%s pending=%s",
-                time.perf_counter(), self._gesture_id, self._press_pending,
-            )
+            logger.info("Selection monitor stopped")
 
     def set_enabled(self, enabled: bool):
         """根据配置开关启用/停用。"""
@@ -356,13 +350,15 @@ class SelectionMonitor(QObject):
 
     # ------------------------------------------------------------------ 内部实现
     def _diagnostic_probe(self):
-        """即使没有新的鼠标事件，也保留松开已发生/Qt 事件循环迟到的证据。"""
+        """仅在 DEBUG 模式观测事件时序，不改变手势状态。"""
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
         now = time.perf_counter()
         gap_ms = ((now - self._last_probe_at) * 1000
                   if self._last_probe_at is not None else 0.0)
         self._last_probe_at = now
         if gap_ms > 350:
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=qt_probe_late t=%.6f gesture_id=%s "
                 "tick_gap_ms=%.2f expected_ms=100 pending=%s",
                 now, self._gesture_id, gap_ms, self._press_pending,
@@ -371,7 +367,7 @@ class SelectionMonitor(QObject):
         if (self._press_pending and self._release_probe_id != gesture_id
                 and not is_left_button_physically_down()):
             self._release_probe_id = gesture_id
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=release_probe t=%.6f gesture_id=%s "
                 "physical_down=False pending=True up_seen=%s last_event_gap_ms=%.2f",
                 now, gesture_id, self._left_up_at is not None,
@@ -397,7 +393,7 @@ class SelectionMonitor(QObject):
         self._last_sample_at = callback_at
         self._max_event_age_ms = event_age_ms
         self._press_foreground = _foreground_identity()
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=press_detected t=%.6f gesture_id=%s "
             "event=%s button=%s event_age_ms=%.2f start=(%d,%d) "
             "press_cursor_text=%s foreground_hwnd=%s foreground_pid=%s",
@@ -416,7 +412,7 @@ class SelectionMonitor(QObject):
             self._last_move_at = callback_at
             if callback_at - self._last_sample_at >= _DIAGNOSTIC_SAMPLE_SECONDS:
                 self._last_sample_at = callback_at
-                logger.info(
+                logger.debug(
                     "[SelectionTiming] stage=drag_sample t=%.6f gesture_id=%s "
                     "event_age_ms=%.2f physical_down=%s pos=(%d,%d) "
                     "path_px=%.1f moves=%d cursor_text=%s up_seen=%s",
@@ -440,7 +436,7 @@ class SelectionMonitor(QObject):
                             if self._left_up_at is not None else -1.0)
         last_move_gap_ms = ((callback_at - self._last_move_at) * 1000
                             if self._last_move_at is not None else -1.0)
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=gesture t=%.6f gesture_id=%s accepted=%s "
             "path_px=%.1f moves=%d duration_ms=%.2f "
             "start=(%d,%d) end=(%d,%d) delta=(%d,%d) press_cursor_text=%s "
@@ -517,7 +513,7 @@ class SelectionMonitor(QObject):
         was_down = self._press_pending
         # 保留标签与物理状态不一致的诊断证据，但不再用物理状态否决 UP。
         if button == "left":
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=button_event t=%.6f gesture_id=%s event=%s "
                 "button=%s event_time=%s event_age_ms=%.2f event_gap_ms=%.2f "
                 "physical_down=%s pending=%s pos=(%d,%d)",
@@ -529,7 +525,7 @@ class SelectionMonitor(QObject):
         left_button = button == "left" or button == getattr(_mouse, "LEFT", "__missing__")
         if labeled and left_button and event_type in {"down", "double"}:
             if self._press_pending:
-                logger.info(
+                logger.debug(
                     "[SelectionTiming] stage=gesture_cancelled t=%.6f gesture_id=%s "
                     "reason=new_press_before_release",
                     callback_at, self._gesture_id,
@@ -587,7 +583,7 @@ class SelectionMonitor(QObject):
         者）——两者都与拖选方向无关，浮标不会因方向不同而偏移或盖住文字。
         """
         capture_started = time.perf_counter()
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=uia_capture_begin t=%.6f gesture_id=%s",
             capture_started, self._gesture_id,
         )
@@ -599,7 +595,7 @@ class SelectionMonitor(QObject):
                 self._gesture_id, type(exc).__name__,
             )
             status, text = selection_uia.SelectionStatus.NO_TEXT_PATTERN, ""
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=uia_capture t=%.6f gesture_id=%s elapsed_ms=%.2f status=%s chars=%d",
             time.perf_counter(), self._gesture_id,
             (time.perf_counter() - capture_started) * 1000,
@@ -615,7 +611,7 @@ class SelectionMonitor(QObject):
         emit = should_emit(status, cursor_evidence)
         # 没有选区确认、也从未出现文本光标的拖动仍静默，避免拖窗/桌面误弹。
         if not emit:
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=filtered t=%.6f gesture_id=%s status=%s "
                 "press_cursor_text=%s release_cursor_text=%s drag_cursor_text_seen=%s",
                 time.perf_counter(), self._gesture_id, getattr(status, "name", str(status)),
@@ -637,7 +633,7 @@ class SelectionMonitor(QObject):
         # 直接用包围盒锚点定位。
         if status == selection_uia.SelectionStatus.HAS_TEXT:
             bounds_started = time.perf_counter()
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=uia_bounds_begin t=%.6f gesture_id=%s",
                 bounds_started, self._gesture_id,
             )
@@ -653,7 +649,7 @@ class SelectionMonitor(QObject):
                     "[SelectionTiming] stage=uia_bounds_error gesture_id=%s exception_type=%s",
                     self._gesture_id, type(exc).__name__,
                 )
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=uia_bounds t=%.6f gesture_id=%s elapsed_ms=%.2f found=%s",
                 time.perf_counter(), self._gesture_id,
                 (time.perf_counter() - bounds_started) * 1000,
@@ -661,7 +657,7 @@ class SelectionMonitor(QObject):
             )
         # marshal 回主线程：Qt 信号跨线程自动用 queued connection。
         # text 为空时（NO_TEXT_PATTERN / UNAVAILABLE）控制器点击时走 Ctrl+C 兜底。
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=signal_emit t=%.6f gesture_id=%s status=%s "
             "anchor_physical=(%d,%d) chars=%d",
             time.perf_counter(), self._gesture_id, getattr(status, "name", str(status)),

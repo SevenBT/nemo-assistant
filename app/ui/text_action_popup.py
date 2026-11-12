@@ -257,7 +257,7 @@ class TextActionPopup(NonActivatingPopup):
         return len(actions) + bool(more_actions)
 
     def _toggle_more(self):
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_more_toggle t=%.6f popup_id=%s expanded=%s",
             time.perf_counter(), self._popup_id, not self._more_panel.isVisible(),
         )
@@ -287,7 +287,7 @@ class TextActionPopup(NonActivatingPopup):
         elif etype in (QEvent.Type.Leave, QEvent.Type.MouseButtonPress):
             self._tooltip.cancel()
         if etype in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=popup_button_event t=%.6f popup_id=%s "
                 "event=%s action=%s button=%s",
                 time.perf_counter(), self._popup_id, etype.name,
@@ -307,7 +307,7 @@ class TextActionPopup(NonActivatingPopup):
     def showEvent(self, event):
         super().showEvent(event)  # NonActivatingPopup 负责 WS_EX_NOACTIVATE
         self._click_watcher.install()
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_show_event t=%.6f popup_id=%s anchor=(%d,%d) "
             "geometry=(%d,%d,%d,%d)",
             time.perf_counter(), self._popup_id, self._anchor.x(), self._anchor.y(),
@@ -321,7 +321,7 @@ class TextActionPopup(NonActivatingPopup):
         super().hideEvent(event)
         self._tooltip.cancel()
         self._click_watcher.remove()
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_hide_event t=%.6f popup_id=%s reason=%s "
             "since_request_ms=%.2f first_paint_pending=%s spontaneous=%s",
             time.perf_counter(), self._popup_id, self._hide_reason,
@@ -334,7 +334,7 @@ class TextActionPopup(NonActivatingPopup):
         super().paintEvent(event)
         if self._first_paint_pending:
             self._first_paint_pending = False
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=popup_first_paint t=%.6f popup_id=%s "
                 "visible=%s since_request_ms=%.2f",
                 time.perf_counter(), self._popup_id, self.isVisible(),
@@ -346,7 +346,7 @@ class TextActionPopup(NonActivatingPopup):
         self._hide_with_reason("global_click")
 
     def _hide_with_reason(self, reason: str):
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_hide_begin t=%.6f popup_id=%s reason=%s visible=%s",
             time.perf_counter(), self._popup_id, reason, self.isVisible(),
         )
@@ -390,7 +390,7 @@ class TextActionPopup(NonActivatingPopup):
         """
         started = time.perf_counter()
         if self.isVisible():
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=popup_reused t=%.6f popup_id=%s first_paint_pending=%s",
                 started, self._popup_id, self._first_paint_pending,
             )
@@ -398,7 +398,7 @@ class TextActionPopup(NonActivatingPopup):
         self._popup_id = f"{id(self):x}-{self._show_sequence}"
         self._show_started = started
         self._click_watcher.diagnostic_id = self._popup_id
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_prepare_begin t=%.6f popup_id=%s anchor=(%d,%d)",
             started, self._popup_id, x, y,
         )
@@ -407,13 +407,13 @@ class TextActionPopup(NonActivatingPopup):
         self._first_paint_pending = True
         # 按当前显隐配置重建按钮；全部关闭则不弹。
         action_count = self._rebuild_buttons()
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_buttons_ready t=%.6f popup_id=%s "
             "elapsed_ms=%.2f actions=%d",
             time.perf_counter(), self._popup_id, (time.perf_counter() - started) * 1000, action_count,
         )
         if action_count == 0:
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] stage=popup_skipped t=%.6f popup_id=%s reason=no_actions",
                 time.perf_counter(), self._popup_id,
             )
@@ -422,7 +422,7 @@ class TextActionPopup(NonActivatingPopup):
         self.adjustSize()
         self._place_at_anchor()
         first_button = self._row.itemAt(0).widget() if self._row.count() else None
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_layout_ready t=%.6f popup_id=%s elapsed_ms=%.2f "
             "size=(%d,%d) first_button_size=(%d,%d)",
             time.perf_counter(), self._popup_id, (time.perf_counter() - started) * 1000,
@@ -433,13 +433,13 @@ class TextActionPopup(NonActivatingPopup):
         self.show()
         self.raise_()
         self._auto_hide.start(_AUTO_HIDE_MS)
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_visible t=%.6f popup_id=%s elapsed_ms=%.2f "
             "visible=%s actions=%d",
             time.perf_counter(), self._popup_id, (time.perf_counter() - started) * 1000,
             self.isVisible(), action_count,
         )
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_timer_started t=%.6f popup_id=%s reason=show timeout_ms=%d",
             time.perf_counter(), self._popup_id, _AUTO_HIDE_MS,
         )
@@ -464,7 +464,7 @@ class TextActionPopup(NonActivatingPopup):
         placed = place_below_anchor(w, h, x, y, screen_geo, scale)
         self._cached_geo = placed.logical
         self._cached_geo_physical = placed.physical
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_geometry t=%.6f popup_id=%s scale=%.3f "
             "logical=(%d,%d,%d,%d) physical=(%d,%d,%d,%d)",
             time.perf_counter(), self._popup_id, scale,
@@ -477,7 +477,7 @@ class TextActionPopup(NonActivatingPopup):
     # ── 鼠标悬停计时 ────────────────────────────────────────────────────
 
     def leaveEvent(self, event):
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_timer_started t=%.6f popup_id=%s reason=leave timeout_ms=%d",
             time.perf_counter(), self._popup_id, _AUTO_HIDE_MS,
         )
@@ -485,7 +485,7 @@ class TextActionPopup(NonActivatingPopup):
         super().leaveEvent(event)
 
     def enterEvent(self, event):
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=popup_timer_stopped t=%.6f popup_id=%s reason=enter",
             time.perf_counter(), self._popup_id,
         )

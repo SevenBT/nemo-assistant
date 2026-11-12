@@ -1,4 +1,4 @@
-"""诊断必须区分 UP/move 时序，且不能把选中文字或异常内容写入日志。"""
+"""常态划词不刷调试日志；DEBUG 诊断区分时序且不泄露选中文字。"""
 import logging
 import time
 from types import SimpleNamespace
@@ -13,7 +13,8 @@ from app.ui import global_click_watcher as click_module
 
 
 @pytest.mark.parametrize("start,end", [((200, 200), (100, 100)), ((100, 100), (200, 200))])
-def test_up_ends_gesture_without_movement_despite_stale_physical_state(monkeypatch, caplog, start, end):
+@pytest.mark.parametrize("log_level", [logging.INFO, logging.DEBUG])
+def test_up_ends_gesture_without_movement_despite_stale_physical_state(monkeypatch, caplog, start, end, log_level):
     monitor = monitor_module.SelectionMonitor()
     emitted = []
     monitor._maybe_emit = lambda x, y: emitted.append((x, y))
@@ -26,7 +27,7 @@ def test_up_ends_gesture_without_movement_despite_stale_physical_state(monkeypat
     ticks = [10.0]
     monkeypatch.setattr(monitor_module.time, "perf_counter", lambda: ticks[0])
     monkeypatch.setattr(monitor_module.time, "monotonic", lambda: ticks[0])
-    caplog.set_level(logging.INFO)
+    caplog.set_level(log_level)
 
     def event(kind, x, y):
         position[0] = (x, y)
@@ -49,6 +50,9 @@ def test_up_ends_gesture_without_movement_despite_stale_physical_state(monkeypat
 
     assert emitted == [end]
     messages = [r.getMessage() for r in caplog.records]
+    if log_level == logging.INFO:
+        assert messages == []
+        return
     up = next(m for m in messages if "stage=button_event" in m and "event=up" in m)
     assert "physical_down=True" in up and "pending=True" in up
     ended = next(m for m in messages if "stage=gesture " in m)
@@ -78,7 +82,8 @@ def test_fallback_uses_drag_and_release_cursor_evidence(monkeypatch, cursor_samp
     assert emitted == ([(150, 210, "")] if should_show else [])
 
 
-def test_uia_logs_call_boundaries_without_selection_or_exception_content(caplog):
+@pytest.mark.parametrize("log_level", [logging.INFO, logging.DEBUG])
+def test_uia_logs_call_boundaries_without_selection_or_exception_content(caplog, log_level):
     class Range:
         def GetText(self, limit):
             return "PRIVATE_SELECTED_SENTINEL"
@@ -91,10 +96,11 @@ def test_uia_logs_call_boundaries_without_selection_or_exception_content(caplog)
         def GetTextPattern(self):
             return Pattern()
 
-    caplog.set_level(logging.INFO)
+    caplog.set_level(log_level)
     assert uia._selection_via_text_pattern(Control())[1] == "PRIVATE_SELECTED_SENTINEL"
-    assert "operation=range_text:0" in caplog.text
-    assert "stage=uia_step_begin" in caplog.text and "stage=uia_step_done" in caplog.text
+    if log_level == logging.DEBUG:
+        assert "operation=range_text:0" in caplog.text
+        assert "stage=uia_step_begin" in caplog.text and "stage=uia_step_done" in caplog.text
     assert "PRIVATE_SELECTED_SENTINEL" not in caplog.text
 
     class BrokenControl:
@@ -102,8 +108,28 @@ def test_uia_logs_call_boundaries_without_selection_or_exception_content(caplog)
             raise RuntimeError("PRIVATE_EXCEPTION_SENTINEL")
 
     assert uia._selection_via_text_pattern(BrokenControl())[0] == uia.SelectionStatus.NO_TEXT_PATTERN
-    assert "stage=uia_step_error" in caplog.text and "exception_type=RuntimeError" in caplog.text
+    if log_level == logging.DEBUG:
+        assert "stage=uia_step_error" in caplog.text and "exception_type=RuntimeError" in caplog.text
+    else:
+        assert not caplog.records
     assert "PRIVATE_EXCEPTION_SENTINEL" not in caplog.text
+
+
+@pytest.mark.parametrize("log_level", [logging.INFO, logging.DEBUG])
+def test_monitor_only_polls_diagnostics_when_debugging(qtbot, monkeypatch, caplog, log_level):
+    caplog.set_level(log_level, logger=monitor_module.__name__)
+    monkeypatch.setattr(monitor_module, "_MOUSE_OK", True)
+    monkeypatch.setattr(monitor_module, "_mouse", SimpleNamespace(hook=lambda callback: callback, unhook=lambda hook: None))
+    monitor = monitor_module.SelectionMonitor()
+    try:
+        monitor.start()
+        assert monitor.is_enabled
+        assert monitor._diagnostic_timer.isActive() == (log_level == logging.DEBUG)
+    finally:
+        monitor.stop()
+    assert not monitor._diagnostic_timer.isActive()
+    assert "Selection monitor started" in caplog.text
+    assert "Selection monitor stopped" in caplog.text
 
 
 def test_uia_uses_generic_pattern_and_bounding_rectangle_methods(caplog, monkeypatch):
@@ -129,7 +155,7 @@ def test_uia_uses_generic_pattern_and_bounding_rectangle_methods(caplog, monkeyp
 
     monkeypatch.setattr(uia, "_auto", SimpleNamespace(PatternId=PatternIds, GetFocusedControl=GenericControl))
     monkeypatch.setattr(uia, "_UIA_OK", True)
-    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.DEBUG)
     status, text = uia._selection_via_text_pattern(GenericControl())
     assert status is uia.SelectionStatus.HAS_TEXT and text == "generic"
     assert "operation=text_pattern" in caplog.text
@@ -181,7 +207,7 @@ def test_release_probe_observes_without_ending_gesture_or_emitting(monkeypatch, 
     monitor.selection_gesture.connect(lambda *args: emitted.append(args))
     monkeypatch.setattr(monitor_module.time, "perf_counter", lambda: 1.5)
     monkeypatch.setattr(monitor_module, "is_left_button_physically_down", lambda: False)
-    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.DEBUG)
     monitor._diagnostic_probe()
     monitor._diagnostic_probe()
     assert monitor._press_pending is True and emitted == []
@@ -202,7 +228,7 @@ def test_global_click_logs_inside_and_outside_without_changing_hide_rule(monkeyp
         on_hide_requested=lambda: hidden.append(True),
     )
     watcher.diagnostic_id = "test-popup"
-    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.DEBUG)
     event = SimpleNamespace(event_type="down", button="left", time=time.time())
     watcher._on_global_event(event)
     assert hidden == []
