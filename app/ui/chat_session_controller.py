@@ -164,15 +164,10 @@ class ChatSessionController(QObject):
         用户可以在发送前修改提示词或追加额外问题。
         """
         session = self._sessions.create(title=vision_action.session_title)
-        logger.info(f"[Vision] 创建新会话后 messages 数量: {len(session.messages)}")
 
         sessions = self._sessions.get_sessions()
         self._session_panel.load(sessions, session.id)
         self.switch_session(session.id)
-
-        # 验证切换后的状态
-        session_after_switch = self._sessions.get(session.id)
-        logger.info(f"[Vision] 切换会话后 messages 数量: {len(session_after_switch.messages)}")
 
         self._input.add_pending_attachments(attachments)
 

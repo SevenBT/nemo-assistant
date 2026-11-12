@@ -62,7 +62,7 @@ def _run_prompt_stream(
         gateway_started = None
         first_token_at = None
         ui_dispatch_started = None
-        logger.info(
+        logger.debug(
             "[SelectionTiming] request_id=%s stage=request_ready action=%s "
             "prompt_chars=%d messages=1 system_messages=0 tools=0 prompt_prepare_ms=%.2f",
             request_id,
@@ -70,7 +70,7 @@ def _run_prompt_stream(
             len(prompt),
             prompt_prepare_ms,
         )
-        logger.info(
+        logger.debug(
             "[SelectionTiming] request_id=%s stage=worker_started elapsed_ms=%.2f",
             request_id,
             (worker_started - request_started) * 1000,
@@ -89,7 +89,7 @@ def _run_prompt_stream(
                 token_at = time.perf_counter()
                 if first_token_at is None:
                     first_token_at = token_at
-                    logger.info(
+                    logger.debug(
                         "[SelectionTiming] request_id=%s stage=first_token gateway_ttft_ms=%.2f",
                         request_id,
                         (first_token_at - gateway_started) * 1000,
@@ -124,7 +124,7 @@ def _run_prompt_stream(
             return
         if not cancel_token.is_cancelled():
             completion_emitted = time.perf_counter()
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] request_id=%s stage=gateway_done gateway_ms=%.2f "
                 "ttft_ms=%s generation_after_first_ms=%s",
                 request_id,
@@ -393,7 +393,7 @@ class ResultBubble(NonActivatingPopup):
         prompt_started = time.perf_counter()
         prompt = action.render(text)
         self._prompt_prepare_ms = (time.perf_counter() - prompt_started) * 1000
-        logger.info(
+        logger.debug(
             "[SelectionTiming] request_id=%s stage=prompt_prepared action=%s "
             "selection_chars=%d elapsed_ms=%.2f system_prompt=none history=none",
             self._request_id,
@@ -475,7 +475,7 @@ class ResultBubble(NonActivatingPopup):
             return
         dispatch_ms = (time.perf_counter() - emitted_at) * 1000
         if self._full_text == "":
-            logger.info(
+            logger.debug(
                 "[SelectionTiming] request_id=%s stage=first_ui_chunk dispatch_ms=%.2f",
                 self._request_id,
                 dispatch_ms,
@@ -527,12 +527,9 @@ class ResultBubble(NonActivatingPopup):
             return
         ui_finished_at = time.perf_counter()
         logger.info(
-            "[SelectionTiming] request_id=%s stage=ui_done total_ms=%.2f "
-            "ui_finalize_ms=%.2f ui_after_last_chunk_ms=%.2f result_chars=%d",
+            "Selection action completed request_id=%s duration_ms=%.2f result_chars=%d",
             self._request_id,
             (ui_finished_at - self._request_started) * 1000,
-            (ui_finished_at - finished_at) * 1000,
-            (ui_finished_at - last_ui_at) * 1000,
             len(self._full_text),
         )
         self._streaming = False

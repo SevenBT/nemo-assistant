@@ -36,22 +36,24 @@ logger = logging.getLogger(__name__)
 
 def _diagnostic_call(query_id, operation, callback):
     """记录现有 UIA 调用的边界，不增加查询，不输出文本或异常消息。"""
+    if not logger.isEnabledFor(logging.DEBUG):
+        return callback()
     started = time.perf_counter()
-    logger.info(
+    logger.debug(
         "[SelectionTiming] stage=uia_step_begin t=%.6f query_id=%s operation=%s",
         started, query_id, operation,
     )
     try:
         result = callback()
     except Exception as exc:
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=uia_step_error t=%.6f query_id=%s "
             "operation=%s elapsed_ms=%.2f exception_type=%s",
             time.perf_counter(), query_id, operation,
             (time.perf_counter() - started) * 1000, type(exc).__name__,
         )
         raise
-    logger.info(
+    logger.debug(
         "[SelectionTiming] stage=uia_step_done t=%.6f query_id=%s "
         "operation=%s elapsed_ms=%.2f result_present=%s",
         time.perf_counter(), query_id, operation,
@@ -138,7 +140,7 @@ def _query_selection(*, point=None):
         return (SelectionStatus.NO_FOCUS, "")
     if control is None:
         return (SelectionStatus.NO_FOCUS, "")
-    logger.info(
+    logger.debug(
         "[SelectionTiming] stage=uia_control query_id=%s control_class=%s",
         query_id, type(control).__name__,
     )
@@ -161,7 +163,7 @@ def _query_selection(*, point=None):
                 return candidate
             target = _diagnostic_call(query_id, "point_parent", target.GetParentControl)
     except Exception as exc:
-        logger.info(
+        logger.debug(
             "[SelectionTiming] stage=uia_point_fallback_error query_id=%s exception_type=%s",
             query_id, type(exc).__name__,
         )
