@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "no-tool-answer",
+  "revision": 1,
+  "status": "reviewed",
+  "suites": [
+    "core"
+  ],
+  "input": {
+    "mode": "snapshot",
+    "messages": [
+      {
+        "role": "user",
+        "content": "只回答 42，不调用工具。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "none",
+    "model_script": [
+      [
+        {
+          "type": "text",
+          "delta": "42"
+        },
+        {
+          "type": "done"
+        }
+      ]
+    ]
+  },
+  "expectations": {
+    "tools": {
+      "no_tools": true
+    },
+    "answer": {
+      "equals": "42"
+    }
+  },
+  "limits": {
+    "deadline_seconds": 30,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

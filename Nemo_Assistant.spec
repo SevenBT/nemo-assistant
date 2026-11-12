@@ -62,7 +62,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', '_tkinter', 'tk', 'tcl', 'gevent'],
+    excludes=['nemo_eval', 'app.eval', 'tkinter', '_tkinter', 'tk', 'tcl', 'gevent'],
     noarchive=False,
 )
 

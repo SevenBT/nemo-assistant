@@ -1,8 +1,8 @@
 """指标聚合与对比测试。"""
 from __future__ import annotations
 
-from app.eval import metrics
-from app.eval import rule_checks as rc
+from nemo_eval import metrics
+from nemo_eval import rule_checks as rc
 
 
 def test_aggregate_averages_per_dim():

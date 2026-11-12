@@ -42,7 +42,7 @@
 
 ## 源码发布
 
-- 运行 `uv sync --extra dev --frozen`。
+- 运行 `uv sync --extra desktop --extra dev --frozen`。
 - 运行 `uv run python scripts/check_repo.py`。
 - 运行 `uv run python -m pytest -q`。
 - 确认 `git status --short` 只包含本次发布应有的改动。
@@ -51,7 +51,7 @@
 ## Windows 二进制发布
 
 - 从一个干净或可丢弃的 `dist/` 目录开始。
-- 运行 `uv sync --extra build --frozen`。
+- 运行 `uv sync --extra desktop --extra build --frozen`。
 - 运行 `uv run python -m PyInstaller --clean --noconfirm Nemo_Assistant.spec`。
 - 确认 `dist/Nemo Assistant.exe` 已生成。
 - 在 Windows 上启动一次可执行文件，确认主窗口能正常打开。

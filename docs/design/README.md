@@ -14,6 +14,7 @@ shipped behavior — check each document's header.
 | [memory-module-design](memory-module-design.md) | Long-term memory module design |
 | [prd-model-settings](prd-model-settings.md) | Model settings & system prompt design |
 | [security-eval-guide](security-eval-guide.md) | Observability / security / eval walkthrough |
+| [evaluation-extraction-design](evaluation-extraction-design.md) | Evaluation extraction — implemented core, verification and supported scope |
 | [local-rag-plan](local-rag-plan.md) | Local knowledge base (RAG) plan — design draft, not yet implemented |
 | [current-codebase-improvement-plan](current-codebase-improvement-plan.md) | Current codebase improvement plan — review draft, no implementation yet |
 | [workshop-advanced-generation-design](workshop-advanced-generation-design.md) | Workshop advanced generation design — only Phase 1 implemented |

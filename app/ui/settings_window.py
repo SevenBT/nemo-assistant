@@ -33,7 +33,6 @@ class SettingsWindow(QDialog):
         ("settings.nav.archived", "archived"),
         ("settings.nav.trash", "trash"),
         ("settings.nav.trace", "trace"),
-        ("settings.nav.eval", "eval"),
     ]
 
     def __init__(
@@ -45,8 +44,6 @@ class SettingsWindow(QDialog):
         note_mgr=None,
         on_notes_changed=None,
         trace_store=None,
-        llm_gateway=None,
-        prompt_builder=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -57,8 +54,6 @@ class SettingsWindow(QDialog):
         self._note_mgr = note_mgr
         self._on_notes_changed = on_notes_changed
         self._trace_store = trace_store
-        self._llm_gateway = llm_gateway
-        self._prompt_builder = prompt_builder
         self.setWindowTitle(t("settings.title"))
         self.setMinimumSize(640, 480)
         self.resize(cfg.get(cfg.settingsWidth), cfg.get(cfg.settingsHeight))
@@ -98,7 +93,7 @@ class SettingsWindow(QDialog):
         root.addWidget(btns)
 
         # Select last used page
-        self._nav.setCurrentRow(cfg.get(cfg.settingsPage))
+        self._nav.setCurrentRow(min(max(0, cfg.get(cfg.settingsPage)), len(self._PAGES) - 1))
 
     def _create_pages(self):
         from app.ui.settings_pages.appearance_page import AppearancePage
@@ -111,7 +106,6 @@ class SettingsWindow(QDialog):
         from app.ui.settings_pages.archived_page import ArchivedPage
         from app.ui.settings_pages.trash_page import TrashPage
         from app.ui.settings_pages.trace_page import TracePage
-        from app.ui.settings_pages.eval_page import EvalPage
 
         self._stack.addWidget(AppearancePage(self))
         self._stack.addWidget(EditorPage(self))
@@ -130,16 +124,6 @@ class SettingsWindow(QDialog):
             TrashPage(self._note_mgr, self._on_notes_changed, self)
         )
         self._stack.addWidget(TracePage(self._trace_store, self._session_mgr, self))
-        self._stack.addWidget(
-            EvalPage(
-                self._trace_store,
-                self._llm_gateway,
-                self._registry,
-                self._prompt_builder,
-                self,
-            )
-        )
-
     def _on_nav_changed(self, index: int):
         # 切换页面前保存当前页的设置
         current_index = self._stack.currentIndex()

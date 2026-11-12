@@ -1,0 +1,12 @@
+[judge]
+model = 'REPLACE_WITH_JUDGE_MODEL_ID'
+provider = 'openai'
+api_key_env = 'NEMO_EVAL_JUDGE_API_KEY'
+max_tokens = 2048
+temperature = 0.0
+max_attempts = 1
+timeout_seconds = 60
+
+[budget]
+max_model_calls = 20
+max_output_tokens = 40960

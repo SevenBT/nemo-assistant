@@ -234,7 +234,7 @@ def _table_exists(self, table_name: str) -> bool:
 
 - [设计文档](trace-naming-refactor.md)
 - [Schema V2 迁移脚本](../../app/core/trace_store.py#L450-L550)
-- [测试用例](../../tests/test_eval_scorer_store.py)
+- [测试用例](../../tests/test_runtime_observations.py)
 
 ## 致谢
 

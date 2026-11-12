@@ -1,20 +1,12 @@
-"""指标聚合与改动前后对比 —— 让「换模型 / 改 prompt 到底变好没有」可量化。
-
-聚合：把一次 run 里逐用例的 rule_scores（来自 rule_checks）按维度求平均。
-对比：拿本次 run 的 avg 和 baseline run 的 avg 按维度比，标出改善 / 退步。
-
-对比方向遵循 rule_checks 里的 HIGHER_IS_BETTER / LOWER_IS_BETTER：大多数维度
-越大越好，redundant_call_rate 越小越好——所以「Δ 的好坏」要按维度方向解读，
-不能一律「正数=变好」。
-"""
+"""Optional descriptive trace statistics; acceptance and CI use case verdicts."""
 from __future__ import annotations
 
 from typing import Any
 
-from app.eval import rule_checks
+from nemo_eval import rule_checks
 
 # 相对退步超过此比例即视为「显著退步」（文章给的经验阈值 ~5%，单机放宽到此处
-# 仅用于 UI 标红提示，不做发布拦截）。
+# 仅用于描述历史指标，不做发布拦截）。
 REGRESSION_THRESHOLD = 0.05
 
 
@@ -76,3 +68,13 @@ def compare(
 def has_regression(comparison: list[dict[str, Any]]) -> bool:
     """对比结果里是否存在任一显著退步维度。"""
     return any(row.get("regressed") for row in comparison)
+
+
+def aggregate_details(per_case_scores):
+    """Expose the actual denominator and missing count alongside every mean."""
+    means = aggregate(per_case_scores)
+    selected = len(per_case_scores)
+    return {dim: {"mean": mean, "applicable": sum(isinstance((row or {}).get(dim), (int, float)) for row in per_case_scores),
+                  "selected": selected,
+                  "missing_or_inapplicable": sum(not isinstance((row or {}).get(dim), (int, float)) for row in per_case_scores)}
+            for dim, mean in means.items()}

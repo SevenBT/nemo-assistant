@@ -1159,69 +1159,71 @@ name = "nemo-assistant"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "apscheduler" },
-    { name = "beautifulsoup4" },
-    { name = "html2text" },
     { name = "httpx" },
-    { name = "keyboard" },
-    { name = "keyring" },
     { name = "litellm" },
-    { name = "markdown" },
-    { name = "mouse" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "pygments" },
-    { name = "pypdf2" },
-    { name = "pyperclip" },
-    { name = "pyqt6" },
-    { name = "pyqt6-fluent-widgets" },
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
-    { name = "rapidocr-onnxruntime" },
     { name = "tiktoken" },
-    { name = "uiautomation" },
 ]
 
 [package.optional-dependencies]
-build = [
-    { name = "pip-licenses" },
-    { name = "pyinstaller" },
+desktop = [
+    { name = "pyqt6" },
+    { name = "pyqt6-fluent-widgets" },
+    { name = "openai" },
+    { name = "apscheduler" },
+    { name = "beautifulsoup4" },
+    { name = "pyperclip" },
+    { name = "rapidocr-onnxruntime" },
+    { name = "numpy" },
+    { name = "keyring" },
+    { name = "keyboard" },
+    { name = "mouse" },
+    { name = "uiautomation", marker = "platform_system == \"Windows\"" },
+    { name = "pywin32", marker = "platform_system == \"Windows\"" },
+    { name = "pypdf2" },
+    { name = "markdown" },
+    { name = "pygments" },
+    { name = "html2text" },
 ]
 dev = [
     { name = "pytest" },
-    { name = "pytest-cov" },
     { name = "pytest-qt" },
+    { name = "pytest-cov" },
+]
+build = [
+    { name = "pyinstaller" },
+    { name = "pip-licenses" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "apscheduler", specifier = ">=3.10.0" },
-    { name = "beautifulsoup4", specifier = ">=4.12.0" },
-    { name = "html2text", specifier = ">=2020.1.16" },
     { name = "httpx", specifier = ">=0.25.0" },
-    { name = "keyboard", specifier = ">=0.13.5" },
-    { name = "keyring", specifier = ">=24.0.0" },
     { name = "litellm", specifier = ">=1.0.0" },
-    { name = "markdown", specifier = ">=3.4.0" },
-    { name = "mouse", specifier = ">=0.7.1" },
-    { name = "numpy", specifier = ">=1.24.0" },
-    { name = "openai", specifier = ">=1.0.0" },
-    { name = "pip-licenses", marker = "extra == 'build'", specifier = ">=4.0.0" },
-    { name = "pygments", specifier = ">=2.15.0" },
-    { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6.0.0" },
-    { name = "pypdf2", specifier = ">=3.0.0" },
-    { name = "pyperclip", specifier = ">=1.8.2" },
-    { name = "pyqt6", specifier = ">=6.5.0" },
-    { name = "pyqt6-fluent-widgets", specifier = ">=1.11.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
-    { name = "pytest-qt", marker = "extra == 'dev'", specifier = ">=4.4.0" },
-    { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=306" },
-    { name = "rapidocr-onnxruntime", specifier = ">=1.2.0,<1.5.0" },
     { name = "tiktoken", specifier = ">=0.5.0" },
-    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'dev'", specifier = ">=2.0.0" },
-    { name = "uiautomation", specifier = ">=2.0.18" },
+    { name = "pyqt6", marker = "extra == 'desktop'", specifier = ">=6.5.0" },
+    { name = "pyqt6-fluent-widgets", marker = "extra == 'desktop'", specifier = ">=1.11.0" },
+    { name = "openai", marker = "extra == 'desktop'", specifier = ">=1.0.0" },
+    { name = "apscheduler", marker = "extra == 'desktop'", specifier = ">=3.10.0" },
+    { name = "beautifulsoup4", marker = "extra == 'desktop'", specifier = ">=4.12.0" },
+    { name = "pyperclip", marker = "extra == 'desktop'", specifier = ">=1.8.2" },
+    { name = "rapidocr-onnxruntime", marker = "extra == 'desktop'", specifier = "<1.5.0,>=1.2.0" },
+    { name = "numpy", marker = "extra == 'desktop'", specifier = ">=1.24.0" },
+    { name = "keyring", marker = "extra == 'desktop'", specifier = ">=24.0.0" },
+    { name = "keyboard", marker = "extra == 'desktop'", specifier = ">=0.13.5" },
+    { name = "mouse", marker = "extra == 'desktop'", specifier = ">=0.7.1" },
+    { name = "uiautomation", marker = "(platform_system == \"Windows\") and extra == 'desktop'", specifier = ">=2.0.18" },
+    { name = "pywin32", marker = "(platform_system == \"Windows\") and extra == 'desktop'", specifier = ">=306" },
+    { name = "pypdf2", marker = "extra == 'desktop'", specifier = ">=3.0.0" },
+    { name = "markdown", marker = "extra == 'desktop'", specifier = ">=3.4.0" },
+    { name = "pygments", marker = "extra == 'desktop'", specifier = ">=2.15.0" },
+    { name = "html2text", marker = "extra == 'desktop'", specifier = ">=2020.1.16" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-qt", marker = "extra == 'dev'", specifier = ">=4.4.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
+    { name = "tomli", marker = "(python_version < \"3.11\") and extra == 'dev'", specifier = ">=2.0.0" },
+    { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6.0.0" },
+    { name = "pip-licenses", marker = "extra == 'build'", specifier = ">=4.0.0" },
 ]
-provides-extras = ["dev", "build"]
+provides-extras = ["desktop", "dev", "build"]
 
 [[package]]
 name = "numpy"

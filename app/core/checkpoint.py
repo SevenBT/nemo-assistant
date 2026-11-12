@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from app.core.config import SESSIONS_DIR
+from app.core.runtime_paths import SESSIONS_DIR
 
 
 def _checkpoint_path(session_id: str) -> Path:

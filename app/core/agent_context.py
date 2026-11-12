@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 from app.core.agent_hooks import AgentHook, CompositeHook
 from app.core.agent_interface import AgentCallbacks
-from app.core.llm_gateway import CancellationToken
+from app.core.cancellation import CancellationToken
 
 
 @dataclass
@@ -70,6 +70,9 @@ class AgentContext:
 
     registry: "ToolRegistry | None" = None
     """工具注册中心。Agent 运行时必需。"""
+
+    checkpoint_store: object | None = None
+    """Optional isolated checkpoint backend with save/clear methods."""
 
     # ── 便捷属性 ──
 

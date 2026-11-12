@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -73,7 +74,7 @@ def _get_pricing_file() -> Path:
     """延迟获取定价文件路径（避免循环导入）"""
     global _PRICING_FILE
     if _PRICING_FILE is None:
-        from app.core.config import CONFIG_DIR
+        from app.core.runtime_paths import CONFIG_DIR
         _PRICING_FILE = CONFIG_DIR / "model_pricing.json"
     return _PRICING_FILE
 
@@ -150,9 +151,6 @@ def calculate_cost(
     """
     _init_pricing()  # 确保定价表已加载
 
-    if not prompt_tokens and not completion_tokens and not cached_tokens:
-        return 0.0
-
     # 构造模型标识
     model_key = f"{provider}/{model}"
     prompt_tokens = prompt_tokens or 0
@@ -173,9 +171,9 @@ def calculate_cost(
         # LiteLLM 需要一个伪响应对象
         mock_response = type('MockResponse', (), {
             'usage': type('Usage', (), {
-                'prompt_tokens': prompt_tokens,
+                'prompt_tokens': prompt_tokens + cached_tokens,
                 'completion_tokens': completion_tokens,
-                'total_tokens': prompt_tokens + completion_tokens,
+                'total_tokens': prompt_tokens + cached_tokens + completion_tokens,
             })(),
             'model': model_key,
             '_hidden_params': {
@@ -191,7 +189,7 @@ def calculate_cost(
             })()
 
         cost = ll.completion_cost(completion_response=mock_response)
-        if cost > 0:
+        if cost is not None and cost >= 0:
             logger.debug(f"[CostCalc] {model_key} (LiteLLM pricing): ${cost:.6f}")
             return cost
     except Exception as e:
@@ -218,13 +216,30 @@ def calculate_cost_from_usage(
     Returns:
         美元成本，或 None
     """
-    if not usage:
+    if not usage or any(usage.get(k) is None for k in ("prompt_tokens", "completion_tokens")):
         return None
 
     return calculate_cost(
         provider=provider,
         model=model,
-        prompt_tokens=usage.get("prompt_tokens"),
+        prompt_tokens=max(0, usage["prompt_tokens"] - (usage.get("cached_tokens") or 0)),
         completion_tokens=usage.get("completion_tokens"),
         cached_tokens=usage.get("cached_tokens"),
     )
+
+
+def pricing_snapshot(provider: str, model: str) -> tuple[str | None, str | None]:
+    """Identify the actual table contents used for an estimated cost."""
+    key = f"{provider}/{model}"
+    if key in _CUSTOM_PRICING:
+        table, source = _CUSTOM_PRICING[key], "custom_pricing"
+    else:
+        from app.core.litellm_loader import load_litellm
+        ll = load_litellm()
+        table, source = getattr(ll, "model_cost", {}).get(key), "litellm"
+        if table is None:
+            table = getattr(ll, "model_cost", {}).get(model)
+    if table is None:
+        return None, None
+    version = hashlib.sha256(json.dumps(table, sort_keys=True, default=str).encode()).hexdigest()
+    return source, version

@@ -49,7 +49,7 @@ jobs:
       - name: Install locked dependencies
         run: |
           python -m pip install uv==0.11.26
-          uv sync --locked --extra dev --extra build
+          uv sync --locked --extra dev --extra build --extra desktop
 
       - name: Validate release metadata
         id: metadata

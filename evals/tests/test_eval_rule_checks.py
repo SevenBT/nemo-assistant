@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from app.eval import rule_checks as rc
+from nemo_eval import rule_checks as rc
 
 
 def _tool(name="t", args=None, status="success"):

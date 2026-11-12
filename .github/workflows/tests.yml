@@ -33,10 +33,41 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip uv
-          uv sync --extra dev --frozen
+          uv sync --extra desktop --extra dev --frozen
 
       - name: Run repository checks
         run: uv run python scripts/check_repo.py
 
       - name: Run tests
         run: uv run pytest -q
+
+  eval-offline:
+    runs-on: ubuntu-latest
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install independent evaluation environment
+        run: |
+          python -m pip install uv
+          uv sync --project evals --extra dev --frozen
+      - name: Check headless dependency boundary
+        run: uv run --project evals --frozen python evals/check_boundaries.py
+      - name: Test evaluator and production offline scenarios
+        run: |
+          uv run --project evals --frozen pytest evals/tests -q
+          uv run --project evals --frozen nemo-eval validate --suite core
+          uv run --project evals --frozen nemo-eval run --suite core --out artifacts/eval/ci-core
+      - name: Upload synthetic evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-evaluation
+          path: |
+            artifacts/eval/ci-core/summary.json
+            artifacts/eval/ci-core/junit.xml
+            artifacts/eval/ci-core/report.md
+          retention-days: 14

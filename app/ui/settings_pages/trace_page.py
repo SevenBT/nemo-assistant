@@ -1,23 +1,15 @@
-"""运行记录 / Trace 设置页 — 回放一次 Agent 运行的全链路。
-
-数据源是独立的 traces.db（TraceStore）：每次 AgentLoop 运行 = 一个 trace_id，
-贯穿其下所有 LLM 调用、工具调用、安全审计事件、评测样本与状态机流转。本页
-把它们重组展示，是「可观测 + 安全 + 评测」地基的可视化出口。
-
-布局：左侧运行列表，右侧 = 顶部概览卡 + 分段切换（SegmentedWidget）。把
-LLM / 工具 / 安全 / 评测 / 状态机分到独立分页，每页结构化卡片列表，替代早期
-「全部信息堆一个 Markdown 块」的混乱排版。
-
-只读：trace 由 TraceStore 自动限容（prune），本页不提供删除，避免误删审计证据。
-"""
+"""Runtime history, usage, estimated costs and local diagnostic export."""
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from collections.abc import Callable
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
+    QDialog, QDialogButtonBox, QFileDialog, QMessageBox, QPlainTextEdit,
     QHBoxLayout,
     QListWidgetItem,
     QStackedWidget,
@@ -79,19 +71,10 @@ class TracePage(QWidget):
         header = QHBoxLayout()
         header.addWidget(StrongBodyLabel(t("settings.trace.title"), self))
         header.addStretch()
-        self._save_case_btn = PushButton(FluentIcon.HEART, t("settings.trace.save_case"), self)
-        self._save_case_btn.setToolTip(
-            t("settings.trace.save_case_tip")
-        )
-        self._save_case_btn.clicked.connect(self._on_save_case)
-        self._save_case_btn.setEnabled(False)
-        header.addWidget(self._save_case_btn)
-        self._score_btn = PushButton(FluentIcon.CERTIFICATE, t("settings.trace.score"), self)
-        self._score_btn.setToolTip(
-            t("settings.trace.score_tip")
-        )
-        self._score_btn.clicked.connect(self._on_score)
-        header.addWidget(self._score_btn)
+        self._export_btn = PushButton(FluentIcon.SAVE, t("settings.trace.export"), self)
+        self._export_btn.clicked.connect(self._on_export)
+        self._export_btn.setEnabled(False)
+        header.addWidget(self._export_btn)
         self._refresh_btn = PushButton(FluentIcon.SYNC, t("settings.trace.refresh"), self)
         self._refresh_btn.clicked.connect(self.reload)
         header.addWidget(self._refresh_btn)
@@ -138,27 +121,6 @@ class TracePage(QWidget):
         if self._traces:
             self._list.setCurrentRow(0)
 
-    def _on_score(self):
-        """离线给未打分的评测样本打规则分，写回 scores 列后刷新当前详情。"""
-        if self._store is None or not getattr(self._store, "enabled", False):
-            return
-        from app.eval import scorer
-
-        self._score_btn.setEnabled(False)
-        self._score_btn.setText(t("settings.trace.scoring"))
-        try:
-            n = scorer.score_unscored_samples(self._store)
-        finally:
-            self._score_btn.setText(t("settings.trace.score"))
-            self._score_btn.setEnabled(True)
-        # 重渲染当前选中详情，让新分数立即显示。
-        row = self._list.currentRow()
-        if 0 <= row < len(self._traces):
-            self._on_select(row)
-        from app.ui.toast import show_toast
-
-        show_toast(t("settings.trace.score_toast_title"), t("settings.trace.score_toast_done", n=n) if n else t("settings.trace.score_toast_none"))
-
     def _set_empty(self, is_empty: bool, message: str = ""):
         self._empty.setText(message or t("settings.trace.empty"))
         self._empty.setVisible(is_empty)
@@ -174,44 +136,46 @@ class TracePage(QWidget):
     def _on_select(self, index: int):
         if index < 0 or index >= len(self._traces):
             self._detail.clear()
-            self._save_case_btn.setEnabled(False)
+            self._export_btn.setEnabled(False)
             return
-        self._save_case_btn.setEnabled(self._session_mgr is not None)
+        self._export_btn.setEnabled(True)
         trace_id = self._traces[index].get("trace_id")
         if not trace_id:
             return
         data = self._store.get_trace(trace_id)
         self._detail.set_data(data)
 
-    def _on_save_case(self):
-        """把当前选中的 Trace 存为回归用例。
-
-        用户输入从该 Trace 所属会话的最近一轮 user 消息取——trace 本身不存 user
-        消息（trace_page 注释「不暴露可变内部结构」），所以靠 session_mgr 补。
-        """
-        if self._store is None or self._session_mgr is None:
-            return
+    def _on_export(self):
+        from app.core.diagnostics import build_diagnostic
         row = self._list.currentRow()
-        if not (0 <= row < len(self._traces)):
+        if self._store is None or not (0 <= row < len(self._traces)):
             return
-        trace = self._traces[row]
-        trace_id = trace.get("trace_id")
-        session_id = trace.get("session_id") or ""
-        user_input = _first_user_input(self._session_mgr, session_id)
-        if not user_input:
-            from app.ui.toast import show_toast
-            show_toast(t("settings.trace.save_case_toast_title"), t("settings.trace.save_case_no_input"))
+        data = self._store.get_trace(self._traces[row]["trace_id"])
+        if data is None:
             return
-        from app.eval import cases
-        from app.ui.toast import show_toast
-
-        case_id = cases.build_case_from_trace(
-            self._store, trace_id, user_input=user_input
-        )
-        if case_id:
-            show_toast(t("settings.trace.save_case_toast_title"), t("settings.trace.save_case_done"))
-        else:
-            show_toast(t("settings.trace.save_case_toast_title"), t("settings.trace.save_case_failed"))
+        dialog = QDialog(self)
+        dialog.setWindowTitle(t("settings.trace.export_preview"))
+        dialog.resize(720, 520)
+        layout = QVBoxLayout(dialog)
+        hint = CaptionLabel(t("settings.trace.export_hint"), dialog)
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        editor = QPlainTextEdit(dialog)
+        editor.setPlainText(json.dumps(build_diagnostic(data), ensure_ascii=False, indent=2))
+        layout.addWidget(editor)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel, dialog)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            payload = json.loads(editor.toPlainText())
+            filename, _ = QFileDialog.getSaveFileName(self, t("settings.trace.export"), "diagnostic.json", "JSON (*.json)")
+            if filename:
+                Path(filename).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except (ValueError, OSError) as exc:
+            QMessageBox.warning(self, t("settings.trace.export"), str(exc))
 
 
 # ── 列表行 ──────────────────────────────────────────────────────────────
@@ -268,7 +232,6 @@ class _TraceDetailView(QWidget):
         ("llm", "settings.trace.tab_llm"),
         ("tools", "settings.trace.tab_tools"),
         ("security", "settings.trace.tab_security"),
-        ("eval", "settings.trace.tab_eval"),
         ("state", "settings.trace.tab_state"),
     ]
 
@@ -327,7 +290,7 @@ class _TraceDetailView(QWidget):
         self._stack.setVisible(True)
 
         trace = data.get("trace") or {}
-        self._overview.set_trace(trace)
+        self._overview.set_trace(trace, data.get("cost"))
         counts = _fill_pages(self._pages, data)
         # 分段标题带计数；首个非空分页设为当前。
         first_key = None
@@ -369,7 +332,7 @@ class _OverviewCard(SimpleCardWidget):
         self._error.setTextColor(QColor("#d03050"), QColor("#ff7875"))
         layout.addWidget(self._error)
 
-    def set_trace(self, trace: dict):
+    def set_trace(self, trace: dict, cost: dict | None = None):
         """设置 Trace 概览数据。"""
         status = trace.get("status", "")
         label, color = _status_meta(status)
@@ -391,6 +354,9 @@ class _OverviewCard(SimpleCardWidget):
                   completion=trace.get('completion_tokens', 0))
             )
         bits.append(t("settings.trace.trace_id", id=trace.get('trace_id', '')[:12]))
+        if cost is not None:
+            bits.append(t("settings.trace.cost", cost=f"{cost['known_cost_usd']:.6f}", unknown=cost['unknown_calls']))
+            bits.append(t("settings.trace.cost_scope"))
         self._metrics.setText("　·　".join(bits))
 
         err = trace.get("error")
@@ -438,14 +404,12 @@ def _fill_pages(pages: dict, data: dict) -> dict[str, int]:
     llm = data.get("llm_calls") or []
     tools = data.get("tool_calls") or []
     sec = data.get("security_events") or []
-    evals = data.get("eval_samples") or []
     states = data.get("state_trace") or []
 
     for key, items, builder, empty in [
         ("llm", llm, _llm_card, t("settings.trace.empty_llm")),
         ("tools", tools, _tool_card, t("settings.trace.empty_tools")),
         ("security", sec, _security_card, t("settings.trace.empty_security")),
-        ("eval", evals, _eval_card, t("settings.trace.empty_eval")),
     ]:
         page = pages[key]
         page.clear()
@@ -503,6 +467,10 @@ def _llm_card(c: dict, parent: QWidget) -> QWidget:
     title = f"#{c.get('seq', 0)}  {c.get('model') or c.get('provider') or '?'}"
     _title_row(col, card, dot=("#2e9e5b" if ok else "#d03050"),
                title=title, right="　·　".join(metrics))
+    if c.get("cost_usd") is not None:
+        col.addWidget(CaptionLabel(t("settings.trace.call_cost", cost=f"{c['cost_usd']:.6f}"), card))
+    else:
+        col.addWidget(CaptionLabel(t("settings.trace.cost_unknown"), card))
     if c.get("error_message"):
         err = CaptionLabel(c["error_message"], card)
         err.setWordWrap(True)
@@ -537,22 +505,6 @@ def _security_card(e: dict, parent: QWidget) -> QWidget:
     return card
 
 
-def _eval_card(s: dict, parent: QWidget) -> QWidget:
-    card, col = _row_card(parent)
-    right_bits = [t("settings.trace.eval_tools", n=s.get('tool_count', 0))]
-    if s.get("error_count"):
-        right_bits.append(t("settings.trace.eval_errors", n=s['error_count']))
-    if s.get("scores"):
-        right_bits.append(t("settings.trace.eval_scores", scores=s['scores']))
-    _title_row(col, card, dot=None, title=t("settings.trace.eval_turn", n=s.get('turn', 0)),
-               right="　·　".join(right_bits))
-    if s.get("answer"):
-        ans = CaptionLabel(s["answer"], card)
-        ans.setWordWrap(True)
-        col.addWidget(ans)
-    return card
-
-
 def _state_card(states: list, parent: QWidget) -> QWidget:
     card, col = _row_card(parent)
     flow = "  →  ".join(s.get("state", "") for s in states if s.get("state"))
@@ -561,25 +513,3 @@ def _state_card(states: list, parent: QWidget) -> QWidget:
     body.setWordWrap(True)
     col.addWidget(body)
     return card
-
-
-def _first_user_input(session_mgr, session_id: str) -> str | None:
-    """从指定会话中取第一条 user 消息作为回归用例的 user_input。
-
-    Session.messages 里装的是 Message 实体（属性访问 .role / .content），不是 dict
-    ——Session 落盘时才会 to_dict()。这里直接读实体，避免无谓的序列化往返。
-    """
-    if not session_id or session_mgr is None:
-        return None
-    try:
-        session = session_mgr.get(session_id)
-    except Exception:
-        return None
-    if session is None:
-        return None
-    for msg in (session.messages or []):
-        if getattr(msg, "role", None) == "user":
-            content = getattr(msg, "content", "")
-            if isinstance(content, str) and content.strip():
-                return content
-    return None

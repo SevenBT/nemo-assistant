@@ -39,7 +39,7 @@ def resolve_safe(path_str: str, workspace: Path) -> tuple[Path | None, str]:
     except (OSError, ValueError) as e:
         return None, t("tool.path.msg.invalid_path", error=e)
 
-    if not str(target).startswith(str(ws)):
+    if not target.is_relative_to(ws):
         return None, t("tool.path.msg.out_of_workspace")
 
     return target, ""

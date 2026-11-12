@@ -28,6 +28,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import copy
 import logging
 import queue
 import threading
@@ -182,6 +183,11 @@ class Agent:
         return self._thread is not None and self._thread.is_alive()
 
     @property
+    def trace_id(self) -> str:
+        """Public execution identifier."""
+        return self._trace_id
+
+    @property
     def result(self) -> dict | None:
         """获取运行结果（仅在运行完成后可用）。"""
         return self._result
@@ -227,7 +233,9 @@ class Agent:
         except Exception as e:
             logger.exception("[Agent] Unhandled exception")
             self._trace_finish(ctx, "error", run_t0, error=str(e))
-            self._result = {"ok": False, "error": str(e), "trace": self._serialize_trace(ctx)}
+            self._result = {"ok": False, "status": "error", "trace_id": self.trace_id,
+                            "answer": ctx.full_text, "messages": copy.deepcopy(ctx.messages),
+                            "error": str(e), "trace": self._serialize_trace(ctx)}
             self._emit_done(self._result)
             self._done_event.set()
             return
@@ -236,6 +244,10 @@ class Agent:
         self._trace_finish(ctx, status, run_t0, error=ctx.error_message)
         self._result = {
             "ok": status == "ok",
+            "status": status,
+            "trace_id": self.trace_id,
+            "answer": ctx.full_text,
+            "messages": copy.deepcopy(ctx.messages),
             "error": ctx.error_message,
             "trace": self._serialize_trace(ctx),
         }
@@ -413,7 +425,9 @@ class Agent:
             if self._session_id:
                 remaining = self._get_remaining_calls(pending_calls, batch, batches)
                 if remaining:
-                    save_checkpoint(
+                    checkpoint_save = (self._ctx.checkpoint_store.save
+                                       if self._ctx.checkpoint_store is not None else save_checkpoint)
+                    checkpoint_save(
                         self._session_id,
                         ctx.messages,
                         assistant_msg,
@@ -422,7 +436,9 @@ class Agent:
                     )
 
         if self._session_id:
-            clear_checkpoint(self._session_id)
+            checkpoint_clear = (self._ctx.checkpoint_store.clear
+                                if self._ctx.checkpoint_store is not None else clear_checkpoint)
+            checkpoint_clear(self._session_id)
 
         self._fire_after_iteration(ctx, iteration_results)
         return "ok"
