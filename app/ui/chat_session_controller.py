@@ -2,7 +2,7 @@
 
 import logging
 
-from PyQt6.QtCore import QObject
+from PyQt6.QtCore import QObject, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ def is_reading_session_title(title: str) -> bool:
 
 class ChatSessionController(QObject):
     """Coordinates session list state, chat widgets, and background agent workers."""
+
+    chat_view_requested = pyqtSignal()
 
     def __init__(
         self,
@@ -163,6 +165,7 @@ class ChatSessionController(QObject):
         填充预设提示词（若有）、光标聚焦到输入框,等待用户点击发送按钮。
         用户可以在发送前修改提示词或追加额外问题。
         """
+        self.chat_view_requested.emit()
         session = self._sessions.create(title=vision_action.session_title)
 
         sessions = self._sessions.get_sessions()
@@ -187,6 +190,7 @@ class ChatSessionController(QObject):
         - prefill_reply 为空：直接发出查询，等 LLM 回复。
         - prefill_reply 非空：注入气泡里已得到的问答，不重复请求 LLM。
         """
+        self.chat_view_requested.emit()
         session = self._sessions.create(title=text_action.session_title)
         sessions = self._sessions.get_sessions()
         self._session_panel.load(sessions, session.id)
@@ -539,6 +543,7 @@ class ChatSessionController(QObject):
 
         返回归入的快速会话 id。
         """
+        self.chat_view_requested.emit()
         sid = self._resolve_reading_session(force_new)
         self._session_panel.load(self._sessions.get_sessions(), sid)
         self.switch_session(sid)

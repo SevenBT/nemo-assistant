@@ -140,6 +140,9 @@ class MainWindow(FluentWindow):
             consolidator=self._consolidator,
             trace_store=self._trace_store,
         )
+        self._chat_session_controller.chat_view_requested.connect(
+            lambda: self._switch_view(0)
+        )
         # 消息级操作（复制/重新生成/编辑）：气泡信号 → 会话控制器。
         # 必须在控制器创建之后连接（_build_ui 阶段控制器尚不存在）。
         self._chat.copy_message.connect(self._chat_session_controller.copy_reply)
