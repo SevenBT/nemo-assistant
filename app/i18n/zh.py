@@ -138,6 +138,10 @@ ZH: dict[str, str] = {
     # ── 输入区 ──
     "input.placeholder": "输入消息… (Enter 发送，Shift+Enter 换行)",
     "input.send": "发送",
+    "input.addFiles": "添加本地文件",
+    "input.supportedFiles": "支持的文件 ({patterns})",
+    "input.allFiles": "所有文件 (*)",
+    "input.attachFailed": "部分文件无法添加",
     "input.cancel": "取消",
     "input.editing": "正在编辑消息",
     "input.cancelEdit": "取消编辑",
