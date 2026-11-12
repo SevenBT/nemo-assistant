@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+MAX_CONSOLIDATION_RATIO = 0.1
+
 # 模型到 tiktoken encoding 的映射
 _MODEL_ENCODING_MAP = {
     # OpenAI models
@@ -118,7 +120,7 @@ def count_tokens(text: str, model: str = "default") -> int:
 
     encoding = get_encoding_for_model(model)
     try:
-        tokens = encoding.encode(text)
+        tokens = encoding.encode(text, disallowed_special=())
         return len(tokens)
     except Exception as e:
         logger.warning(f"[ContextManager] Token counting failed: {e}, fallback to char/4")
@@ -223,6 +225,19 @@ class ContextManager:
         """计算一组消息的 token 数量。"""
         return count_messages_tokens(messages, self.model)
 
+    def consolidation_budget(self, target_ratio: float = MAX_CONSOLIDATION_RATIO) -> int:
+        """压缩结果的总预算，最多占模型总上下文的 10%（包含摘要）。"""
+        if not 0 < target_ratio <= MAX_CONSOLIDATION_RATIO:
+            raise ValueError("target_ratio must be greater than 0 and at most 0.1")
+        return int(self._max_context * target_ratio)
+
+    def truncate_text(self, text: str, max_tokens: int) -> str:
+        """按 token 预算截断文本，不保留截断处不完整的 Unicode 字符。"""
+        if max_tokens <= 0:
+            return ""
+        tokens = self._encoding.encode(text, disallowed_special=())
+        return self._encoding.decode(tokens[:max_tokens], errors="ignore")
+
     def should_consolidate(self, messages: list["Message"], threshold_ratio: float = 0.7) -> bool:
         """
         判断是否需要压缩消息。
@@ -249,32 +264,36 @@ class ContextManager:
     def calculate_keep_count(
         self,
         messages: list["Message"],
-        target_ratio: float = 0.5,
+        target_ratio: float = MAX_CONSOLIDATION_RATIO,
         min_keep: int = 4,
+        reserved_tokens: int = 0,
     ) -> int:
         """
         计算需要保留多少条最近的消息。
 
         Args:
             messages: 消息列表
-            target_ratio: 压缩后的目标 token 占比（默认 50%）
-            min_keep: 最少保留的消息数（默认 4）
+            target_ratio: 占模型总上下文的目标比例（默认且最多 10%）
+            min_keep: 期望至少保留的消息数（默认 4），预算优先
+            reserved_tokens: 为摘要等额外内容预留的 token 数量
 
         Returns:
             应该保留的消息数量
         """
-        target_tokens = int(self._usable_context * target_ratio)
+        target_tokens = max(0, self.consolidation_budget(target_ratio) - reserved_tokens)
 
-        # 从后往前累加，找到第一个超过 target 的位置
-        running_tokens = 0
+        # 只保留预算内的连续近期消息，不能把越过预算的消息也算进去。
+        # 对完整后缀计数，将消息之间的换行也纳入预算。
+        keep_count = 0
         for i in range(len(messages) - 1, -1, -1):
-            msg_text = message_to_token_text(messages[i])
-            msg_tokens = self.count_tokens(msg_text)
-            running_tokens += msg_tokens
+            if self.count_messages_tokens(messages[i:]) > target_tokens:
+                break
+            keep_count = len(messages) - i
 
-            if running_tokens >= target_tokens:
-                keep_count = len(messages) - i
-                return max(keep_count, min_keep)
+        # 预算切分不能留下失去对应 assistant tool_calls 的工具结果。
+        while keep_count and messages[len(messages) - keep_count].role == "tool":
+            keep_count -= 1
 
-        # 如果全部消息都不超过 target，保留全部
-        return max(len(messages), min_keep)
+        if keep_count < min(min_keep, len(messages)):
+            logger.debug("[ContextManager] Token budget limits retained messages to %d", keep_count)
+        return keep_count

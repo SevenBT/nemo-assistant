@@ -296,6 +296,28 @@ class StatePrepareTest(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════
 
 class StateStreamTest(unittest.TestCase):
+    def test_empty_response_returns_error(self):
+        for chunks in (
+            [],
+            [{"type": "done"}],
+            [{"type": "text", "delta": " \n\t"}, {"type": "done"}],
+            [{"type": "done", "reasoning_content": "I think..."}],
+        ):
+            with self.subTest(chunks=chunks):
+                iterations = []
+
+                class _CaptureHook(AgentHook):
+                    def after_iteration(self, ctx):
+                        iterations.append(ctx)
+
+                agent = _make_agent(gateway=_FakeGateway(chunks), hooks=[_CaptureHook()])
+                ctx = TurnContext(messages=[{"role": "user", "content": "hi"}], tools=None)
+
+                self.assertEqual(agent._state_stream(ctx), "error")
+                self.assertIn("空响应", ctx.error_message)
+                self.assertEqual(len(iterations), 1)
+                self.assertEqual(iterations[0].error, ctx.error_message)
+
     def test_text_chunks_accumulated(self):
         chunks = [
             {"type": "text", "delta": "Hello"},
@@ -1015,6 +1037,29 @@ class ExternalControlTest(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════
 
 class RunSyncTest(unittest.TestCase):
+    def test_empty_response_fails_in_result_callbacks_and_trace(self):
+        callbacks = []
+        trace_store = _FakeTraceStore()
+        agent = _make_agent(
+            gateway=_FakeGateway([{"type": "done"}]),
+            messages=[{"role": "user", "content": "hi"}],
+            callbacks=AgentCallbacks(on_done=callbacks.append),
+            trace_store=trace_store,
+        )
+
+        result = agent.run_sync()
+
+        self.assertFalse(result["ok"])
+        self.assertIn("空响应", result["error"])
+        self.assertTrue(callbacks)
+        self.assertTrue(all(not info["ok"] for info in callbacks))
+        self.assertEqual(trace_store.finishes[-1]["status"], "error")
+        self.assertEqual(trace_store.finishes[-1]["error"], result["error"])
+        self.assertEqual(
+            [(entry["state"], entry["event"]) for entry in result["trace"]],
+            [("PREPARE", "ok"), ("STREAM", "error"), ("FINALIZE", "ok")],
+        )
+
     def test_simple_no_tool_response(self):
         chunks = [
             {"type": "text", "delta": "Hello!"},

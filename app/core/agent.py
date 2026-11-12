@@ -295,6 +295,10 @@ class Agent:
                 break
 
         if not ctx.tool_calls:
+            if not ctx.full_text.strip():
+                ctx.error_message = "模型返回了空响应（无正文、无工具调用），请重试。"
+                self._fire_after_iteration(ctx, [])
+                return "error"
             self._fire_after_iteration(ctx, [])
             return "no_tools"
         return "has_tools"
