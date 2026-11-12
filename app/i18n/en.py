@@ -138,6 +138,10 @@ EN: dict[str, str] = {
     # ── Input area ──
     "input.placeholder": "Type a message… (Enter to send, Shift+Enter for newline)",
     "input.send": "Send",
+    "input.addFiles": "Add local files",
+    "input.supportedFiles": "Supported files ({patterns})",
+    "input.allFiles": "All files (*)",
+    "input.attachFailed": "Some files could not be added",
     "input.cancel": "Cancel",
     "input.editing": "Editing message",
     "input.cancelEdit": "Cancel edit",

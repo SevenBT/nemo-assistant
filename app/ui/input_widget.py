@@ -1,7 +1,9 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QKeyEvent, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
+    QMessageBox,
     QSizePolicy,
     QTextEdit,
     QVBoxLayout,
@@ -80,6 +82,13 @@ class InputWidget(QWidget):
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
+
+        self._attach_btn = TransparentToolButton(FluentIcon.ADD, self)
+        self._attach_btn.setFixedSize(36, 36)
+        self._attach_btn.setToolTip(t("input.addFiles"))
+        self._attach_btn.setAccessibleName(t("input.addFiles"))
+        self._attach_btn.clicked.connect(self._choose_files)
+        row.addWidget(self._attach_btn)
 
         self._edit = _TextEdit(self)
         self._edit.setPlaceholderText(t("input.placeholder"))
@@ -268,6 +277,7 @@ class InputWidget(QWidget):
 
     def set_enabled(self, enabled: bool):
         self._edit.setEnabled(enabled)
+        self._attach_btn.setEnabled(enabled)
         self._btn.setEnabled(enabled)
 
     def focus(self):
@@ -280,6 +290,25 @@ class InputWidget(QWidget):
         self._edit.setFocus()
 
     # -- 待发送附件 -----------------------------------------------------
+
+    def _choose_files(self):
+        from app.core.file_parser import FileParser
+        from app.ui.attachment_intake import attachments_from_paths
+
+        patterns = " ".join(f"*{suffix}" for suffix in FileParser.SUPPORTED_TYPES)
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            t("input.addFiles"),
+            "",
+            t("input.supportedFiles", patterns=patterns) + ";;" + t("input.allFiles"),
+        )
+        if not paths:
+            return
+        errors = []
+        self.add_pending_attachments(attachments_from_paths(paths, errors=errors))
+        if errors:
+            QMessageBox.warning(self, t("input.attachFailed"), "\n".join(errors))
+        self.focus()
 
     def _on_files_dropped(self, attachments: list):
         """拖放/粘贴的附件 → 加入待发预览条。"""

@@ -6,6 +6,7 @@ identically. Images are saved/parsed and returned as image Attachments so
 they flow through the multimodal vision channel.
 """
 import logging
+from collections.abc import Iterable
 
 from PyQt6.QtCore import QMimeData
 from PyQt6.QtGui import QImage
@@ -15,6 +16,22 @@ from app.core.file_parser import FileParser, FileParseError
 from app.models.attachment import Attachment
 
 logger = logging.getLogger(__name__)
+
+
+def attachments_from_paths(
+    paths: Iterable[str], *, errors: list[str] | None = None
+) -> list[Attachment]:
+    """Use the same validation and lazy image OCR for picked and dropped files."""
+    parser = FileParser()
+    attachments = []
+    for path in paths:
+        try:
+            attachments.append(parser.parse_file(path, ocr_images=False))
+        except (FileParseError, OSError) as exc:
+            logger.warning("解析文件失败: %s", exc)
+            if errors is not None:
+                errors.append(str(exc))
+    return attachments
 
 
 def attachments_from_mime(mime: QMimeData) -> list[Attachment]:
@@ -27,18 +44,9 @@ def attachments_from_mime(mime: QMimeData) -> list[Attachment]:
     attachments: list[Attachment] = []
 
     if mime.hasUrls():
-        parser = FileParser()
-        for url in mime.urls():
-            file_path = url.toLocalFile()
-            if not file_path:
-                continue
-            try:
-                # Don't OCR images at intake — pixels go to the vision model
-                # directly; OCR text is only a downgrade fallback, computed
-                # lazily later if the model can't see images.
-                attachments.append(parser.parse_file(file_path, ocr_images=False))
-            except FileParseError as e:
-                logger.warning("解析文件失败: %s", e)
+        attachments = attachments_from_paths(
+            path for url in mime.urls() if (path := url.toLocalFile())
+        )
 
     # Raw image bytes on the clipboard (no file path) — common for snipping
     # tools. Persist to disk so it can be referenced + sent as pixels.
