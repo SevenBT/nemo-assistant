@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QStackedWidget, QWidget
 
 from app.models.message import Message, MessageRole
 from app.ui.chat_session_controller import ChatSessionController
@@ -139,6 +139,56 @@ class ChatSessionControllerTest(unittest.TestCase):
 
         self.assertEqual(sid, "reading1")
         self.assertEqual(self.sessions.created.title, reading_session_title())
+
+    def test_external_chat_entries_leave_notes_and_toolbox_before_focusing(self):
+        from app.ui.main_window import MainWindow
+        from app.ui.vision_actions import get_vision_action
+
+        stack = QStackedWidget()
+        pages = [QWidget() for _ in range(3)]
+        for page in pages:
+            stack.addWidget(page)
+        title_bar = Mock()
+        window = SimpleNamespace(
+            _pages=pages, switchTo=stack.setCurrentWidget, _title_bar=title_bar
+        )
+        self.controller.chat_view_requested.connect(
+            lambda: MainWindow._switch_view(window, 0)
+        )
+        focused_pages = []
+        self.input.focus.side_effect = lambda: focused_pages.append(stack.currentIndex())
+        attachments = [object()]
+        action = get_vision_action("ask")
+
+        for previous_page in (1, 2):
+            for entry in ("continue", "new", "vision", "text"):
+                with self.subTest(previous_page=previous_page, entry=entry):
+                    stack.setCurrentIndex(previous_page)
+                    title_bar.reset_mock()
+                    focused_pages.clear()
+                    with patch("app.ui.chat_session_controller.cfg") as fake_cfg:
+                        fake_cfg.get.return_value = "s1"
+                        if entry in ("continue", "new"):
+                            sid = self.controller.compose_in_reading(
+                                "selected text", force_new=entry == "new"
+                            )
+                            self.assertEqual(sid, "reading1" if entry == "new" else "s1")
+                            self.input.set_text.assert_called_with("selected text")
+                        elif entry == "vision":
+                            self.controller.start_vision_session(attachments, action)
+                            self.input.add_pending_attachments.assert_called_with(attachments)
+                            self.input.set_text.assert_called_with(action.prompt)
+                        else:
+                            with patch.object(self.controller, "submit") as submit:
+                                text_action = SimpleNamespace(
+                                    session_title="selection", render=lambda text: text
+                                )
+                                self.controller.start_text_session("selected text", text_action)
+                                submit.assert_called_once_with("selected text")
+                    self.assertEqual(stack.currentIndex(), 0)
+                    title_bar.set_active_view.assert_called_once_with(0)
+                    self.assertTrue(focused_pages)
+                    self.assertEqual(set(focused_pages), {0})
 
     def test_submit_creates_messages_and_starts_worker(self):
         self.controller.switch_session("s1")
