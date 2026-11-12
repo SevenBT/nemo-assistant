@@ -39,7 +39,7 @@ def code_fingerprint(root):
 def compare(current: Path, baseline: Path, *, allow_changes=()):
     cur = json.loads((current / "manifest.json").read_text(encoding="utf-8"))
     base = json.loads((baseline / "manifest.json").read_text(encoding="utf-8"))
-    permitted = {"target.model", "target.provider", "target.base_url", "target.temperature", "target.top_p", "target.max_tokens"}
+    permitted = {"target.model", "target.api_protocol", "target.provider", "target.base_url", "target.temperature", "target.top_p", "target.max_tokens"}
     if set(allow_changes) - permitted:
         raise ValueError("Unsupported comparison change dimension")
     conditions = []

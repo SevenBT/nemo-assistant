@@ -114,7 +114,7 @@ In a conversation, the assistant can summarize the tools it has available and pu
 
 Nemo Assistant records the execution chain for each conversation turn, making debugging and review easier:
 
-- LLM latency, token usage, and estimated costs with unknown amounts identified.
+- LLM latency and token usage; provider-reported charges when available, with console links for known official endpoints. No local price estimates or user-maintained price tables.
 - Tool call records.
 - Security audit details.
 - Editable, redacted diagnostic export with a preview before saving.
@@ -125,7 +125,7 @@ Developer regression testing lives in the independent [evaluation package](evals
 
 ## Models & API
 
-Models are connected through **LiteLLM**, with support for OpenAI, Anthropic, DeepSeek, Gemini, and OpenAI-compatible APIs. Each model can have its own `api_base`, vision capability setting, max tokens, temperature, and other parameters.
+Models share a lightweight **httpx** connection pool and explicit wire codecs: Chat Completions, Responses, Claude Messages, and Cohere Chat v2. Provider profiles cover OpenAI, Anthropic, Gemini (OpenAI-compatible endpoint), DeepSeek, Qwen, Z.ai and Meta; custom compatible endpoints and Azure v1 resource endpoints are configurable. Select the API protocol in the model editor when needed. LiteLLM and provider SDK dependencies are removed. Protocol contracts are tested offline; live availability and model capabilities depend on the configured service. Existing model settings and keyring entries remain compatible.
 
 After the first launch, open **Settings → API**, add a model, and set it as the default to enable AI features across chat and desktop actions.
 
@@ -213,7 +213,7 @@ main.py                  Entry: dependency checks → crash logs → Qt startup
 │   └── components/          Reusable components (message bubbles, Markdown editor, etc.)
 │
 ├── app/core/            Core business layer
-│   ├── llm_gateway          Unified LLM gateway (LiteLLM / rate limit / retry / streaming)
+│   ├── llm_gateway          Unified LLM gateway (shared HTTP / protocol codecs / rate limit / retry / streaming)
 │   ├── agent_loop           Agent state machine (prepare → stream → execute → feedback → finalize)
 │   ├── note_manager         Notes / stickies / todo storage (SQLite)
 │   ├── memory_manager       Long-term memory
@@ -253,7 +253,7 @@ All tools inherit from `BuiltinTool`, declare `name / description / parameters /
 ## Tech Stack
 
 - **GUI**: PyQt6 + [PyQt-Fluent-Widgets](https://github.com/zhiyiYo/PyQt-Fluent-Widgets)
-- **Model access**: LiteLLM
+- **Model access**: httpx shared transport and explicit protocol codecs
 - **Storage**: SQLite (notes, memory) + JSON (sessions, config)
 - **OCR**: RapidOCR (ONNX Runtime, local recognition)
 - **Scheduling**: APScheduler

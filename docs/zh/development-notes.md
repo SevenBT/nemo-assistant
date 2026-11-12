@@ -17,11 +17,16 @@
 - 剪贴板回退方案会注入 `Ctrl+C`，随后还原之前的剪贴板内容。
 - 开发期间，全局 `Ctrl+C` 可能意外落到启动应用的终端上，因此取词层会处理 `KeyboardInterrupt` 并保持应用存活。
 
-## LLM 启动预热
+## 轻量模型传输
 
-- 主窗口显示后延迟 500 毫秒，在后台线程加载 LiteLLM，把 SDK 初始化从首次划词或聊天请求中提前移出，避免阻塞界面。
-- 预热和提前到来的请求共用加载锁与模块缓存，加载失败后仍可在实际请求时重试。
-- 预热仅加载本地 SDK，不调用模型、不读取 API Key，也不预建供应商连接；首次实际请求仍可能受到 DNS/TLS 和服务端延迟影响。加载器默认使用包内价格表。
+- 所有供应商共用 httpx 传输层；已移除 LiteLLM、OpenAI SDK 和后台 SDK 预热。启动不发送模型探测请求；首次调用仍可能受 DNS/TLS 和服务端延迟影响。
+- 分别处理 Chat Completions、Responses、Claude Messages 和 Cohere Chat v2。provider 选择默认协议，模型条目可用 api_protocol 覆盖；未知厂商需要明确 api_base。Azure 使用资源地址下 /openai/v1，Model ID 填部署名称。
+- LiteLLM 命名的配置字段和 keyring 槽位仅为兼容旧数据保留，不表示第二套调用体系。编辑模型保留额外字段，并可选择协议。
+- 每个网关持有可关闭的连接池。池内使用单个后台 asyncio 循环，等待响应头、保活及读取中均可取消；单次取消不关闭其他请求。阶段超时和可选总时限分别处理。
+- 收到协议结束事件并验证全部工具调用后才提交执行。无效 JSON、冲突 ID/签名、重复 ID、截断工具或缺少结束事件均报错。文本、推理或工具分片开始后不再整次重试，不自动换协议重发。
+- Gemini 工具签名、Claude 签名内容块和 Responses 推理/输出项贯穿 Agent 多轮及 Message 持久化；保留图片和工具结果，不支持的内容报错。
+- usage 缺失保持未知，部分字段缺失不当作零。不读取本地价格表；错误展示和落库前脱敏。日志记录 provider/model/protocol/profile revision，不记录提示词和密钥。
+- 验证使用离线协议、禁止 SDK 导入的子进程、真实本机连接取消及独立评估；不等于所有厂商/模型已经实网认证。详见[实现方案](../design/shared-lightweight-provider-design.md)。
 
 ## 主题
 

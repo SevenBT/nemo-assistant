@@ -1,4 +1,4 @@
-"""Runtime history, usage, estimated costs and local diagnostic export."""
+"""Runtime history, usage, provider-reported charges and diagnostic export."""
 
 from __future__ import annotations
 
@@ -28,10 +28,12 @@ from qfluentwidgets import (
     StrongBodyLabel,
     PushButton,
     FluentIcon,
+    HyperlinkButton,
     setFont,
 )
 
 from app.i18n import t
+from app.core.billing import normalize_provider_cost, validate_billing_url
 
 # 状态 → (i18n key, 语义色)。语义色固定不随主题，对齐 InfoBadge 内部用色。
 # 文案存 key，在 _status_meta 运行时取（语言启动后才锁定）。
@@ -355,8 +357,11 @@ class _OverviewCard(SimpleCardWidget):
             )
         bits.append(t("settings.trace.trace_id", id=trace.get('trace_id', '')[:12]))
         if cost is not None:
-            bits.append(t("settings.trace.cost", cost=f"{cost['known_cost_usd']:.6f}", unknown=cost['unknown_calls']))
-            bits.append(t("settings.trace.cost_scope"))
+            for currency, amount in sorted(cost.get("reported_totals", {}).items()):
+                bits.append(t("settings.trace.reported_cost", currency=currency, amount=f"{amount:.12g}"))
+            if cost.get("unknown_calls"):
+                bits.append(t("settings.trace.unreported_calls", n=cost["unknown_calls"]))
+        bits.append(t("settings.trace.billing_hint"))
         self._metrics.setText("　·　".join(bits))
 
         err = trace.get("error")
@@ -467,10 +472,18 @@ def _llm_card(c: dict, parent: QWidget) -> QWidget:
     title = f"#{c.get('seq', 0)}  {c.get('model') or c.get('provider') or '?'}"
     _title_row(col, card, dot=("#2e9e5b" if ok else "#d03050"),
                title=title, right="　·　".join(metrics))
-    if c.get("cost_usd") is not None:
-        col.addWidget(CaptionLabel(t("settings.trace.call_cost", cost=f"{c['cost_usd']:.6f}"), card))
+    cost = normalize_provider_cost({"amount": c.get("reported_cost_amount"),
+                                    "currency": c.get("reported_cost_currency")})
+    if cost is not None:
+        text = t("settings.trace.reported_cost", currency=cost["currency"], amount=f"{cost['amount']:.12g}")
     else:
-        col.addWidget(CaptionLabel(t("settings.trace.cost_unknown"), card))
+        text = t("settings.trace.unreported_cost")
+    col.addWidget(CaptionLabel(text, card))
+    if c.get("cost_usd") is not None:
+        col.addWidget(CaptionLabel(t("settings.trace.legacy_cost", amount=f"{c['cost_usd']:.12g}"), card))
+    url = validate_billing_url(c.get("provider"), c.get("billing_url"))
+    if url:
+        col.addWidget(HyperlinkButton(url, t("settings.trace.billing_console"), card))
     if c.get("error_message"):
         err = CaptionLabel(c["error_message"], card)
         err.setWordWrap(True)

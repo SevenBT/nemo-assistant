@@ -1,4 +1,4 @@
-"""API 连接设置页 — 单一 LiteLLM 入口
+"""API 连接设置页 — 共用轻量 HTTP 入口
 
 用户自定义模型条目（id/name/provider/api_base），按 provider 保存 API Key，
 切换默认模型即切换供应商。

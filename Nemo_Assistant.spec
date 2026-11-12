@@ -1,13 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
-openai_datas, openai_binaries, openai_hiddenimports = collect_all('openai')
 httpx_datas, httpx_binaries, httpx_hiddenimports = collect_all('httpx')
 httpcore_datas, httpcore_binaries, httpcore_hiddenimports = collect_all('httpcore')
-# litellm ships data files (model_prices_and_context_window_backup.json) that it
-# reads at import time even with LITELLM_LOCAL_MODEL_COST_MAP=True. collect_all
-# pulls in those data files + submodules; missing them => import fails at runtime.
-litellm_datas, litellm_binaries, litellm_hiddenimports = collect_all('litellm')
 # tiktoken registers its encodings (cl100k_base, etc.) via the tiktoken_ext
 # namespace plugin package, discovered dynamically at runtime — PyInstaller's
 # static analysis misses it, causing "Unknown encoding cl100k_base / Plugins
@@ -22,12 +17,10 @@ tool_hiddenimports = collect_submodules('app.tools')
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=openai_binaries + httpx_binaries + httpcore_binaries + litellm_binaries + tiktoken_binaries,
+    binaries=httpx_binaries + httpcore_binaries + tiktoken_binaries,
     datas=[
-        *openai_datas,
         *httpx_datas,
         *httpcore_datas,
-        *litellm_datas,
         *tiktoken_datas,
         # Bundle app assets. In onefile mode the bootloader unpacks these into
         # sys._MEIPASS at runtime; config.py resolves ASSETS_DIR against that
@@ -37,10 +30,8 @@ a = Analysis(
         ('assets', 'assets'),
     ],
     hiddenimports=[
-        *openai_hiddenimports,
         *httpx_hiddenimports,
         *httpcore_hiddenimports,
-        *litellm_hiddenimports,
         *tiktoken_hiddenimports,
         *tiktoken_ext_hiddenimports,
         *tool_hiddenimports,
@@ -62,7 +53,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['nemo_eval', 'app.eval', 'tkinter', '_tkinter', 'tk', 'tcl', 'gevent'],
+    excludes=['litellm', 'openai', 'anthropic', 'nemo_eval', 'app.eval', 'tkinter', '_tkinter', 'tk', 'tcl', 'gevent'],
     noarchive=False,
 )
 

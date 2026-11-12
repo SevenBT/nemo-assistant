@@ -1,11 +1,13 @@
 """Exercise the retained user-facing runtime history and previewed export."""
 import json
 
-from PyQt6.QtWidgets import QDialog, QFileDialog, QPlainTextEdit
+from PyQt6.QtWidgets import QDialog, QFileDialog, QPlainTextEdit, QLabel
+from qfluentwidgets import HyperlinkButton
 
 from app.core.trace_store import TraceStore
 from app.ui.settings_pages.trace_page import TracePage
 from app.ui.settings_window import SettingsWindow
+from app.i18n import t
 
 
 def test_runtime_page_exports_preview_without_private_bodies(qtbot, tmp_path, monkeypatch):
@@ -37,3 +39,24 @@ def test_runtime_page_exports_preview_without_private_bodies(qtbot, tmp_path, mo
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args: (str(target), "JSON"))
     page._on_export()
     assert "security_events" not in json.loads(target.read_text(encoding="utf-8"))
+
+
+def test_cost_labels_and_console_link_do_not_promote_old_estimates(qtbot):
+    from app.ui.settings_pages.trace_page import _llm_card
+
+    old = _llm_card({"cost_usd": 0.123, "provider": "deepseek"}, None)
+    qtbot.addWidget(old)
+    texts = [label.text() for label in old.findChildren(QLabel)]
+    assert t("settings.trace.unreported_cost") in texts
+    assert t("settings.trace.legacy_cost", amount="0.123") in texts
+    assert not old.findChildren(HyperlinkButton)
+
+    reported = _llm_card({"provider": "deepseek", "reported_cost_amount": 0,
+        "reported_cost_currency": "CNY", "billing_url": "https://platform.deepseek.com/"}, None)
+    qtbot.addWidget(reported)
+    assert t("settings.trace.reported_cost", currency="CNY", amount="0") in [label.text() for label in reported.findChildren(QLabel)]
+    assert len(reported.findChildren(HyperlinkButton)) == 1
+
+    proxy = _llm_card({"provider": "openai", "billing_url": "https://proxy.example/?api_key=secret"}, None)
+    qtbot.addWidget(proxy)
+    assert not proxy.findChildren(HyperlinkButton)

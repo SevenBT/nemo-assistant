@@ -70,6 +70,7 @@ class TurnContext:
     turn_count: int = 0
     full_text: str = ""
     reasoning_content: str | None = None
+    provider_state: dict = field(default_factory=dict)
     tool_calls: list[dict] = field(default_factory=list)
     error_message: str | None = None
 
@@ -80,4 +81,5 @@ class TurnContext:
         """每轮 STREAM 开始前重置临时变量。"""
         self.full_text = ""
         self.reasoning_content = None
+        self.provider_state = {}
         self.tool_calls = []

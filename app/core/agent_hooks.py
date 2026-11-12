@@ -221,12 +221,15 @@ def _api_dicts_to_messages(api_dicts: list[dict[str, Any]]) -> list["Message"]:
             for tc in d["tool_calls"]:
                 args_str = tc.get("function", {}).get("arguments", "{}")
                 args = _json.loads(args_str) if isinstance(args_str, str) else args_str
-                tool_calls.append(ToolCall(id=tc["id"], name=tc["function"]["name"], arguments=args))
+                tool_calls.append(ToolCall(id=tc["id"], name=tc["function"]["name"], arguments=args,
+                                           extra_content=tc.get("extra_content", {})))
         result.append(_Msg(
             role=d["role"],
             content=d.get("content") or "",
             tool_calls=tool_calls,
             tool_call_id=d.get("tool_call_id"),
+            reasoning_content=d.get("reasoning_content"),
+            provider_state=d.get("provider_state", {}),
         ))
     return result
 

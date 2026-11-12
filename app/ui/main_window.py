@@ -808,6 +808,8 @@ class MainWindow(FluentWindow):
         if hasattr(self, "_selection_monitor"):
             self._selection_monitor.stop()
         self._chat_session_controller.cleanup()
+        self._llm_gateway.close()
+        self._selection_controller.cleanup()
 
     def _on_quit(self):
         # 仅当窗口可见时保存布局（否则 closeEvent 已保存）

@@ -78,7 +78,7 @@ def test_gateway_retries_retryable_error_before_streaming():
     sleeps = []
     gateway = LLMGateway(
         config_proxy=StaticConfig(),
-        adapters={"litellm": adapter},
+        adapters={"openai_chat": adapter},
         retry_policy=RetryPolicy(max_attempts=2, sleep=sleeps.append),
         logger=GatewayLogger.disabled(),
     )
@@ -96,12 +96,39 @@ def test_gateway_records_each_retry_once_with_usage(tmp_path):
         [{"type": "done", "usage": {"prompt_tokens": 3, "completion_tokens": 1}}],
     ])
     path = tmp_path / "attempts.jsonl"
-    gateway = LLMGateway(config_proxy=StaticConfig(), adapters={"litellm": adapter},
+    gateway = LLMGateway(config_proxy=StaticConfig(), adapters={"openai_chat": adapter},
                          retry_policy=RetryPolicy(max_attempts=2, sleep=lambda _: None), logger=GatewayLogger(path))
     list(gateway.chat_stream([{"role": "user", "content": "hi"}]))
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == len({r["attempt_id"] for r in rows}) == 2
     assert [r["usage"]["prompt_tokens"] for r in rows] == [2, 3]
+
+
+def test_gateway_records_only_explicit_provider_charges_for_each_attempt(tmp_path):
+    from app.core.runtime_config import GatewayConfig
+    from app.core.trace_store import TraceStore
+
+    adapter = ScriptedAdapter([
+        [{"type": "error", "status_code": 429, "message": "busy",
+          "provider_cost": {"amount": 0.01, "currency": "USD"}}],
+        [{"type": "done", "provider_cost": {"amount": 0.2, "currency": "CNY"},
+          "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}}],
+    ])
+    store = TraceStore(tmp_path / "traces.db")
+    store.start_trace("trace")
+    path = tmp_path / "calls.jsonl"
+    gateway = LLMGateway(
+        config=GatewayConfig(provider="deepseek", model="test", api_key="dummy"),
+        adapters={"openai_chat": adapter}, trace_sink=store, logger=GatewayLogger(path),
+        retry_policy=RetryPolicy(max_attempts=2, sleep=lambda _: None),
+    )
+    list(gateway.chat_stream([{"role": "user", "content": "test"}], trace_id="trace"))
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [row["provider_cost"]["currency"] for row in rows] == ["USD", "CNY"]
+    assert all(row["billing_url"] == "https://platform.deepseek.com/" for row in rows)
+    data = store.get_trace("trace")
+    assert data["cost"]["reported_totals"] == {"USD": 0.01, "CNY": 0.2}
+    assert data["llm_calls"][1]["total_tokens"] == 10
 
 
 def test_gateway_does_not_retry_after_text_was_streamed():
@@ -114,7 +141,7 @@ def test_gateway_does_not_retry_after_text_was_streamed():
     ])
     gateway = LLMGateway(
         config_proxy=StaticConfig(),
-        adapters={"litellm": adapter},
+        adapters={"openai_chat": adapter},
         retry_policy=RetryPolicy(max_attempts=2, sleep=lambda _: None),
         logger=GatewayLogger.disabled(),
     )
@@ -131,14 +158,14 @@ def test_gateway_uses_limiter_with_api_type_and_model_key():
     limiter = SpyLimiter()
     gateway = LLMGateway(
         config_proxy=StaticConfig(),
-        adapters={"litellm": adapter},
+        adapters={"openai_chat": adapter},
         limiter=limiter,
         logger=GatewayLogger.disabled(),
     )
 
     list(gateway.chat_stream([{"role": "user", "content": "hi"}]))
 
-    assert limiter.keys == ["litellm:test-model"]
+    assert limiter.keys == ["openai_chat:test-model"]
 
 
 def test_gateway_logger_writes_sanitized_jsonl(tmp_path: Path):
@@ -146,7 +173,7 @@ def test_gateway_logger_writes_sanitized_jsonl(tmp_path: Path):
     adapter = ScriptedAdapter([[{"type": "text", "delta": "ok"}, {"type": "done"}]])
     gateway = LLMGateway(
         config_proxy=StaticConfig(),
-        adapters={"litellm": adapter},
+        adapters={"openai_chat": adapter},
         logger=GatewayLogger(log_path),
     )
 
@@ -155,7 +182,7 @@ def test_gateway_logger_writes_sanitized_jsonl(tmp_path: Path):
     lines = log_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     record = json.loads(lines[0])
-    assert record["api_type"] == "litellm"
+    assert record["api_type"] == "openai_chat"
     assert record["model"] == "test-model"
     assert record["status"] == "ok"
     assert record["input_message_count"] == 1
@@ -167,7 +194,7 @@ def test_gateway_stops_stream_and_retry_after_cancellation():
     token = CancellationToken()
     gateway = LLMGateway(
         config_proxy=StaticConfig(),
-        adapters={"litellm": adapter},
+        adapters={"openai_chat": adapter},
         retry_policy=RetryPolicy(max_attempts=2, sleep=lambda _: None),
         logger=GatewayLogger.disabled(),
     )
@@ -194,7 +221,7 @@ def test_connection_refused_wrapped_as_500_is_not_retried():
     adapter = ScriptedAdapter([[err], [{"type": "done"}]])
     gateway = LLMGateway(
         config_proxy=StaticConfig(),
-        adapters={"litellm": adapter},
+        adapters={"openai_chat": adapter},
         retry_policy=RetryPolicy(max_attempts=3, sleep=lambda _: None),
         logger=GatewayLogger.disabled(),
     )
@@ -215,25 +242,6 @@ def test_error_event_classifies_winerror_10061_as_connection_refused():
 
     assert event["error_kind"] == "connection_refused"
     assert RetryPolicy().is_retryable(event) is False
-
-
-def test_error_event_strips_litellm_boilerplate_from_message():
-    exc = Exception(
-        "litellm.InternalServerError: DeepseekException - [WinError 10061] "
-        "由于目标计算机积极拒绝，无法连接。\n"
-        "Give Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new\n"
-        "LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.\n"
-        "Provider List: https://docs.litellm.ai/docs/providers"
-    )
-
-    event = _error_event(exc, "LiteLLM 调用失败")
-
-    assert "由于目标计算机积极拒绝" in event["message"]
-    assert "Give Feedback" not in event["message"]
-    assert "Provider List" not in event["message"]
-    assert "docs.litellm.ai" not in event["message"]
-    # 样板行剥掉后仍能识别为连接被拒绝。
-    assert event["error_kind"] == "connection_refused"
 
 
 def test_error_event_handles_unread_streaming_httpx_response():
@@ -288,13 +296,13 @@ def test_generation_cancellation_interrupts_all_local_waits_promptly(wait_kind):
     elif wait_kind == "rpm":
         cancel_sleep = CancelDuringWait(token)
         limiter = LocalRateLimiter(max_concurrent=1, rpm=1, sleep=cancel_sleep)
-        limiter._timestamps["litellm:test-model"].append(time.monotonic())
+        limiter._timestamps["openai_chat:test-model"].append(time.monotonic())
     else:
         retry = RetryPolicy(max_attempts=2, sleep=CancelDuringWait(token))
 
     gateway = LLMGateway(
         config_proxy=StaticConfig(),
-        adapters={"litellm": adapter},
+        adapters={"openai_chat": adapter},
         retry_policy=retry,
         limiter=limiter,
         logger=GatewayLogger.disabled(),
@@ -329,7 +337,7 @@ def test_retry_after_is_capped_by_generation_deadline():
     ])
     gateway = LLMGateway(
         config_proxy=StaticConfig(),
-        adapters={"litellm": adapter},
+        adapters={"openai_chat": adapter},
         retry_policy=RetryPolicy(max_attempts=2, sleep=sleeps.append),
         logger=GatewayLogger.disabled(),
     )
@@ -389,7 +397,7 @@ def test_gateway_persistence_receives_only_sanitized_error_summary(tmp_path):
     log_path = tmp_path / "gateway.jsonl"
     gateway = LLMGateway(
         config_proxy=StaticConfig(),
-        adapters={"litellm": adapter},
+        adapters={"openai_chat": adapter},
         retry_policy=RetryPolicy(max_attempts=1),
         logger=GatewayLogger(log_path),
         trace_sink=sink,

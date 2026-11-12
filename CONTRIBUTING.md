@@ -44,14 +44,13 @@ written to plaintext config. Personal config is saved in
 ## Running Tests
 
 Tests use **pytest**. Because PyQt components are involved, a headless
-environment (including CI) needs the offscreen platform plugin set. Importing
-`litellm` fetches a pricing table over the network, so disabling it via an
-environment variable speeds things up.
+environment (including CI) needs the offscreen platform plugin set. Model
+protocol tests use offline responses and loopback sockets; they do not call
+paid services. No model SDK or pricing-table environment variable is required.
 
 ```bash
 # Windows (PowerShell)
 $env:QT_QPA_PLATFORM = "offscreen"
-$env:LITELLM_LOCAL_MODEL_COST_MAP = "True"
 pytest -q
 
 # Or with uv
@@ -59,7 +58,6 @@ uv run pytest -q
 
 # macOS / Linux (bash)
 export QT_QPA_PLATFORM=offscreen
-export LITELLM_LOCAL_MODEL_COST_MAP=True
 pytest -q
 ```
 

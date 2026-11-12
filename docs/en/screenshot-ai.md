@@ -19,7 +19,7 @@ Typical use:
 
 Vision analysis is used when the user wants the selected model to inspect the image itself. This requires:
 
-- A configured LiteLLM model.
+- A configured model with the required vision capability.
 - A provider API key saved in the system keyring.
 - Vision capability enabled or auto-detected for the selected model.
 

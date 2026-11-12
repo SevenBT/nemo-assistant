@@ -291,6 +291,7 @@ class Agent:
                 return "error"
             elif chunk["type"] == "done":
                 ctx.reasoning_content = chunk.get("reasoning_content")
+                self._message_complete(ctx, chunk)
                 break
 
         if not ctx.tool_calls:
@@ -311,12 +312,15 @@ class Agent:
                         "name": tc["name"],
                         "arguments": json.dumps(tc["arguments"], ensure_ascii=False),
                     },
+                    **({"extra_content": copy.deepcopy(tc["extra_content"])} if tc.get("extra_content") else {}),
                 }
                 for tc in ctx.tool_calls
             ],
         }
         if ctx.reasoning_content:
             assistant_msg["reasoning_content"] = ctx.reasoning_content
+        if ctx.provider_state:
+            assistant_msg["provider_state"] = copy.deepcopy(ctx.provider_state)
         ctx.messages.append(assistant_msg)
 
         rejections = self._apply_before_tools_hook(ctx)
@@ -489,6 +493,7 @@ class Agent:
                 return "error"
             elif chunk["type"] == "done":
                 ctx.reasoning_content = chunk.get("reasoning_content")
+                self._message_complete(ctx, chunk)
                 break
 
         self._fire_after_iteration(ctx, [])
@@ -499,6 +504,16 @@ class Agent:
             )
             return "error"
         return "ok"
+
+    def _message_complete(self, ctx: TurnContext, chunk: dict) -> None:
+        ctx.provider_state = copy.deepcopy(chunk.get("provider_state") or {})
+        cb = self._ctx.callbacks.on_message_complete
+        if cb:
+            try:
+                cb({"provider_state": ctx.provider_state, "reasoning_content": ctx.reasoning_content,
+                    "tool_calls": copy.deepcopy(ctx.tool_calls)})
+            except Exception:
+                logger.debug("[Agent] message metadata callback raised", exc_info=True)
 
     def _state_finalize(self, ctx: TurnContext) -> str:
         trace_data = self._serialize_trace(ctx)

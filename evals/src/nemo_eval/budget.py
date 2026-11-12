@@ -6,11 +6,13 @@ def validate_config(config):
     allowed = {'language', 'target', 'judge', 'budget'}
     if set(config) - allowed:
         raise ValueError('Unknown run configuration fields')
-    profile_allowed = {'model', 'provider', 'base_url', 'api_key_env', 'max_tokens', 'temperature', 'top_p', 'max_attempts', 'timeout_seconds', 'pricing'}
+    profile_allowed = {'model', 'provider', 'base_url', 'api_protocol', 'api_key_env', 'max_tokens', 'temperature', 'top_p', 'max_attempts', 'timeout_seconds', 'pricing'}
     for name in ('target', 'judge'):
         if name not in config:
             continue
         profile = config[name]
+        if profile.get('api_protocol', 'auto') not in ('auto', 'openai_chat', 'responses', 'anthropic_messages', 'cohere_chat'):
+            raise ValueError('Unsupported API protocol')
         if set(profile) - profile_allowed:
             raise ValueError(f'Unknown {name} profile field; inline credentials are forbidden')
         if not profile.get('model') or not profile.get('api_key_env'):

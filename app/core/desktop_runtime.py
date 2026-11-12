@@ -16,4 +16,5 @@ def gateway_config(proxy=None) -> GatewayConfig:
         api_key=get_litellm_provider_api_key(provider) if provider else '',
         max_tokens=cfg.get(cfg.maxTokens), temperature=cfg.get(cfg.temperature),
         top_p=cfg.get(cfg.topP),
+        api_protocol=model_config.get('api_protocol', 'auto'),
     )

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from datetime import datetime
 from typing import Any, TYPE_CHECKING
 
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 # 预定义的分析视角标识。每个视角的名称与 system prompt 在运行时通过 t() 取，
 # 不能在模块加载时求值（语言此时可能尚未锁定，且需支持中英双语）。
-# 所有视角统一使用当前 LiteLLM 默认模型（跟随用户选择的供应商）。
+# 所有视角统一使用当前默认模型（跟随用户选择的供应商）。
 PERSPECTIVE_IDS = ("architect", "security", "performance", "cost")
 
 
@@ -59,6 +60,7 @@ class MultiModelConsultTool(BuiltinTool):
         api_base: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        api_protocol: str = "auto",
     ):
         self._model = model
         self._provider = provider
@@ -66,10 +68,11 @@ class MultiModelConsultTool(BuiltinTool):
         self._api_base = api_base
         self._max_tokens = max_tokens
         self._temperature = temperature
+        self._api_protocol = api_protocol
 
     @classmethod
     def create(cls, ctx: "ToolContext") -> "MultiModelConsultTool":
-        """从配置中读取当前 LiteLLM 默认模型的连接信息。"""
+        """从配置中读取当前默认模型的连接信息。"""
         from app.core.config import cfg, get_litellm_provider_api_key
 
         model_id = cfg.get(cfg.litellmDefaultModel)
@@ -84,6 +87,7 @@ class MultiModelConsultTool(BuiltinTool):
             provider=provider,
             api_key=get_litellm_provider_api_key(provider) if provider else "",
             api_base=api_base,
+            api_protocol=(model_cfg or {}).get("api_protocol", "auto"),
             max_tokens=cfg.get(cfg.maxTokens),
             temperature=cfg.get(cfg.temperature),
         )
@@ -133,12 +137,13 @@ class MultiModelConsultTool(BuiltinTool):
         query = params.get("query", "").strip()
         perspectives = params.get("perspectives", ["architect", "security", "performance"])
         context = params.get("context", "").strip()
-        timeout = float(params.get("timeout", 30.0))
-
         if not query:
             return {"status": "error", "data": {"message": "query is required"}}
 
         try:
+            timeout = float(params.get("timeout", 30.0))
+            if not math.isfinite(timeout) or timeout <= 0:
+                raise ValueError("timeout must be a finite positive number")
             # 在同步上下文中启动 asyncio 事件循环并行调用多个模型
             result = asyncio.run(self._consult_async(query, perspectives, context, timeout))
             return {"status": "success", "data": {"query": query, "perspectives": perspectives, "result": result}}
@@ -146,16 +151,21 @@ class MultiModelConsultTool(BuiltinTool):
             return {"status": "error", "data": {"message": str(e)}}
 
     async def _consult_async(self, query: str, perspectives: list, context: str, timeout: float) -> str:
-        """异步并行调用多个视角（统一使用当前 LiteLLM 默认模型）。"""
-        from app.core.litellm_loader import load_litellm
-        litellm = load_litellm()
+        """通过统一网关并行调用，复用路由、取消、错误脱敏和 token 记录。"""
+        from app.core.cancellation import CancellationToken
+        from app.core.llm_gateway import LLMGateway
+        from app.core.runtime_config import GatewayConfig
+
+        gateway = LLMGateway(config=GatewayConfig(
+            model=self._model, provider=self._provider, api_key=self._api_key,
+            base_url=self._api_base, max_tokens=self._max_tokens,
+            temperature=self._temperature, api_protocol=self._api_protocol,
+        ))
 
         # 过滤无效的视角名称
         valid = [p for p in perspectives if p in PERSPECTIVE_IDS]
         if not valid:
             valid = ["architect", "security", "performance"]
-
-        model_label = f"{self._provider}/{self._model}" if self._provider else self._model
 
         async def call_one(pid: str) -> dict:
             """调用单个模型视角。"""
@@ -166,30 +176,46 @@ class MultiModelConsultTool(BuiltinTool):
                 if context
                 else t("tool.multi_model_consult.user_content", query=query)
             )
-            kwargs: dict[str, Any] = {
-                "model": model_label,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},
-                ],
-                "max_tokens": self._max_tokens,
-                "temperature": self._temperature,
-                "api_key": self._api_key,
-            }
-            if self._api_base:
-                kwargs["api_base"] = self._api_base
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ]
+            token = CancellationToken()
+
+            def consume() -> str:
+                content = []
+                stream = gateway.chat_stream(messages, cancel_token=token, stream_timeout=timeout)
+                try:
+                    for event in stream:
+                        if event['type'] == 'text':
+                            content.append(event['delta'])
+                        elif event['type'] == 'error':
+                            raise RuntimeError(event['message'])
+                        elif event['type'] == 'done':
+                            if not content:
+                                raise RuntimeError('模型返回了空回答')
+                            return ''.join(content)
+                    raise RuntimeError('模型调用未完成')
+                finally:
+                    stream.close()
+
             try:
-                resp = await asyncio.wait_for(
-                    litellm.acompletion(**kwargs),
-                    timeout=timeout,
-                )
+                content = await asyncio.wait_for(asyncio.to_thread(consume), timeout=timeout)
                 return {"id": pid, "name": name, "model": self._model, "status": "success",
-                        "content": resp.choices[0].message.content}
+                        "content": content}
+            except TimeoutError:
+                return {"id": pid, "name": name, "model": self._model, "status": "error",
+                        "error": f'模型调用超时（{timeout:g}s）'}
             except Exception as e:
                 return {"id": pid, "name": name, "model": self._model, "status": "error", "error": str(e)}
+            finally:
+                token.cancel()
 
         # 并行调用所有选中的视角
-        results = await asyncio.gather(*[call_one(p) for p in valid], return_exceptions=True)
+        try:
+            results = await asyncio.gather(*[call_one(p) for p in valid], return_exceptions=True)
+        finally:
+            gateway.close()
 
         # 格式化为 Markdown 输出
         output = t("tool.multi_model_consult.output_header", query=query) + "\n\n"

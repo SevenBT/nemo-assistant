@@ -33,11 +33,15 @@ def test_stream_generate_forwards_cancellation_without_gateway_extension(monkeyp
             captured["cancel_token"] = cancel_token
             return iter(({"type": "done"},))
 
+        def close(self):
+            captured["closed"] = True
+
     monkeypatch.setattr("app.core.tool_generator.LLMGateway", FakeGateway)
 
     assert list(stream_generate("make a tool", cancel_token=token)) == [{"type": "done"}]
     assert captured["cancel_token"] is token
     assert "stream_timeout" not in captured
+    assert captured["closed"]
 
 
 def test_parse_result_extracts_valid_code_blocks():
@@ -52,6 +56,18 @@ def test_parse_result_extracts_valid_code_blocks():
     assert json.loads(manifest_text) == manifest
     assert script_text == "print('{}')"
     assert error == ""
+
+
+def test_model_override_preserves_custom_endpoint_and_protocol(monkeypatch):
+    from types import SimpleNamespace
+    from app.core.tool_generator import ModelOverride, _ConfigProxy
+    entry = {'id': 'custom', 'provider': 'openai', 'api_base': 'https://proxy.test/v1',
+             'api_protocol': 'responses', 'enabled': True, 'future_field': 'keep'}
+    fake_cfg = SimpleNamespace(litellmModels=object(), get=lambda _: [entry])
+    monkeypatch.setattr('app.core.tool_generator.cfg', fake_cfg)
+    resolved = _ConfigProxy(ModelOverride('litellm', 'custom', 'Custom', 'openai')).get_litellm_model_by_id('custom')
+    assert resolved == entry
+    assert resolved is not entry
 
 
 def test_parse_result_does_not_apply_strict_manifest_validation():

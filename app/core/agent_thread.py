@@ -114,6 +114,7 @@ class AgentThread(QThread):
         """
         # Build callback bridge: Agent callbacks → Qt signals
         callbacks = AgentCallbacks(
+            on_message_complete=lambda payload: self.tool_event.emit("", "message", payload),
             on_text_chunk=lambda delta: self.text_chunk.emit(delta),
             on_tool_start=lambda call_id, name, params: self.tool_event.emit(
                 call_id, "start", {"name": name, "params": params}
