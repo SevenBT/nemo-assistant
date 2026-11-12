@@ -41,6 +41,9 @@ class AgentCallbacks:
     on_trace: Callable[[str, dict], None] | None = None
     """Trace 事件回调。(event_name, event_data)"""
 
+    on_message_complete: Callable[[dict], None] | None = None
+    """Validated assistant metadata for lossless persisted protocol history."""
+
     # ── 便捷构造 ──
 
     @classmethod

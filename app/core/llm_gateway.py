@@ -11,580 +11,34 @@ from __future__ import annotations
 import json
 import logging
 import random
-import re
 import threading
 import time
 import uuid
 from collections import defaultdict, deque
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional, Protocol
-
-import httpx
+from typing import Any, Callable, Iterator, Optional
 
 from app.core.runtime_paths import DATA_DIR
 from app.core.cancellation import CancellationToken, _close_resource
-from app.core.runtime_config import GatewayConfig
+from app.core.runtime_config import GatewayConfig, provider_api_type
+from app.core.billing import billing_url_for, normalize_provider_cost
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT = httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0)
 _LOG_DIR = DATA_DIR.parent / "logs"
 _DEFAULT_LOG_PATH = _LOG_DIR / "llm_gateway.jsonl"
 _WAIT_SLICE_SECONDS = 0.05
 _MAX_RETRY_AFTER_SECONDS = 30.0
-_SENSITIVE_KEY_RE = re.compile(
-    r"(?i)(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|credential)"
-)
-_BEARER_RE = re.compile(r"(?i)\bBearer\s+[^\s,;\"']+")
-_ASSIGNMENT_SECRET_RE = re.compile(
-    r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|credential)\b\s*[:=]\s*([^\s,;]+)"
-)
-_QUERY_SECRET_RE = re.compile(
-    r"(?i)([?&](?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|credential)=)[^&#\s]+"
-)
-_ABSOLUTE_PATH_RE = re.compile(
-    r"(?i)(?:[A-Z]:[\\/](?:[^\s,;\"']+[\\/])*[^\s,;\"']+|/(?:Users|home|tmp|var|private)/[^\s,;\"']+)"
-)
-
-
 def _is_cancelled(cancel_token: "CancellationToken | None") -> bool:
     return bool(cancel_token and cancel_token.is_cancelled())
 
 
-@dataclass(frozen=True)
-class LLMRequest:
-    """网关内部的统一请求对象。
-
-    上层只关心 messages/tools；网关在这里补齐 provider、model、key、
-    base_url 等调用细节，再交给具体 adapter。
-    """
-
-    trace_id: str
-    attempt_id: str
-    api_type: str
-    model: str
-    messages: list[dict[str, Any]]
-    tools: list[dict[str, Any]] | None = None
-    max_tokens: int = 4096
-    temperature: float = 0.7
-    top_p: float = 1.0
-    provider: str = ""
-    api_key: str = ""
-    base_url: str = ""
-    extra: dict[str, Any] = field(default_factory=dict)
-    stream_timeout: float | None = None
-
-
-class ProviderAdapter(Protocol):
-    """Provider 适配器协议。
-
-    每个供应商只负责把自己的响应翻译成统一事件，不处理全局限流、
-    重试和日志，这些横切逻辑留在 LLMGateway。
-    """
-
-    def stream(
-        self,
-        request: LLMRequest,
-        cancel_token: CancellationToken | None = None,
-    ) -> Iterator[dict]:
-        """Yield normalized gateway events."""
-
-
-def _safe_getattr(obj: Any, name: str, default: Any = None) -> Any:
-    try:
-        return getattr(obj, name, default)
-    except Exception:
-        return default
-
-
-def _read_response_payload(response: Any) -> Any:
-    response_json = _safe_getattr(response, "json")
-    if callable(response_json):
-        try:
-            return response_json()
-        except Exception:
-            pass
-
-    response_read = _safe_getattr(response, "read")
-    if callable(response_read):
-        try:
-            response_read()
-        except Exception:
-            pass
-
-    if callable(response_json):
-        try:
-            return response_json()
-        except Exception:
-            pass
-
-    text = _safe_getattr(response, "text")
-    if text:
-        return text
-    return None
-
-
-def _get_error_payload(exc: Exception) -> Any:
-    payload = _safe_getattr(exc, "body") or _safe_getattr(exc, "doc")
-    if payload is not None:
-        return payload
-
-    response = _safe_getattr(exc, "response")
-    if response is None:
-        return None
-
-    return _read_response_payload(response)
-
-
-def _error_type_code(payload: Any) -> tuple[str | None, str | None]:
-    data: dict[str, Any] | None = None
-    if isinstance(payload, dict):
-        data = payload
-    elif isinstance(payload, str) and payload.strip():
-        try:
-            parsed = json.loads(payload)
-        except Exception:
-            parsed = None
-        if isinstance(parsed, dict):
-            data = parsed
-    if not isinstance(data, dict):
-        return None, None
-
-    err = data.get("error")
-    err_type = data.get("type")
-    err_code = data.get("code")
-    if isinstance(err, dict):
-        err_type = err.get("type") or err_type
-        err_code = err.get("code") or err_code
-    return (
-        str(err_type).strip().lower() if err_type else None,
-        str(err_code).strip().lower() if err_code else None,
-    )
-
-
-def _retry_after_from_headers(headers: Any) -> float | None:
-    if not headers:
-        return None
-
-    def header_value(name: str) -> Any:
-        if hasattr(headers, "get"):
-            value = headers.get(name) or headers.get(name.title())
-            if value is not None:
-                return value
-        if isinstance(headers, dict):
-            for key, value in headers.items():
-                if isinstance(key, str) and key.lower() == name.lower():
-                    return value
-        return None
-
-    try:
-        retry_ms = header_value("retry-after-ms")
-        if retry_ms is not None:
-            value = float(retry_ms) / 1000.0
-            if value > 0:
-                return value
-    except (TypeError, ValueError):
-        pass
-
-    retry_after = header_value("retry-after")
-    if retry_after is None:
-        return None
-    text = str(retry_after).strip()
-    if not text:
-        return None
-    try:
-        return max(0.1, float(text))
-    except ValueError:
-        pass
-    try:
-        retry_at = parsedate_to_datetime(text)
-    except Exception:
-        return None
-    if retry_at.tzinfo is None:
-        retry_at = retry_at.replace(tzinfo=timezone.utc)
-    return max(0.1, (retry_at - datetime.now(retry_at.tzinfo)).total_seconds())
-
-
-# "目标计算机积极拒绝" / connection refused：目标端口拒绝握手，通常是本地代理
-# 未启动或 base_url 端口错配。重试毫无意义（每次都撞同一堵墙），单独归类且不重试。
-_CONNECTION_REFUSED_MARKERS = (
-    "winerror 10061",
-    "econnrefused",
-    "connection refused",
-    "actively refused",
-    "由于目标计算机积极拒绝",
+from app.core.providers.contracts import LLMRequest, ProviderAdapter
+from app.core.providers.errors import (
+    _error_event, _coerce_int, _normalize_usage, sanitize_error_event,
 )
-
-
-def _looks_like_connection_refused(text: str) -> bool:
-    lowered = text.lower()
-    return any(marker in lowered for marker in _CONNECTION_REFUSED_MARKERS)
-
-
-# LiteLLM 会在异常文本里附带固定的引导链接/提示行，对用户毫无信息量，反而
-# 淹没真正的原因（如"目标计算机积极拒绝"）。展示与日志前统一剥掉这些行。
-_LITELLM_BOILERPLATE_MARKERS = (
-    "give feedback / get help",
-    "litellm.info:",
-    "provider list:",
-    "if you need to debug this error",
-    "https://docs.litellm.ai",
-    "https://github.com/berriai/litellm",
-)
-
-
-def _strip_litellm_boilerplate(text: str) -> str:
-    lines = [
-        line
-        for line in text.splitlines()
-        if line.strip()
-        and not any(m in line.lower() for m in _LITELLM_BOILERPLATE_MARKERS)
-    ]
-    cleaned = "\n".join(lines).strip()
-    return cleaned or text.strip()
-
-
-def _sanitize_sensitive_value(value: Any, *, key: str = "") -> Any:
-    """Recursively redact provider data before it reaches UI or persistence."""
-
-    if key and _SENSITIVE_KEY_RE.search(key):
-        return "[REDACTED]"
-    if isinstance(value, dict):
-        return {
-            str(item_key): _sanitize_sensitive_value(item, key=str(item_key))
-            for item_key, item in value.items()
-        }
-    if isinstance(value, (list, tuple)):
-        return [_sanitize_sensitive_value(item) for item in value]
-    if isinstance(value, str):
-        return _sanitize_error_text(value)
-    if isinstance(value, (int, float, bool)) or value is None:
-        return value
-    return _sanitize_error_text(str(value))
-
-
-def _sanitize_error_text(text: str) -> str:
-    sanitized = _BEARER_RE.sub("Bearer [REDACTED]", text)
-    sanitized = _ASSIGNMENT_SECRET_RE.sub(
-        lambda match: f"{match.group(1)}=[REDACTED]", sanitized
-    )
-    sanitized = _QUERY_SECRET_RE.sub(
-        lambda match: f"{match.group(1)}[REDACTED]", sanitized
-    )
-    sanitized = _ABSOLUTE_PATH_RE.sub("[PATH]", sanitized)
-    return sanitized[:500]
-
-
-def _safe_error_message(payload: Any, exc: Exception) -> str:
-    sanitized_payload = _sanitize_sensitive_value(payload)
-    if isinstance(sanitized_payload, dict):
-        error = sanitized_payload.get("error")
-        if isinstance(error, dict):
-            candidate = error.get("message")
-            if isinstance(candidate, str) and candidate.strip():
-                return candidate.strip()
-        candidate = sanitized_payload.get("message")
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate.strip()
-    if isinstance(sanitized_payload, str) and sanitized_payload.strip():
-        return sanitized_payload.strip()
-    return _sanitize_error_text(str(exc)).strip()
-
-
-def sanitize_error_event(event: dict[str, Any]) -> dict[str, Any]:
-    """Return an immutable-style sanitized event copy for UI/log/trace use."""
-
-    safe = {
-        key: _sanitize_sensitive_value(value, key=key)
-        for key, value in event.items()
-        if key in {
-            "type",
-            "message",
-            "status_code",
-            "error_kind",
-            "error_type",
-            "error_code",
-            "retry_after",
-        }
-    }
-    safe["type"] = "error"
-    safe["message"] = _sanitize_error_text(str(safe.get("message") or "Provider request failed"))
-    return safe
-
-
-def _error_event(exc: Exception, prefix: str = "") -> dict:
-    """把 SDK/httpx 异常转换为网关可判断的结构化 error 事件。"""
-    response = getattr(exc, "response", None)
-    status_code = getattr(exc, "status_code", None)
-    if status_code is None and response is not None:
-        status_code = getattr(response, "status_code", None)
-
-    payload = _get_error_payload(exc)
-    err_type, err_code = _error_type_code(payload)
-    headers = getattr(response, "headers", None)
-
-    raw_message = _safe_error_message(payload, exc)
-    message = _strip_litellm_boilerplate(raw_message)
-
-    name = exc.__class__.__name__.lower()
-    if "timeout" in name:
-        error_kind = "timeout"
-    elif "connection" in name:
-        error_kind = "connection"
-    else:
-        error_kind = None
-    # LiteLLM 常把底层 ConnectionRefusedError 包成 InternalServerError（类名无
-    # 关键字、状态码 500），只能靠错误文本兜底识别，否则会被当 5xx 反复重试。
-    if _looks_like_connection_refused(f"{message} {str(exc)}"):
-        error_kind = "connection_refused"
-    if prefix:
-        message = f"{prefix}: {message}"
-
-    return sanitize_error_event({
-        "type": "error",
-        "message": message,
-        "status_code": int(status_code) if status_code is not None else None,
-        "error_kind": error_kind,
-        "error_type": err_type,
-        "error_code": err_code,
-        "retry_after": _retry_after_from_headers(headers),
-    })
-
-
-def _field(data: Any, name: str, default: Any = None) -> Any:
-    """Read a field from either SDK objects or plain response dictionaries."""
-    if isinstance(data, dict):
-        return data.get(name, default)
-    return getattr(data, name, default)
-
-
-def _coerce_int(value: Any) -> int | None:
-    """宽容地把 usage 字段转 int；非数值返回 None，不让脏数据中断记录。"""
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _normalize_usage(usage: Any) -> dict[str, int] | None:
-    """把 SDK usage 对象或 dict 归一为 token 统计字典（OpenAI 形状）。
-
-    兼容流式最后一帧的 usage：prompt/completion/total_tokens，以及
-    prompt_tokens_details.cached_tokens（缓存命中，provider 可选）。
-    任何字段缺失或非数值都安全跳过。
-    """
-    if usage is None:
-        return None
-    prompt = _coerce_int(_field(usage, "prompt_tokens"))
-    completion = _coerce_int(_field(usage, "completion_tokens"))
-    total = _coerce_int(_field(usage, "total_tokens"))
-    if total is None and (prompt is not None or completion is not None):
-        total = (prompt or 0) + (completion or 0)
-
-    cached = None
-    details = _field(usage, "prompt_tokens_details")
-    if details is not None:
-        cached = _coerce_int(_field(details, "cached_tokens"))
-    if cached is None:
-        # 部分网关直接平铺 cached_tokens。
-        cached = _coerce_int(_field(usage, "cached_tokens"))
-
-    if prompt is None and completion is None and total is None and cached is None:
-        return None
-    return {
-        "prompt_tokens": prompt,
-        "completion_tokens": completion,
-        "total_tokens": total,
-        "cached_tokens": cached,
-    }
-
-
-def _parse_tool_calls(tc_buf: dict[int, dict[str, str]]) -> Iterator[dict]:
-    """把流式 tool_call 分片组装成 AgentLoop 已经认识的事件格式。"""
-    for _, tc_data in sorted(tc_buf.items()):
-        if not tc_data["name"]:
-            continue
-        try:
-            args = json.loads(tc_data["args_str"] or "{}")
-        except json.JSONDecodeError:
-            args = {}
-        if not isinstance(args, dict):
-            args = {}
-        yield {
-            "type": "tool_call",
-            "id": tc_data["id"] or f"call_{uuid.uuid4().hex}",
-            "name": tc_data["name"],
-            "arguments": args,
-        }
-
-
-def _append_tool_call_delta(
-    tc_buf: dict[int, dict[str, str]],
-    tool_call: Any,
-    fallback_index: int = 0,
-) -> None:
-    """Merge one streamed tool_call delta into the per-index buffer."""
-    idx = _field(tool_call, "index", fallback_index)
-    try:
-        idx = int(idx)
-    except (TypeError, ValueError):
-        idx = fallback_index
-
-    entry = tc_buf.setdefault(idx, {"id": "", "name": "", "args_str": ""})
-    call_id = _field(tool_call, "id")
-    if call_id:
-        entry["id"] = str(call_id)
-
-    function = _field(tool_call, "function", {}) or {}
-    name = _field(function, "name")
-    arguments = _field(function, "arguments")
-    if name:
-        entry["name"] = str(name)
-    if arguments:
-        if isinstance(arguments, str):
-            entry["args_str"] += arguments
-        else:
-            entry["args_str"] = json.dumps(arguments, ensure_ascii=False)
-
-
-def _append_function_call_delta(
-    tc_buf: dict[int, dict[str, str]],
-    function_call: Any,
-) -> None:
-    """Merge legacy function_call deltas into the tool-call event shape."""
-    entry = tc_buf.setdefault(0, {"id": "", "name": "", "args_str": ""})
-    name = _field(function_call, "name")
-    arguments = _field(function_call, "arguments")
-    if name:
-        entry["name"] = str(name)
-    if arguments:
-        if isinstance(arguments, str):
-            entry["args_str"] += arguments
-        else:
-            entry["args_str"] = json.dumps(arguments, ensure_ascii=False)
-
-
-class LiteLLMAdapter:
-    """LiteLLM Python 包适配器。"""
-
-    def stream(
-        self,
-        request: LLMRequest,
-        cancel_token: CancellationToken | None = None,
-    ) -> Iterator[dict]:
-        try:
-            from app.core.litellm_loader import load_litellm
-            litellm = load_litellm()
-        except ImportError as e:
-            yield {"type": "error", "message": str(e)}
-            return
-
-        if not request.provider:
-            yield {"type": "error", "message": f"模型 {request.model} 未找到"}
-            return
-        if not request.api_key:
-            yield {"type": "error", "message": f"{request.provider} API Key 未配置"}
-            return
-
-        kwargs: dict[str, Any] = {
-            "model": f"{request.provider}/{request.model}",
-            "messages": request.messages,
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-            "api_key": request.api_key,
-            # The gateway owns retries and attempt accounting.
-            "num_retries": 0,
-            "max_retries": 0,
-        }
-        if request.provider == "deepseek":
-            # DeepSeek enables thinking mode by default; keep standard chat
-            # calls in non-thinking mode unless the app exposes an explicit control.
-            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-        if request.base_url:
-            kwargs["api_base"] = request.base_url
-        if request.provider == "deepseek" and any(
-            isinstance(message.get("content"), list)
-            and any(
-                isinstance(part, dict) and part.get("type") == "image_url"
-                for part in message["content"]
-            )
-            for message in request.messages
-        ):
-            # LiteLLM's DeepSeek transformer flattens content lists to text,
-            # dropping image_url parts. Use its OpenAI-compatible transport
-            # for image requests while retaining the DeepSeek endpoint/key.
-            kwargs["model"] = f"openai/{request.model}"
-            kwargs["api_base"] = request.base_url or "https://api.deepseek.com/beta"
-        if request.tools:
-            kwargs["tools"] = request.tools
-            kwargs["tool_choice"] = "auto"
-        if request.stream_timeout is not None:
-            kwargs["timeout"] = request.stream_timeout
-
-        logger.debug(
-            "LLM request provider=%s model=%s messages=%d tools=%d",
-            request.provider, request.model, len(request.messages), len(request.tools or []),
-        )
-
-        try:
-            stream = litellm.completion(**kwargs)
-            if cancel_token:
-                cancel_token.add_resource(stream)
-            tc_buf: dict[int, dict[str, str]] = {}
-            reasoning_buf = ""
-            usage = None
-
-            try:
-                for chunk in stream:
-                    if _is_cancelled(cancel_token):
-                        return
-                    chunk_usage = getattr(chunk, "usage", None)
-                    if chunk_usage is not None:
-                        usage = chunk_usage
-                    if not getattr(chunk, "choices", None):
-                        continue
-                    choice = chunk.choices[0]
-                    delta = choice.delta
-
-                    reasoning = getattr(delta, "reasoning_content", None)
-                    if reasoning:
-                        reasoning_buf += reasoning
-
-                    if hasattr(delta, "content") and delta.content:
-                        yield {"type": "text", "delta": delta.content}
-
-                    if hasattr(delta, "tool_calls") and delta.tool_calls:
-                        for fallback_index, tc in enumerate(delta.tool_calls):
-                            _append_tool_call_delta(tc_buf, tc, fallback_index)
-                    # 不在 finish_reason 处 break：usage 帧随后到达（choices 为空）。
-            finally:
-                if cancel_token:
-                    cancel_token.remove_resource(stream)
-                if _is_cancelled(cancel_token):
-                    _close_resource(stream)
-
-            if _is_cancelled(cancel_token):
-                return
-            yield from _parse_tool_calls(tc_buf)
-            yield {
-                "type": "done",
-                "reasoning_content": reasoning_buf or None,
-                "usage": _normalize_usage(usage),
-            }
-        except Exception as exc:
-            if _is_cancelled(cancel_token):
-                return
-            event = _error_event(exc, "LiteLLM 调用失败")
-            yield event
 
 
 def _bounded_wait(
@@ -659,9 +113,8 @@ class RetryPolicy:
 
     def is_retryable(self, event: dict) -> bool:
         """根据结构化错误字段判断是否值得重试。"""
-        # 连接被拒绝：端口拒握手，重试只会撞同一堵墙。优先于状态码判断，
-        # 因为 LiteLLM 会把它错包成 500，否则会被当 5xx 白白重试。
-        if (event.get("error_kind") or "").lower() == "connection_refused":
+        # Local configuration/protocol failures and refused ports cannot heal by retrying.
+        if (event.get("error_kind") or "").lower() in ('connection_refused', 'protocol', 'configuration'):
             return False
         status = event.get("status_code")
         if status is not None:
@@ -844,15 +297,29 @@ class LLMGateway:
     ):
         self._config = config
         self._proxy = config_proxy
-        self._adapters = adapters or {
-            "litellm": LiteLLMAdapter(),
-        }
+        if adapters is None:
+            from app.core.providers.adapter import HTTPProviderAdapter
+            adapter = HTTPProviderAdapter()
+            from app.core.providers.adapter import CODECS
+            adapters = {key: adapter for key in CODECS}
+        self._adapters = adapters
         self._retry_policy = retry_policy or RetryPolicy()
         self._limiter = limiter or LocalRateLimiter()
         self._logger = logger if logger is not None else GatewayLogger()
         # 可选 TraceStore：AgentLoop 链路传入后，LLM 汇总额外按 trace_id 落库。
         # 其它调用方（consolidator/dream/...）不传则只走 JSONL，行为不变。
         self._trace_sink = trace_sink
+
+    def close(self) -> None:
+        """Release persistent HTTP pools after active calls have been cancelled."""
+        for adapter in {id(a): a for a in self._adapters.values()}.values():
+            _close_resource(adapter)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
 
     def chat_stream(
         self,
@@ -869,7 +336,11 @@ class LLMGateway:
         保证非 AgentLoop 调用方（consolidator/dream/tool_generator/result_bubble）
         无需改动也能正常工作。seq 标记同一 turn 内第几次 LLM 往返。
         """
-        request = self._build_request(messages, tools, trace_id, stream_timeout)
+        try:
+            request = self._build_request(messages, tools, trace_id, stream_timeout)
+        except ValueError as exc:
+            yield _error_event(exc, '模型配置无效')
+            return
         adapter = self._adapters.get(request.api_type)
         if adapter is None:
             yield {"type": "error", "message": f"未知 API 类型: {request.api_type}"}
@@ -918,7 +389,9 @@ class LLMGateway:
             t0, ttft_ms = time.perf_counter(), None
             streamed = False
             attempt_request = LLMRequest(
-                **{**request.__dict__, "attempt_id": uuid.uuid4().hex}
+                **{**request.__dict__, "attempt_id": uuid.uuid4().hex,
+                   "stream_timeout": max(0.001, deadline - time.monotonic())
+                   if deadline is not None else request.stream_timeout}
             )
             request = attempt_request
             stream_iter = adapter.stream(attempt_request, cancel_token=cancel_token)
@@ -932,6 +405,9 @@ class LLMGateway:
                         )
                         return
                     event_type = event.get("type")
+                    if event_type == "progress":
+                        streamed = True
+                        continue
                     if event_type == "text" and ttft_ms is None:
                         ttft_ms = (time.perf_counter() - t0) * 1000
                     if event_type in {"text", "tool_call"}:
@@ -940,6 +416,7 @@ class LLMGateway:
                         continue
                     if event_type == "error":
                         error_usage = event.get("usage")
+                        error_cost = event.get("provider_cost")
                         event = sanitize_error_event(event)
                         final_error = event
                         can_retry = (
@@ -949,7 +426,7 @@ class LLMGateway:
                             and not _is_cancelled(cancel_token)
                         )
                         if can_retry:
-                            self._write_log(request, t0, ttft_ms, retry_count, "error", event, seq, error_usage)
+                            self._write_log(request, t0, ttft_ms, retry_count, "error", event, seq, error_usage, provider_cost=error_cost)
                             retry_count += 1
                             self._retry_policy.wait(
                                 attempt,
@@ -964,7 +441,7 @@ class LLMGateway:
                             retry_next_attempt = True
                             break
                         # 同 done：先写日志再 yield，否则消费者 break 后丢日志。
-                        self._write_log(request, t0, ttft_ms, retry_count, "error", event, seq, error_usage)
+                        self._write_log(request, t0, ttft_ms, retry_count, "error", event, seq, error_usage, provider_cost=error_cost)
                         yield event
                         return
                     if event_type == "done":
@@ -975,6 +452,7 @@ class LLMGateway:
                         self._write_log(
                             request, t0, ttft_ms, retry_count, final_status,
                             None, seq, event.get("usage"),
+                            provider_cost=event.get("provider_cost"),
                         )
                         yield event
                         return
@@ -1008,6 +486,7 @@ class LLMGateway:
         error: dict | None,
         seq: int = 0,
         usage: dict | None = None,
+        provider_cost: dict | None = None,
     ) -> None:
         """写一条脱敏 attempt 汇总日志，并按 trace_id 同步到 TraceStore。"""
         safe_error = sanitize_error_event(error) if error else None
@@ -1015,6 +494,7 @@ class LLMGateway:
             "trace_id": request.trace_id,
             "attempt_id": request.attempt_id,
             "api_type": request.api_type,
+            "profile_revision": 1,
             "provider": request.provider or request.api_type,
             "model": request.model,
             "stream": True,
@@ -1028,8 +508,12 @@ class LLMGateway:
             "error_kind": safe_error.get("error_kind") if safe_error else None,
             "error_status_code": safe_error.get("status_code") if safe_error else None,
             "error_message": safe_error.get("message") if safe_error else None,
+            "billing_url": billing_url_for(request.provider, request.base_url),
         }
-        # token 用量（仅成功流末尾有），独立放进 record 供 sink 落库。
+        cost = normalize_provider_cost(provider_cost)
+        if cost is not None:
+            record["provider_cost"] = cost
+        # 保留服务商明确返回的 token 用量，包括失败或截断的调用。
         if usage:
             usage = {k: _coerce_int(usage.get(k)) for k in ("prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens")}
             record["usage"] = usage
@@ -1058,7 +542,9 @@ class LLMGateway:
             from app.core.desktop_runtime import gateway_config
             config = gateway_config(self._proxy)
         return LLMRequest(
-            trace_id=trace_id, attempt_id=uuid.uuid4().hex, api_type="litellm",
+            trace_id=trace_id, attempt_id=uuid.uuid4().hex,
+            api_type=provider_api_type(config.provider, config.api_protocol),
+            api_protocol=config.api_protocol,
             model=config.model, provider=config.provider, base_url=config.base_url,
             api_key=config.api_key, messages=messages, tools=tools,
             max_tokens=config.max_tokens, temperature=config.temperature,

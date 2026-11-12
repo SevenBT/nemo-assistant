@@ -21,6 +21,7 @@ class ToolCall:
     arguments: dict
     result: Optional[dict] = None
     status: str = "pending"  # pending | running | success | error
+    extra_content: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -29,6 +30,7 @@ class ToolCall:
             "arguments": self.arguments,
             "result": self.result,
             "status": self.status,
+            "extra_content": self.extra_content,
         }
 
     @classmethod
@@ -39,6 +41,7 @@ class ToolCall:
             arguments=d.get("arguments", {}),
             result=d.get("result"),
             status=d.get("status", "pending"),
+            extra_content=d.get("extra_content", {}),
         )
 
 
@@ -51,6 +54,8 @@ class Message:
     tool_calls: list = field(default_factory=list)  # list[ToolCall]
     tool_call_id: Optional[str] = None  # for role=tool messages
     attachments: list = field(default_factory=list)  # list[Attachment]
+    reasoning_content: Optional[str] = None
+    provider_state: dict = field(default_factory=dict)
 
     def to_api_dict(self) -> dict:
         d: dict = {"role": self.role, "content": self.content or ""}
@@ -63,6 +68,7 @@ class Message:
                         "name": tc.name,
                         "arguments": json.dumps(tc.arguments, ensure_ascii=False),
                     },
+                    **({"extra_content": tc.extra_content} if tc.extra_content else {}),
                 }
                 for tc in self.tool_calls
             ]
@@ -70,6 +76,10 @@ class Message:
                 d["content"] = None
         if self.tool_call_id:
             d["tool_call_id"] = self.tool_call_id
+        if self.reasoning_content:
+            d["reasoning_content"] = self.reasoning_content
+        if self.provider_state:
+            d["provider_state"] = self.provider_state
         return d
 
     def to_dict(self) -> dict:
@@ -81,6 +91,8 @@ class Message:
             "tool_calls": [tc.to_dict() for tc in self.tool_calls],
             "tool_call_id": self.tool_call_id,
             "attachments": [att.to_dict() for att in self.attachments],
+            "reasoning_content": self.reasoning_content,
+            "provider_state": self.provider_state,
         }
 
     @classmethod
@@ -95,4 +107,6 @@ class Message:
             tool_calls=tool_calls,
             tool_call_id=d.get("tool_call_id"),
             attachments=attachments,
+            reasoning_content=d.get("reasoning_content"),
+            provider_state=d.get("provider_state", {}),
         )

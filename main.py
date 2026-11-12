@@ -8,6 +8,7 @@ initialize the Qt application -> create the main window.
 启动流程：检查依赖 → 配置日志 → 配置崩溃日志 → 初始化 Qt 应用 → 创建主窗口。
 """
 import sys
+import importlib.util
 import traceback
 import logging
 from logging.handlers import RotatingFileHandler
@@ -57,17 +58,15 @@ _setup_logging()
 _REQUIRED_PACKAGES = [
     ("bs4",         "beautifulsoup4"),
     ("httpx",       "httpx"),
-    ("openai",      "openai"),
     ("apscheduler", "APScheduler"),
     ("pyperclip",   "pyperclip"),
     ("keyboard",    "keyboard"),
 ]
 
-def _can_import(name: str) -> bool:
+def _is_installed(name: str) -> bool:
     try:
-        __import__(name)
-        return True
-    except ImportError:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
         return False
 
 def _ensure_deps():
@@ -77,12 +76,12 @@ def _ensure_deps():
     # pip, spawning runaway processes. Only auto-install from source checkouts.
     if getattr(sys, "frozen", False):
         return
-    missing = [pkg for imp, pkg in _REQUIRED_PACKAGES if not _can_import(imp)]
+    missing = [pkg for imp, pkg in _REQUIRED_PACKAGES if not _is_installed(imp)]
     if missing:
         missing_text = ", ".join(missing)
         raise SystemExit(
             "[startup] Missing runtime dependencies: "
-            f"{missing_text}\nInstall them with: python -m pip install ."
+            f"{missing_text}\nInstall them with: python -m pip install '.[desktop]'"
         )
 
 _ensure_deps()
@@ -113,12 +112,10 @@ def _setup_crash_log():
 
 _setup_crash_log()
 
-from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 from app.core.config import cfg
-from app.core.litellm_loader import warm_litellm_async
 from app.core.note_manager import NoteManager
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
@@ -169,8 +166,7 @@ def main():
     custom_qss = apply_theme(cfg.get(cfg.theme), content_font_size=cfg.get(cfg.contentFontSize), editor_font_size=cfg.get(cfg.editorFontSize))
     app.setStyleSheet(custom_qss)
     window.show()
-    # Let the first frame render before preloading the shared SDK off the UI thread.
-    QTimer.singleShot(500, warm_litellm_async)
+    # All model providers use HTTP; only local OCR needs background warmup.
     window.schedule_ocr_warmup()
 
     exit_code = app.exec()

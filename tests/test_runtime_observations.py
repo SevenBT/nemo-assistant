@@ -65,13 +65,12 @@ def test_diagnostic_omits_private_bodies_and_recursively_redacts():
     assert "CANARY_SECRET" not in json.dumps(redact({"nested": [{"api_key": "CANARY_SECRET"}], "error": "Bearer CANARY_SECRET"}))
 
 
-def test_incomplete_usage_is_unknown_and_cached_input_is_not_double_billed(monkeypatch):
-    from app.core import cost_calculator as costs
-    monkeypatch.setattr(costs, "_CUSTOM_PRICING", {"test/model": {"input_per_1m": 10, "output_per_1m": 20, "cache_read_per_1m": 1}})
-    assert costs.calculate_cost_from_usage(provider="test", model="model", usage={"total_tokens": 10}) is None
-    amount = costs.calculate_cost_from_usage(provider="test", model="model", usage={"prompt_tokens": 1000, "completion_tokens": 100, "cached_tokens": 800})
-    assert abs(amount - 0.0048) < 1e-10
-    assert costs.pricing_snapshot("test", "model") == costs.pricing_snapshot("test", "model")
+def test_diagnostic_distinguishes_reported_charge_from_legacy_estimates():
+    diagnostic = build_diagnostic({"llm_calls": [{"cost_usd": 42, "pricing_source": "custom_pricing",
+        "reported_cost_amount": 0.01, "reported_cost_currency": "USD", "total_tokens": 10}]})
+    call = diagnostic["llm_calls"][0]
+    assert call["reported_cost_amount"] == 0.01 and call["reported_cost_currency"] == "USD"
+    assert "cost_usd" not in call and "pricing_source" not in call
 
 
 def test_migration_failure_rolls_back_schema_changes(tmp_path, monkeypatch):

@@ -53,8 +53,7 @@ def current_vision_enabled() -> bool:
 
 
 # 模型模板：从模板快速添加模型时的候选清单。
-# provider 键即 LiteLLM 路由前缀（gateway 传 f"{provider}/{model}"），
-# 必须与 LiteLLM 认可的前缀一致：
+# provider 键选择共用 HTTP 传输层的厂商配置：
 #   openai / anthropic / gemini / deepseek / meta_llama / dashscope(Qwen) / zai(GLM)
 # api_base 留空即走该 provider 默认端点，用户只需在设置页填对应 API Key。
 MODEL_TEMPLATES: dict[str, list[dict]] = {
@@ -185,6 +184,8 @@ class AppConfig(QConfig):
     )
 
     # -- API --
+    # Deprecated storage discriminator, retained only for old config compatibility.
+    # Runtime dispatch uses each model's api_protocol, never this value.
     apiType = OptionsConfigItem(
         "API", "ApiType", "litellm",
         OptionsValidator(["litellm"]),
@@ -206,7 +207,7 @@ class AppConfig(QConfig):
         OptionsValidator(["auto", "on", "off"]),
     )
 
-    # -- LiteLLM --
+    # Legacy storage names remain stable to preserve existing config and keyring entries.
     litellmDefaultModel = ConfigItem("LiteLLM", "DefaultModel", DEFAULT_LITELLM_MODEL)
     litellmModels = ConfigItem("LiteLLM", "Models", DEFAULT_LITELLM_MODELS)
 

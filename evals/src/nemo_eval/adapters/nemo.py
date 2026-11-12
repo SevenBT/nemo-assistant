@@ -61,6 +61,7 @@ def make_live_gateway(profile, logger):
         raise ValueError("Live model requires model and a populated api_key_env")
     return LLMGateway(config=GatewayConfig(
         model=profile["model"], provider=profile.get("provider", ""),
+        api_protocol=profile.get("api_protocol", "auto"),
         base_url=profile.get("base_url", ""), api_key=os.environ[key_name],
         max_tokens=profile.get("max_tokens", 1024), temperature=profile.get("temperature", 0),
         top_p=profile.get("top_p", 1),
@@ -179,8 +180,8 @@ def execute(case, workdir: Path, mode="offline", config=None):
                         except ValueError:
                             # Production format may append a localized error hint.
                             payload = next((c["result"] for c in calls if c["call_id"] == call["id"] and c["step"] == step_id), None)
-                        tool_calls.append(ToolCall(id=call["id"], name=call["function"]["name"], arguments=json.loads(call["function"]["arguments"]), result=payload))
-                    history.append(Message(role="assistant", content=message.get("content") or "", tool_calls=tool_calls))
+                        tool_calls.append(ToolCall(id=call["id"], name=call["function"]["name"], arguments=json.loads(call["function"]["arguments"]), result=payload, extra_content=call.get("extra_content", {})))
+                    history.append(Message(role="assistant", content=message.get("content") or "", tool_calls=tool_calls, provider_state=message.get("provider_state", {}), reasoning_content=message.get("reasoning_content")))
             history.append(Message(role="assistant", content=answer))
     if mode == "offline" and gateway.script:
         status, error = "error", "Model script contains unused calls"

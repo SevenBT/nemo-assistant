@@ -45,7 +45,7 @@ class LiteLLMModelEditDialog(QDialog):
         self._provider_combo = QComboBox()
         self._provider_combo.setEditable(True)
         self._provider_combo.setPlaceholderText(t("litellm.model.provider_ph"))
-        # 添加常见的 provider（值即 LiteLLM 路由前缀）
+        # Provider identifiers select shared HTTP protocol profiles.
         for provider in [
             "openai", "anthropic", "gemini", "deepseek",
             "meta_llama", "dashscope", "zai", "azure", "cohere",
@@ -57,6 +57,13 @@ class LiteLLMModelEditDialog(QDialog):
         self._api_base_input = QLineEdit()
         self._api_base_input.setPlaceholderText(t("litellm.model.api_base_ph"))
         form.addRow(t("litellm.model.api_base"), self._api_base_input)
+
+        self._protocol_combo = QComboBox()
+        for label, value in [(t('model.protocol.auto'), 'auto'), ('Chat Completions', 'openai_chat'),
+                             ('Responses', 'responses'), ('Claude Messages', 'anthropic_messages'),
+                             ('Cohere Chat v2', 'cohere_chat')]:
+            self._protocol_combo.addItem(label, value)
+        form.addRow(t('model.protocol.label'), self._protocol_combo)
 
         # 启用状态
         self._enabled_checkbox = QCheckBox(t("litellm.model.enable"))
@@ -93,6 +100,8 @@ class LiteLLMModelEditDialog(QDialog):
             # 如果是自定义 provider，直接设置文本
             self._provider_combo.setCurrentText(provider.capitalize())
         self._api_base_input.setText(model.get("api_base", ""))
+        protocol_index = self._protocol_combo.findData(model.get('api_protocol', 'auto'))
+        self._protocol_combo.setCurrentIndex(max(0, protocol_index))
         self._enabled_checkbox.setChecked(model.get("enabled", False))
 
     def _save(self):
@@ -102,6 +111,7 @@ class LiteLLMModelEditDialog(QDialog):
         provider = self._provider_combo.currentText().strip().lower()
         api_base = self._api_base_input.text().strip()
         enabled = self._enabled_checkbox.isChecked()
+        api_protocol = self._protocol_combo.currentData()
 
         # 验证输入
         if not model_id:
@@ -128,6 +138,7 @@ class LiteLLMModelEditDialog(QDialog):
                         m["provider"] = provider
                         m["api_base"] = api_base
                         m["enabled"] = enabled
+                        m["api_protocol"] = api_protocol
                         break
                 cfg.set(cfg.litellmModels, models)
                 if cfg.get(cfg.litellmDefaultModel) == old_model_id:
@@ -143,6 +154,7 @@ class LiteLLMModelEditDialog(QDialog):
                     "provider": provider,
                     "api_base": api_base,
                     "enabled": enabled,
+                    "api_protocol": api_protocol,
                 })
                 cfg.set(cfg.litellmModels, models)
                 QMessageBox.information(self, t("litellm.model.success_title"), t("litellm.model.add_ok"))

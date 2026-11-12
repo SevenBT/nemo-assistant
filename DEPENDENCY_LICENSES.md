@@ -12,7 +12,6 @@ The following license values were read from installed package metadata during th
 | --- | --- |
 | PyQt6 | GPL-3.0-only |
 | pyqt6-fluent-widgets | GPLv3 |
-| openai | Apache-2.0 |
 | APScheduler | MIT |
 | httpx | BSD-3-Clause |
 | beautifulsoup4 | MIT License |
@@ -28,7 +27,8 @@ The following license values were read from installed package metadata during th
 | Markdown | BSD-3-Clause |
 | Pygments | BSD-2-Clause |
 | html2text | GPL-3.0-or-later |
-| litellm | MIT |
+
+LiteLLM and the OpenAI SDK were removed from runtime requirements and both lockfiles on 2026-11-12. Regenerate the complete transitive inventory for each binary release.
 
 ## Binary Release Checklist
 

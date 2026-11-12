@@ -117,7 +117,7 @@ Nemo Assistant 会记录每轮对话的关键链路，方便调试、评估和�
 
 ## 模型与 API
 
-模型通过 **LiteLLM** 统一接入，支持 OpenAI、Anthropic、DeepSeek、Gemini 等服务，也支持兼容 OpenAI 接口的模型。每个模型都可以单独配置 `api_base`、视觉能力、最大 Token、温度等参数。
+模型共用轻量 **httpx** 连接池，分别处理 Chat Completions、Responses、Claude Messages 和 Cohere Chat v2 协议。内置 OpenAI、Anthropic、DeepSeek、Gemini 兼容端点、通义千问、Z.ai、Meta 配置；支持自定义兼容服务和 Azure v1 资源端点。模型编辑页可选择 API 协议。已移除 LiteLLM 和厂商 SDK 依赖，原有配置与系统密钥继续兼容。协议通过离线契约测试，实际模型能力和连通性取决于所配置的服务。
 
 首次启动后，进入 **设置 → API** 添加模型并设为默认，即可启用聊天与各模块的 AI 功能。
 
@@ -194,7 +194,7 @@ main.py                  入口：依赖检查 → 崩溃日志 → 启动 Qt
 │   └── components/          可复用组件（消息气泡、Markdown 编辑器等）
 │
 ├── app/core/            核心业务层
-│   ├── llm_gateway          统一 LLM 网关（LiteLLM / 限流 / 重试 / 流式）
+│   ├── llm_gateway          统一 LLM 网关（共用 HTTP / 协议适配 / 限流 / 重试 / 流式）
 │   ├── agent_loop           Agent 状态机（prepare → stream → execute → feedback → finalize）
 │   ├── note_manager         笔记 / 便签 / 待办存储（SQLite）
 │   ├── memory_manager       长期记忆
@@ -234,7 +234,7 @@ prepare → stream → execute → feedback → finalize
 ## 技术栈
 
 - **GUI**：PyQt6 + [PyQt-Fluent-Widgets](https://github.com/zhiyiYo/PyQt-Fluent-Widgets)
-- **模型接入**：LiteLLM
+- **模型接入**：httpx 共用传输层与独立协议适配
 - **存储**：SQLite（笔记、记忆）+ JSON（会话、配置）
 - **OCR**：RapidOCR（ONNX Runtime，本地识别）
 - **调度**：APScheduler

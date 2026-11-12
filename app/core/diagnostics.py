@@ -46,7 +46,7 @@ def build_diagnostic(data):
     # for a useful diagnostic without pretending it can reproduce the task.
     allowed = {
         "trace": {"status", "turn_count", "duration_ms", "prompt_tokens", "completion_tokens", "total_tokens", "started_at"},
-        "llm_calls": {"seq", "provider", "model", "status", "latency_ms", "ttft_ms", "prompt_tokens", "completion_tokens", "cached_tokens", "total_tokens", "cost_usd", "retry_count", "pricing_source", "pricing_version"},
+        "llm_calls": {"seq", "provider", "model", "status", "latency_ms", "ttft_ms", "prompt_tokens", "completion_tokens", "cached_tokens", "total_tokens", "retry_count", "reported_cost_amount", "reported_cost_currency"},
         "tool_calls": {"name", "status", "error_type", "duration_ms"},
         "state_trace": {"seq", "state", "event", "duration_ms"},
         "security_events": {"tool_name", "risk", "decision"},

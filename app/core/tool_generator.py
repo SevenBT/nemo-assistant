@@ -18,9 +18,9 @@ from app.core.llm_gateway import CancellationToken, LLMGateway
 class ModelOverride:
     """Describes a specific model selection for tool generation.
 
-    api_type:  always "litellm" (the single entrypoint)
+    api_type:  legacy storage identifier; gateway resolves the HTTP protocol
     model_id:  model identifier (e.g. "gpt-4o", "claude-3-5-sonnet-20241022")
-    provider:  litellm provider (e.g. "anthropic", "openai")
+    provider:  provider profile (e.g. "anthropic", "openai")
     label:     human-readable display name
     """
     api_type: str
@@ -46,7 +46,9 @@ class _ConfigProxy:
 
     def get_litellm_model_by_id(self, model_id: str) -> dict | None:
         if model_id == self._override.model_id:
+            configured = next((m for m in cfg.get(cfg.litellmModels) if m.get('id') == model_id), {})
             return {
+                **configured,
                 "id": self._override.model_id,
                 "provider": self._override.provider,
                 "enabled": True,
@@ -61,7 +63,7 @@ def build_model_options() -> list[ModelOverride]:
     """Build the list of available model options from current config."""
     options: list[ModelOverride] = []
 
-    # LiteLLM enabled models
+    # Enabled configured models; preserve their endpoint/protocol on override.
     for m in cfg.get(cfg.litellmModels):
         if m.get("enabled"):
             options.append(ModelOverride(
@@ -206,10 +208,10 @@ def stream_generate(
         },
     ]
     gateway = LLMGateway(config_proxy=_ConfigProxy(model_override)) if model_override else LLMGateway()
-    yield from gateway.chat_stream(
-        messages,
-        cancel_token=cancel_token,
-    )
+    try:
+        yield from gateway.chat_stream(messages, cancel_token=cancel_token)
+    finally:
+        gateway.close()
 
 
 def parse_result(full_text: str) -> tuple[str, str, str]:

@@ -1,6 +1,8 @@
 """Regression coverage for screenshot pixels through intake, hooks and routing."""
 
 import copy
+import json
+import httpx
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -12,7 +14,8 @@ from app.core.agent_hooks import BeforeTurnContext, ConsolidatorHook
 from app.core.consolidator import Consolidator, _messages_to_text
 from app.core.context_manager import count_messages_tokens, message_to_token_text
 from app.core.conversation_prompt_builder import merge_attachments_to_content
-from app.core.llm_gateway import LLMRequest, LiteLLMAdapter
+from app.core.llm_gateway import LLMRequest
+from app.core.providers.adapter import HTTPProviderAdapter
 from app.i18n import t
 from app.models.attachment import Attachment
 from app.models.message import Message, MessageRole
@@ -21,7 +24,7 @@ from app.ui import attachment_intake
 
 def _request(messages, provider="deepseek", base_url=""):
     return LLMRequest(
-        trace_id="vision-test", attempt_id="vision-test", api_type="litellm",
+        trace_id="vision-test", attempt_id="vision-test", api_type="openai_chat",
         model="test-model", messages=messages, provider=provider,
         api_key="test-key", base_url=base_url,
     )
@@ -30,14 +33,17 @@ def _request(messages, provider="deepseek", base_url=""):
 def _capture_completion(monkeypatch):
     calls = []
 
-    def completion(**kwargs):
-        calls.append(copy.deepcopy(kwargs))
-        return iter(())
+    def handle(request):
+        calls.append(dict(json.loads(request.content), url=str(request.url), headers=request.headers))
+        return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
 
-    monkeypatch.setattr(
-        "app.core.litellm_loader.load_litellm",
-        lambda: SimpleNamespace(completion=completion),
-    )
+    def stream(request):
+        with_client = HTTPProviderAdapter(httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+        try:
+            return list(with_client.stream(request))
+        finally:
+            with_client.close()
+    monkeypatch.setattr(HTTPProviderAdapter, 'capture', staticmethod(stream), raising=False)
     return calls
 
 
@@ -54,12 +60,12 @@ def test_deepseek_images_use_transport_that_preserves_pixels(monkeypatch, base_u
     messages = [{"role": "user", "content": _image_content()}]
     original = copy.deepcopy(messages)
 
-    list(LiteLLMAdapter().stream(_request(messages, base_url=base_url)))
+    HTTPProviderAdapter.capture(_request(messages, base_url=base_url))
 
-    assert calls[0]["model"] == "openai/test-model"
-    assert calls[0]["api_base"] == (base_url or "https://api.deepseek.com/beta")
-    assert calls[0]["api_key"] == "test-key"
-    assert calls[0]["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert calls[0]["model"] == "test-model"
+    assert calls[0]["url"] == (base_url or "https://api.deepseek.com/beta") + "/chat/completions"
+    assert calls[0]["headers"]["authorization"] == "Bearer test-key"
+    assert calls[0]["thinking"] == {"type": "disabled"}
     assert calls[0]["messages"] == original
     assert messages == original
 
@@ -69,24 +75,24 @@ def test_text_requests_keep_existing_provider_routing(monkeypatch, provider):
     calls = _capture_completion(monkeypatch)
     messages = [{"role": "user", "content": "hello"}]
 
-    list(LiteLLMAdapter().stream(_request(messages, provider=provider)))
+    HTTPProviderAdapter.capture(_request(messages, provider=provider))
 
-    assert calls[0]["model"] == f"{provider}/test-model"
-    assert "api_base" not in calls[0]
+    assert calls[0]["model"] == "test-model"
+    assert calls[0]["url"].startswith("https://")
     if provider == "deepseek":
-        assert calls[0]["extra_body"] == {"thinking": {"type": "disabled"}}
+        assert calls[0]["thinking"] == {"type": "disabled"}
     else:
-        assert "extra_body" not in calls[0]
+        assert "thinking" not in calls[0]
 
 
 def test_other_vision_provider_keeps_existing_routing(monkeypatch):
     calls = _capture_completion(monkeypatch)
     messages = [{"role": "user", "content": _image_content()}]
 
-    list(LiteLLMAdapter().stream(_request(messages, provider="anthropic")))
+    HTTPProviderAdapter.capture(_request(messages, provider="anthropic"))
 
-    assert calls[0]["model"] == "anthropic/test-model"
-    assert calls[0]["messages"] == messages
+    assert calls[0]["model"] == "test-model"
+    assert calls[0]["messages"][0]["content"][1]["source"]["data"] == "pixels"
 
 
 def test_two_clipboard_images_survive_hooks_and_gateway(tmp_path, monkeypatch):
@@ -111,10 +117,10 @@ def test_two_clipboard_images_survive_hooks_and_gateway(tmp_path, monkeypatch):
         trace_id="vision-test", session_id="session-test", turn_count=0,
         messages=messages,
     )) is None
-    list(LiteLLMAdapter().stream(_request(messages)))
+    HTTPProviderAdapter.capture(_request(messages))
 
     assert messages == original
-    assert calls[0]["model"] == "openai/test-model"
+    assert calls[0]["model"] == "test-model"
     for index in (0, 2):
         part = calls[0]["messages"][index]["content"][-1]
         assert part["type"] == "image_url"

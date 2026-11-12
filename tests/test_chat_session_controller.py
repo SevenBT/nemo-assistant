@@ -460,6 +460,28 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.assertEqual(tool_calls[0].status, "success")
         bubble.add_tool_card.assert_not_called()
 
+    def test_signed_protocol_metadata_persists_across_tool_rounds(self):
+        self.controller.switch_session('s1')
+        self.input.take_pending_attachments.return_value = []
+        with patch('app.ui.chat_session_controller.AgentThread', FakeWorker):
+            self.controller.submit('hello')
+        worker = FakeWorker.instances[0]
+        signature = {'google': {'thought_signature': 'opaque'}}
+        state = {'protocol': 'responses', 'output': [{'type': 'reasoning', 'encrypted_content': 'encrypted'}]}
+        worker.tool_event.emit('', 'message', {'provider_state': state, 'reasoning_content': 'thought',
+                                             'tool_calls': [{'id': 'a', 'extra_content': signature}]})
+        worker.tool_event.emit('a', 'start', {'name': 'read_file', 'params': {'path': 'a'}})
+        worker.tool_event.emit('a', 'done', {'result': {'status': 'success'}})
+        first = self.sessions.session.messages[-1]
+        restored = Message.from_dict(first.to_dict())
+        self.assertEqual(restored.provider_state, state)
+        self.assertEqual(restored.reasoning_content, 'thought')
+        self.assertEqual(restored.tool_calls[0].extra_content, signature)
+        worker.new_turn.emit(1)
+        worker.tool_event.emit('', 'message', {'provider_state': {}, 'tool_calls': []})
+        self.assertEqual(first.provider_state, state)
+        self.assertEqual(self.sessions.session.messages[-1].provider_state, {})
+
     def test_tool_multiturn_does_not_overwrite_previous_messages(self):
         bubbles = []
 

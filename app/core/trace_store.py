@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.core.billing import normalize_provider_cost, validate_billing_url
 from app.core.runtime_paths import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ _MAX_FIELD_CHARS = 2000
 _DEFAULT_KEEP_TRACES = 2000
 
 # Schema 版本号：每次破坏性变更时递增
-_SCHEMA_VERSION = 3  # Runtime observations are independent of evaluation tables.
+_SCHEMA_VERSION = 4  # Provider charges are separate from historical estimates.
 
 
 def _now_iso() -> str:
@@ -219,7 +220,11 @@ class TraceStore:
                 if name not in columns:
                     conn.execute(f"ALTER TABLE traces ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0")
             columns = {r[1] for r in conn.execute("PRAGMA table_info(llm_calls)")}
-            for name, kind in [('attempt_id', 'TEXT'), ('pricing_source', 'TEXT'), ('pricing_version', 'TEXT')]:
+            for name, kind in [
+                ('attempt_id', 'TEXT'), ('pricing_source', 'TEXT'), ('pricing_version', 'TEXT'),
+                ('reported_cost_amount', 'REAL'), ('reported_cost_currency', 'TEXT'),
+                ('billing_url', 'TEXT'),
+            ]:
                 if name not in columns:
                     conn.execute(f"ALTER TABLE llm_calls ADD COLUMN {name} {kind}")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_attempt ON llm_calls(attempt_id) WHERE attempt_id IS NOT NULL")
@@ -345,31 +350,18 @@ class TraceStore:
             return
         usage = record.get("usage") or {}
 
-        # 计算成本
-        cost_usd = None
-        pricing_source = pricing_version = None
         provider = record.get("provider")
-        model = record.get("model")
-        if provider and model and usage:
-            try:
-                from app.core.cost_calculator import calculate_cost_from_usage, pricing_snapshot
-                cost_usd = calculate_cost_from_usage(
-                    provider=provider,
-                    model=model,
-                    usage=usage,
-                )
-                if cost_usd is not None:
-                    pricing_source, pricing_version = pricing_snapshot(provider, model)
-            except Exception as e:
-                logger.debug(f"[TraceStore] Cost calculation failed: {e}")
+        cost = normalize_provider_cost(record.get("provider_cost"))
 
         self._write(
             "INSERT OR IGNORE INTO llm_calls (trace_id, seq, api_type, provider, model, "
             "has_tools, input_message_count, ttft_ms, latency_ms, retry_count, "
             "status, error_type, error_kind, error_status_code, error_message, "
             "prompt_tokens, completion_tokens, total_tokens, cached_tokens, cost_usd, "
-            "created_at, attempt_id, pricing_source, pricing_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-            "?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "created_at, attempt_id, pricing_source, pricing_version, "
+            "reported_cost_amount, reported_cost_currency, billing_url) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 trace_id,
                 seq,
@@ -390,11 +382,14 @@ class TraceStore:
                 usage.get("completion_tokens"),
                 usage.get("total_tokens"),
                 usage.get("cached_tokens"),
-                cost_usd,
+                None,  # Legacy estimates remain readable, never generated again.
                 _now_iso(),
                 record.get("attempt_id"),
-                record.get("pricing_source") or pricing_source,
-                record.get("pricing_version") or pricing_version,
+                None,
+                None,
+                cost["amount"] if cost else None,
+                cost["currency"] if cost else None,
+                validate_billing_url(provider, record.get("billing_url")),
             ),
         )
 
@@ -601,10 +596,19 @@ class TraceStore:
 
     @staticmethod
     def summarize_cost(calls):
-        known = [c['cost_usd'] for c in calls if c.get('cost_usd') is not None]
-        return {"known_cost_usd": sum(known), "unknown_calls": len(calls) - len(known),
-                "complete": bool(calls) and len(known) == len(calls),
-                "scope": "Only LLM attempts linked to this trace; provider charges may differ."}
+        totals = {}
+        reported = 0
+        for call in calls:
+            cost = normalize_provider_cost({"amount": call.get("reported_cost_amount"),
+                                            "currency": call.get("reported_cost_currency")})
+            if cost is not None:
+                currency = cost["currency"]
+                totals[currency] = totals.get(currency, 0) + cost["amount"]
+                reported += 1
+        return {"reported_totals": totals, "reported_calls": reported,
+                "unknown_calls": len(calls) - reported,
+                "complete": bool(calls) and reported == len(calls),
+                "scope": "Provider-reported charges for linked attempts only; consult provider billing."}
 
     # ── 内部写入辅助 ────────────────────────────────────────────────────
 

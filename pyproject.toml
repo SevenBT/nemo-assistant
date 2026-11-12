@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "SevenBT" }]
-keywords = ["desktop-assistant", "pyqt6", "ai", "ocr", "markdown-notes", "litellm"]
+keywords = ["desktop-assistant", "pyqt6", "ai", "ocr", "markdown-notes"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Win32 (MS Windows)",
@@ -25,7 +25,6 @@ classifiers = [
 # 运行依赖：跑起来这个应用必须安装的包。
 dependencies = [
     "httpx>=0.25.0",
-    "litellm>=1.0.0",
     "tiktoken>=0.5.0",
 ]
 
@@ -36,7 +35,7 @@ Issues = "https://github.com/SevenBT/nemo-assistant/issues"
 
 [project.optional-dependencies]
 desktop = [
-    "PyQt6>=6.5.0", "pyqt6-fluent-widgets>=1.11.0", "openai>=1.0.0",
+    "PyQt6>=6.5.0", "pyqt6-fluent-widgets>=1.11.0",
     "APScheduler>=3.10.0", "beautifulsoup4>=4.12.0", "pyperclip>=1.8.2",
     "rapidocr-onnxruntime>=1.2.0,<1.5.0", "numpy>=1.24.0", "keyring>=24.0.0",
     "keyboard>=0.13.5", "mouse>=0.7.1", "uiautomation>=2.0.18; platform_system == 'Windows'",

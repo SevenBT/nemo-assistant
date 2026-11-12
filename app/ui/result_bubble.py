@@ -566,6 +566,12 @@ class ResultBubble(NonActivatingPopup):
 
     # ── 取消 / 清理 ────────────────────────────────────────────────────
 
+    def cleanup(self):
+        self.hide()
+        self._cancel_current()
+        self._click_watcher.remove()
+        self._llm_gateway.close()
+
     def _cancel_current(self):
         self._stream_generation += 1
         if self._cancel_token is not None:

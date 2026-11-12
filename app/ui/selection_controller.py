@@ -85,6 +85,10 @@ class SelectionController(QObject):
         self._popup_x = 0
         self._popup_y = 0
 
+    def cleanup(self):
+        self._popup.hide()
+        self._bubble.cleanup()
+
     # ── 触发入口 ────────────────────────────────────────────────────────
 
     def trigger_at_cursor(self):

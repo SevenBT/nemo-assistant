@@ -19,8 +19,6 @@ jobs:
     env:
       # PyQt 测试在无显示器的 CI 上运行，用离屏平台插件。
       QT_QPA_PLATFORM: offscreen
-      # litellm import 时会联网拉取价格表，用本地成本表禁用，避免 CI 卡在网络请求。
-      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
 
     steps:
       - uses: actions/checkout@v7
@@ -44,7 +42,6 @@ jobs:
   eval-offline:
     runs-on: ubuntu-latest
     env:
-      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

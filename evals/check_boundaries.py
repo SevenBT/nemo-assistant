@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-for name in ('PyQt6', 'qfluentwidgets', 'pytestqt', 'uiautomation', 'keyring'):
+for name in ('PyQt6', 'qfluentwidgets', 'pytestqt', 'uiautomation', 'keyring', 'litellm', 'openai', 'anthropic'):
     assert importlib.util.find_spec(name) is None, f'Desktop dependency installed: {name}'
 for folder, forbidden in ((ROOT / 'app', 'nemo_eval'), (ROOT / 'evals/src/nemo_eval', 'app')):
     for path in folder.rglob('*.py'):

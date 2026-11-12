@@ -638,6 +638,14 @@ class ChatSessionController(QObject):
         session = self._sessions.get(sid)
         live = self._session_live.get(sid)
         is_cancelling = sid in self._cancelling_sessions
+        if phase == "message":
+            if live and live.get("ai_msg"):
+                live["ai_msg"].provider_state = payload.get("provider_state") or {}
+                live["ai_msg"].reasoning_content = payload.get("reasoning_content")
+                live["provider_calls"] = {tc["id"]: tc.get("extra_content", {})
+                                          for tc in payload.get("tool_calls", [])}
+                self._sessions.save_session(sid)
+            return
         if phase == "start":
             tool_name = payload["name"]
             params = payload["params"]
@@ -647,6 +655,7 @@ class ChatSessionController(QObject):
                     name=tool_name,
                     arguments=params,
                     status="running",
+                    extra_content=live.get("provider_calls", {}).get(call_id, {}),
                 )
                 live["ai_msg"].tool_calls.append(tool_call)
                 if is_cancelling:
