@@ -12,6 +12,7 @@ shipped behavior — check each document's header.
 | [edge-snap-width-implementation](edge-snap-width-implementation.md) | Edge-snap implementation summary |
 | [file-upload-implementation](file-upload-implementation.md) | Drag-and-drop file upload implementation |
 | [memory-module-design](memory-module-design.md) | Long-term memory module design |
+| [memory-optimization-plan](memory-optimization-plan.md) | Runtime memory measurement and staged optimization proposal — not implemented |
 | [prd-model-settings](prd-model-settings.md) | Model settings & system prompt design |
 | [security-eval-guide](security-eval-guide.md) | Observability / security / eval walkthrough |
 | [evaluation-extraction-design](evaluation-extraction-design.md) | Evaluation extraction — implemented core, verification and supported scope |
