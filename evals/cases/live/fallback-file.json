@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "fallback-file",
+  "revision": 1,
+  "status": "reviewed",
+  "category": "recovery",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "读取 primary.txt；如果不存在就读取 fallback.txt，告诉我其中的恢复码。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "fallback.txt": "恢复码：RECOVERED-17"
+    },
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "file_path": "fallback.txt"
+          }
+        }
+      ]
+    },
+    "answer": {
+      "contains": [
+        "RECOVERED-17"
+      ]
+    }
+  },
+  "limits": {
+    "deadline_seconds": 90,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

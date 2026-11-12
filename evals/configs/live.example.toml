@@ -9,5 +9,5 @@ temperature = 0.0
 max_attempts = 1
 
 [budget]
-max_model_calls = 20
-max_output_tokens = 20480
+max_model_calls = 300
+max_output_tokens = 307200

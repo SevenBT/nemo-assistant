@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "plain-answer",
+  "revision": 1,
+  "status": "reviewed",
+  "category": "conversation",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "6乘7等于多少？只回答数字，不要使用工具。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {},
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "no_tools": true
+    },
+    "answer": {
+      "equals": "42"
+    }
+  },
+  "limits": {
+    "deadline_seconds": 90,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

@@ -189,10 +189,11 @@ def test_rejudging_uses_independent_profile_and_keeps_execution_unchanged(tmp_pa
 
 
 def test_comparison_requires_declared_model_changes(tmp_path):
-    case = next(c for c in cases() if c["id"] == "no-tool-answer")
+    from nemo_eval.suites import select_suite
+    case = next(c for c in select_suite("live-smoke").cases if c["id"] == "plain-answer")
     executor = lambda _: {"execution_status": "completed", "answer": "42", "evidence_complete": True}
     for name in ("a", "b"):
         run([case], tmp_path / name, mode="live", config={"target": {"model": name, "api_key_env": "TEST_TARGET"}}, executor=executor)
     with pytest.raises(ValueError, match="config_hash"):
-        compare(tmp_path / "a", tmp_path / "b")
+        compare(tmp_path / "a", tmp_path / "b", change="prompt")
     assert compare(tmp_path / "a", tmp_path / "b", allow_changes=["target.model"])[0]["changed_conditions"][0]["dimension"] == "target.model"

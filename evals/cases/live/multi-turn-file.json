@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "id": "multi-turn-file",
+  "revision": 1,
+  "status": "reviewed",
+  "category": "multi-turn",
+  "priority": "critical",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "读取 plan.txt 并记住计划内容。"
+      },
+      {
+        "id": "step-2",
+        "user": "将刚才的计划另存为 revised.txt，日期改为 2026-11-20，保留负责人和原文件。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "plan.txt": "日期：2026-11-12\n负责人：甲\n"
+    },
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "read_file",
+          "step": "step-1"
+        },
+        {
+          "name": "save_file",
+          "step": "step-2"
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "revised.txt",
+        "check": "text_equals",
+        "expected": "日期：2026-11-20\n负责人：甲\n"
+      },
+      {
+        "path": "plan.txt",
+        "check": "text_equals",
+        "expected": "日期：2026-11-12\n负责人：甲\n"
+      }
+    ]
+  },
+  "limits": {
+    "deadline_seconds": 90,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

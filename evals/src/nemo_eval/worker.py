@@ -25,7 +25,7 @@ def main():
     from nemo_eval.adapters.nemo import execute
     from nemo_eval.artifacts import write_json
     with tempfile.TemporaryDirectory(prefix="nemo-eval-") as directory:
-        result = execute(payload["case"], Path(directory), payload["mode"], payload.get("config"))
+        result = execute(payload["case"], Path(directory), payload["mode"], payload.get("config"), payload.get("variant"))
         write_json(Path(sys.argv[2]), result)
 
 

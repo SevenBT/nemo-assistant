@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "json-answer",
+  "revision": 1,
+  "status": "reviewed",
+  "category": "conversation",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "不要调用工具。只输出 JSON 对象，name 为 nemo，count 为整数 3，不要代码围栏。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {},
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "no_tools": true
+    },
+    "answer": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "const": "nemo"
+          },
+          "count": {
+            "type": "integer",
+            "const": 3
+          }
+        },
+        "required": [
+          "name",
+          "count"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "limits": {
+    "deadline_seconds": 90,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

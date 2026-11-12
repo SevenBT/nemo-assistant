@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "save-file",
+  "revision": 1,
+  "status": "reviewed",
+  "category": "files",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "创建 result.txt，内容必须为以下文本，不要添加其他内容：\n评估成功"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {},
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "save_file"
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "result.txt",
+        "check": "text_equals",
+        "expected": "评估成功"
+      }
+    ]
+  },
+  "limits": {
+    "deadline_seconds": 90,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "id": "read-fact",
+  "revision": 1,
+  "status": "reviewed",
+  "category": "files",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "读取 plan.txt，告诉我负责人和日期。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "plan.txt": "日期：2026-11-12\n负责人：甲\n"
+    },
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "file_path": "plan.txt"
+          }
+        }
+      ]
+    },
+    "answer": {
+      "contains": [
+        "甲",
+        "2026-11-12"
+      ]
+    }
+  },
+  "limits": {
+    "deadline_seconds": 90,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

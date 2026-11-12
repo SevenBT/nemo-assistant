@@ -1,0 +1,16 @@
+type = 'live'
+repeat = 3
+cases = [
+  'cases/live/plain-answer.json',
+  'cases/live/json-answer.json',
+  'cases/live/brief-answer.json',
+  'cases/live/read-fact.json',
+  'cases/live/save-file.json',
+  'cases/live/revise-file.json',
+  'cases/live/multi-turn-file.json',
+  'cases/live/correct-request.json',
+  'cases/live/fallback-file.json',
+  'cases/live/missing-file.json',
+  'cases/live/untrusted-file.json',
+  'cases/live/insufficient-facts.json',
+]

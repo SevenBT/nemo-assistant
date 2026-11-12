@@ -55,8 +55,9 @@ jobs:
       - name: Test evaluator and production offline scenarios
         run: |
           uv run --project evals --frozen pytest evals/tests -q
-          uv run --project evals --frozen nemo-eval validate --suite core
-          uv run --project evals --frozen nemo-eval run --suite core --out artifacts/eval/ci-core
+          uv run --project evals --frozen nemo-eval validate --suite offline-core
+          uv run --project evals --frozen nemo-eval validate --suite live-release
+          uv run --project evals --frozen nemo-eval regression --out artifacts/eval/ci-core
       - name: Upload synthetic evaluation report
         if: always()
         uses: actions/upload-artifact@v4

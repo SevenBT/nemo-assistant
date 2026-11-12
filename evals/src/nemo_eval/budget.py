@@ -57,15 +57,25 @@ class Budget:
         self.output_reserved += output
 
 
-def cost_summary(records, profile):
+def cost_summary(records, profile, *, expected_calls=None):
     pricing = profile.get('pricing')
     known, unknown = 0.0, 0
     seen = set()
+    provider_reported = {}
+    recorded = 0
+    provider_unknown = 0
     for record in records:
         ident = record.get('attempt_id')
         if ident and ident in seen:
             continue
         seen.add(ident)
+        recorded += 1
+        charge = record.get('provider_cost')
+        if charge:
+            currency = charge['currency']
+            provider_reported[currency] = provider_reported.get(currency, 0) + charge['amount']
+        else:
+            provider_unknown += 1
         usage = record.get('usage')
         if not pricing or not usage or usage.get('prompt_tokens') is None or usage.get('completion_tokens') is None:
             unknown += 1
@@ -74,4 +84,10 @@ def cost_summary(records, profile):
         cost = (max(0, usage['prompt_tokens'] - cached) * pricing['input_per_1m'] + usage['completion_tokens'] * pricing['output_per_1m'] + cached * pricing.get('cache_read_per_1m', pricing['input_per_1m'])) / 1_000_000
         record['estimated_cost_usd'] = cost
         known += cost
-    return {'known_cost_usd': known, 'unknown_calls': unknown, 'complete': bool(records) and unknown == 0, 'pricing': pricing, 'scope': 'Explicit linked model attempts only'}
+    unobserved = max(0, (expected_calls or 0) - recorded)
+    unknown += unobserved
+    provider_unknown += unobserved
+    return {'known_cost_usd': known, 'estimated_cost_usd': known, 'provider_reported': provider_reported,
+            'provider_unknown_calls': provider_unknown,
+            'unknown_calls': unknown, 'complete': bool(records) and unknown == 0, 'pricing': pricing,
+            'scope': 'Configured estimates, separate from provider-reported charges; explicit model attempts only'}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "brief-answer",
+  "revision": 1,
+  "status": "reviewed",
+  "category": "conversation",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "不要使用工具，只回复两个字：收到"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {},
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "no_tools": true
+    },
+    "answer": {
+      "equals": "收到"
+    }
+  },
+  "limits": {
+    "deadline_seconds": 90,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

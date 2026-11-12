@@ -53,3 +53,5 @@ nanobot/**
 work/
 
 /artifacts/
+/evals/configs/live.toml
+/evals/configs/judge.toml

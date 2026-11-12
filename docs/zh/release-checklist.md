@@ -42,6 +42,9 @@
 
 ## 源码发布
 
+- 运行 `uv run --project evals --frozen nemo-eval regression` 完成离线链路回归。
+- 系统提示词或 Agent 行为变化时，配置后运行 `uv run --project evals --frozen nemo-eval evaluate`；它会自动完成真实模型任务、必要的 Judge 和最终报告。需要对比时附加基线和变化类型，详见[维护者评估指南](agent-evaluation.md)。评估报告由维护者复核，不自动阻止发布。
+
 - 运行 `uv sync --extra desktop --extra dev --frozen`。
 - 运行 `uv run python scripts/check_repo.py`。
 - 运行 `uv run python -m pytest -q`。

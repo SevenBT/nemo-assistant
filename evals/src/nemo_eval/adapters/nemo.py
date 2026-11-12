@@ -68,7 +68,14 @@ def make_live_gateway(profile, logger):
     ), logger=logger, retry_policy=RetryPolicy(max_attempts=profile.get("max_attempts", 1)))
 
 
-def execute(case, workdir: Path, mode="offline", config=None):
+def default_prompt(language="zh"):
+    from app.i18n import init_language
+    from app.core.constants import get_default_user_prompt
+    init_language(language)
+    return get_default_user_prompt()
+
+
+def execute(case, workdir: Path, mode="offline", config=None, variant=None):
     from app.core.agent import Agent
     from app.core.agent_context import AgentContext
     from app.core.agent_interface import AgentCallbacks
@@ -114,10 +121,11 @@ def execute(case, workdir: Path, mode="offline", config=None):
                 yield from live_gateway.chat_stream(messages, tools=tools, **kwargs, stream_timeout=config["target"].get("timeout_seconds", 60))
         gateway = BudgetedGateway()
 
-    sessions = SimpleNamespace(get=lambda _: SimpleNamespace(system_prompt=fixture.get("system_prompt", "")))
+    prompt_text = variant["text"] if variant else fixture.get("system_prompt", "")
+    sessions = SimpleNamespace(get=lambda _: SimpleNamespace(system_prompt=prompt_text))
     memory = SimpleNamespace(build_memory_context=lambda _: "\n".join(fixture.get("memory", [])))
     builder = ConversationPromptBuilder(
-        sessions, memory, config=PromptConfig(fixture.get("system_prompt", "")),
+        sessions, memory, config=PromptConfig(prompt_text),
         datetime_info_provider=lambda: fixture.get("clock", "2026-11-09T09:00:00+08:00"),
         time_hint_provider=lambda: "", enabled_tools_provider=lambda: registry.tool_names,
         vision_enabled_provider=lambda: False,
@@ -201,5 +209,5 @@ def execute(case, workdir: Path, mode="offline", config=None):
             evidence_complete = False
     return {"execution_status": status, "error": error, "answer": answer, "tool_calls": calls,
             "events": events, "steps": step_results, "requests": requests, "model_requests": gateway.requests, "artifacts": artifacts,
-            "llm_calls": llm_calls, "cost": cost_summary(llm_calls, config.get("target", {})), "model_calls": budget.calls, "output_reserved": budget.output_reserved, "evidence_complete": evidence_complete,
+            "llm_calls": llm_calls, "cost": cost_summary(llm_calls, config.get("target", {}), expected_calls=budget.calls), "model_calls": budget.calls, "output_reserved": budget.output_reserved, "evidence_complete": evidence_complete,
             "expected_statuses": case["expectations"].get("execution_statuses", ["completed"])}
