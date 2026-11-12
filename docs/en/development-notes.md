@@ -17,6 +17,12 @@ These notes capture implementation trade-offs that are useful for contributors. 
 - The clipboard fallback injects `Ctrl+C`, then restores the previous clipboard content.
 - During development, global `Ctrl+C` can accidentally reach the launching terminal, so the capture layer handles `KeyboardInterrupt` and keeps the app alive.
 
+## LLM Startup Warmup
+
+- After the main window appears, a 500 ms timer starts a background LiteLLM import. This moves SDK initialization off the first selection or chat request without blocking the UI.
+- Warmup and early requests share the loader's lock and module cache. Import failures remain retryable on demand.
+- This only preloads the local SDK; it does not call a model, read API keys, or warm provider connections. DNS/TLS and server latency may still affect the first real request. The loader uses the bundled model cost map by default.
+
 ## Theming
 
 - FluentWindow may reapply internal styles after widgets are constructed.

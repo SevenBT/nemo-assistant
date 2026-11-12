@@ -2,6 +2,7 @@
 import importlib
 import os
 import sys
+import threading
 import unittest
 from unittest import mock
 
@@ -12,6 +13,8 @@ from app.core.litellm_loader import LiteLLMUnavailableError, load_litellm
 class LiteLLMLoaderTest(unittest.TestCase):
     def setUp(self):
         # 每个用例前清缓存，保证独立
+        previous = litellm_loader._litellm
+        self.addCleanup(setattr, litellm_loader, "_litellm", previous)
         litellm_loader._litellm = None
 
     def test_sets_local_cost_map_env_before_import(self):
@@ -62,6 +65,56 @@ class LiteLLMLoaderTest(unittest.TestCase):
         ):
             second = load_litellm()
         self.assertIs(first, second)
+
+    def test_warmup_is_nonblocking_and_shared_with_early_request(self):
+        started = threading.Event()
+        release = threading.Event()
+        sentinel = object()
+        results = []
+
+        def slow_import():
+            started.set()
+            self.assertTrue(release.wait(3))
+            litellm_loader._litellm = sentinel
+            return sentinel
+
+        with mock.patch.object(litellm_loader, "_import_litellm", side_effect=slow_import) as importer:
+            self.assertTrue(litellm_loader.warm_litellm_async())
+            warmup = litellm_loader._warmup_thread
+            request = threading.Thread(target=lambda: results.append(load_litellm()))
+            try:
+                self.assertTrue(started.wait(1))
+                self.assertTrue(warmup.is_alive())
+                self.assertFalse(litellm_loader.warm_litellm_async())
+                request.start()
+            finally:
+                release.set()
+                warmup.join(3)
+                if request.ident is not None:
+                    request.join(3)
+            self.assertFalse(warmup.is_alive())
+            self.assertFalse(request.is_alive())
+            importer.assert_called_once_with()
+        self.assertEqual(results, [sentinel])
+        self.assertFalse(litellm_loader.warm_litellm_async())
+
+    def test_failed_warmup_leaves_request_retryable(self):
+        with mock.patch.object(
+            litellm_loader, "_import_litellm",
+            side_effect=LiteLLMUnavailableError("temporarily unavailable"),
+        ):
+            self.assertTrue(litellm_loader.warm_litellm_async())
+            litellm_loader._warmup_thread.join(3)
+            self.assertFalse(litellm_loader._warmup_thread.is_alive())
+        self.assertIsNone(litellm_loader._litellm)
+        sentinel = object()
+        with mock.patch.object(litellm_loader, "_import_litellm", return_value=sentinel):
+            self.assertIs(load_litellm(), sentinel)
+
+    def test_thread_start_failure_does_not_break_startup(self):
+        with mock.patch.object(threading.Thread, "start", side_effect=RuntimeError("failed")):
+            self.assertFalse(litellm_loader.warm_litellm_async())
+        self.assertIsNone(litellm_loader._warmup_thread)
 
 
 if __name__ == "__main__":
