@@ -90,6 +90,20 @@ def test_gateway_retries_retryable_error_before_streaming():
     assert events == [{"type": "text", "delta": "ok"}, {"type": "done"}]
 
 
+def test_gateway_records_each_retry_once_with_usage(tmp_path):
+    adapter = ScriptedAdapter([
+        [{"type": "error", "message": "busy", "status_code": 429, "usage": {"prompt_tokens": 2, "completion_tokens": 0}}],
+        [{"type": "done", "usage": {"prompt_tokens": 3, "completion_tokens": 1}}],
+    ])
+    path = tmp_path / "attempts.jsonl"
+    gateway = LLMGateway(config_proxy=StaticConfig(), adapters={"litellm": adapter},
+                         retry_policy=RetryPolicy(max_attempts=2, sleep=lambda _: None), logger=GatewayLogger(path))
+    list(gateway.chat_stream([{"role": "user", "content": "hi"}]))
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == len({r["attempt_id"] for r in rows}) == 2
+    assert [r["usage"]["prompt_tokens"] for r in rows] == [2, 3]
+
+
 def test_gateway_does_not_retry_after_text_was_streamed():
     adapter = ScriptedAdapter([
         [

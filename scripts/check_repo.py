@@ -30,6 +30,7 @@ SKIP_DIRS = {
     "logs",
     "work",
     ".pytest_cache",
+    "artifacts",
 }
 SKIP_FILES = {
     Path("config/app_config.json"),

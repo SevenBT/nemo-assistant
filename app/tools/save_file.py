@@ -24,9 +24,10 @@ if TYPE_CHECKING:
 class SaveFileTool(BuiltinTool):
     """本地文件保存工具。"""
 
-    def __init__(self, save_dir: str = ""):
+    def __init__(self, save_dir: str = "", *, open_folder: bool = True):
         # 用户配置的保存目录，为空则使用 ~/Downloads
         self._save_dir = save_dir
+        self._open_folder = open_folder
 
     @classmethod
     def create(cls, ctx: "ToolContext") -> "SaveFileTool":
@@ -79,7 +80,8 @@ class SaveFileTool(BuiltinTool):
 
         # 保存后打开所在目录（仅 Windows）
         try:
-            os.startfile(str(target_dir))
+            if self._open_folder:
+                os.startfile(str(target_dir))
         except Exception:
             pass  # 非 Windows 平台或权限问题，静默忽略
 

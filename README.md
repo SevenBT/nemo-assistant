@@ -112,16 +112,14 @@ In a conversation, the assistant can summarize the tools it has available and pu
 
 ### 🧠 Observable Agent Runs
 
-Nemo Assistant records the execution chain for each conversation turn, making debugging, evaluation, and review easier:
+Nemo Assistant records the execution chain for each conversation turn, making debugging and review easier:
 
-- LLM latency, token usage, and input/output statistics.
+- LLM latency, token usage, and estimated costs with unknown amounts identified.
 - Tool call records.
 - Security audit details.
-- Eval samples that can be saved as test cases.
+- Editable, redacted diagnostic export with a preview before saving.
 
-<p align="center">
-  <img src="assets/screenshots/traces.png" alt="Traces and evaluation" width="760">
-</p>
+Developer regression testing lives in the independent [evaluation package](evals/README.md), with a headless offline CI suite and opt-in live-model/Judge commands.
 
 ---
 
@@ -172,21 +170,21 @@ Requires Python 3.12+.
 ```bash
 git clone https://github.com/SevenBT/nemo-assistant.git
 cd nemo-assistant
-pip install .
+pip install ".[desktop]"
 python main.py
 ```
 
 For development:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[desktop,dev]"
 python main.py
 ```
 
 For reproducible development with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv sync --extra dev
+uv sync --extra desktop --extra dev
 uv run pytest -q
 uv run python main.py
 ```

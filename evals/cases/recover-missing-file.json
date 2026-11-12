@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "id": "recover-missing-file",
+  "revision": 1,
+  "status": "reviewed",
+  "suites": [
+    "core"
+  ],
+  "input": {
+    "mode": "snapshot",
+    "messages": [
+      {
+        "role": "user",
+        "content": "读取 missing.txt，如果不存在则读取 fallback.txt。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "fallback.txt": "recovered"
+    },
+    "model_script": [
+      [
+        {
+          "type": "tool_call",
+          "id": "c1",
+          "name": "read_file",
+          "arguments": {
+            "file_path": "missing.txt"
+          }
+        },
+        {
+          "type": "done"
+        }
+      ],
+      [
+        {
+          "type": "tool_call",
+          "id": "c2",
+          "name": "read_file",
+          "arguments": {
+            "file_path": "fallback.txt"
+          }
+        },
+        {
+          "type": "done"
+        }
+      ],
+      [
+        {
+          "type": "text",
+          "delta": "recovered"
+        },
+        {
+          "type": "done"
+        }
+      ]
+    ]
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "read_file",
+          "outcome": "error",
+          "arguments": {
+            "file_path": "missing.txt"
+          }
+        },
+        {
+          "name": "read_file",
+          "outcome": "success",
+          "arguments": {
+            "file_path": "fallback.txt"
+          }
+        }
+      ]
+    },
+    "answer": {
+      "contains": [
+        "recovered"
+      ]
+    }
+  },
+  "limits": {
+    "deadline_seconds": 30,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

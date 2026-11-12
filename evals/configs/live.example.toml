@@ -1,0 +1,13 @@
+language = 'zh'
+
+[target]
+model = 'REPLACE_WITH_MODEL_ID'
+provider = 'openai'
+api_key_env = 'NEMO_EVAL_TARGET_API_KEY'
+max_tokens = 1024
+temperature = 0.0
+max_attempts = 1
+
+[budget]
+max_model_calls = 20
+max_output_tokens = 20480

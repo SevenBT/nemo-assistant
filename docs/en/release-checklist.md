@@ -47,7 +47,7 @@ prepare a new patch version instead.
 
 ## Source Release
 
-- Run `uv sync --extra dev --frozen`.
+- Run `uv sync --extra desktop --extra dev --frozen`.
 - Run `uv run python scripts/check_repo.py`.
 - Run `uv run python -m pytest -q`.
 - Confirm `git status --short` contains only intended release changes.
@@ -56,7 +56,7 @@ prepare a new patch version instead.
 ## Windows Binary Release
 
 - Start from a clean or disposable `dist/` directory.
-- Run `uv sync --extra build --frozen`.
+- Run `uv sync --extra desktop --extra build --frozen`.
 - Run `uv run python -m PyInstaller --clean --noconfirm Nemo_Assistant.spec`.
 - Confirm `dist/Nemo Assistant.exe` exists.
 - Launch the executable once on Windows and verify the main window opens.

@@ -1,11 +1,11 @@
-"""具体 Agent Hook 实现 —— 安全审计与评测埋点。
+"""具体 Agent Hook 实现 —— 安全审计与运行观测。
 
 与 agent_hooks.py 的分工：
     agent_hooks.py 提供机制（AgentHook 基类、裁决类型、组合器）。
     本文件提供策略（挂在扩展点上的两个实际 hook），把数据落到 TraceStore
-    的 security_events / eval_samples 表，供离线安全审计与评测打分。
+    的 security_events / iteration_records 表，供运行回放与安全审计。
 
-两个 hook 都 reraise=False —— 审计/评测「坏了也不该拖垮对话」，异常被
+两个 hook 都 reraise=False —— 审计/观测「坏了也不该拖垮对话」，异常被
 CompositeHook 吞掉并 log。安全 hook 默认只审计不拦截（记录所有高风险工具
 调用），但保留软拒绝通道：blocked_tools 里的工具会被 reject，复用 AgentLoop
 已建好的软拒绝回灌机制。
@@ -99,12 +99,11 @@ class SecurityAuditHook(AgentHook):
             logger.debug("[SecurityAuditHook] record failed", exc_info=True)
 
 
-class EvalHook(AgentHook):
-    """评测埋点 hook —— 每轮迭代结束后采集评测样本。
+class IterationTraceHook(AgentHook):
+    """运行观测 hook —— 每轮迭代结束后采集运行记录。
 
-    把这一轮的最终答复文本 + 工具/错误计数落入 eval_samples 表，scores 列留空
-    待离线打分。AgentLoop 在纯文本收尾轮、工具轮、错误轮均会触发 after_iteration，
-    故最终答复（评测最关心的）必被采集。
+    把这一轮的最终答复文本 + 工具/错误计数落入 iteration_records 表，记录不包含评分。AgentLoop 在纯文本收尾轮、工具轮、错误轮均会触发 after_iteration，
+    故最终答复必被采集。
     """
 
     def __init__(self, trace_store=None):
@@ -118,7 +117,7 @@ class EvalHook(AgentHook):
             if isinstance(r, dict) and r.get("status") == "error"
         )
         try:
-            self._trace_store.record_eval_sample(
+            self._trace_store.record_iteration(
                 ctx.trace_id,
                 turn=ctx.turn_count,
                 answer=ctx.full_text or None,
@@ -127,4 +126,4 @@ class EvalHook(AgentHook):
                 had_error=bool(ctx.error),
             )
         except Exception:
-            logger.debug("[EvalHook] record failed", exc_info=True)
+            logger.debug("[IterationTraceHook] record failed", exc_info=True)

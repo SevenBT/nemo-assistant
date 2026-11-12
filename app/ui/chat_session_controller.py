@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.agent_hooks import ConsolidatorHook
 from app.core.agent_thread import AgentThread
-from app.core.audit_hooks import EvalHook, SecurityAuditHook
+from app.core.audit_hooks import IterationTraceHook, SecurityAuditHook
 from app.core.config import cfg
 from app.i18n import t, all_translations
 from app.models.message import Message, MessageRole, ToolCall
@@ -514,9 +514,9 @@ class ChatSessionController(QObject):
         return None
 
     def _build_hooks(self) -> list:
-        """构建本次 turn 的生命周期 hook（对话压缩 + 安全审计 + 评测埋点）。
+        """构建本次 turn 的生命周期 hook（对话压缩 + 安全审计 + 运行观测）。
 
-        trace_store 为 None（遥测禁用）时不挂安全/评测 hook，省去无意义开销。
+        trace_store 为 None（遥测禁用）时不挂安全/观测 hook，省去无意义开销。
         安全 hook 默认只审计不拦截；后续若要按工具开关拦截，传 blocked_tools。
         ConsolidatorHook 独立于 trace_store，有 consolidator 就挂。
         """
@@ -524,7 +524,7 @@ class ChatSessionController(QObject):
         if self._trace_store is not None:
             hooks.extend([
                 SecurityAuditHook(self._trace_store),
-                EvalHook(self._trace_store),
+                IterationTraceHook(self._trace_store),
             ])
         if self._consolidator is not None:
             hooks.append(ConsolidatorHook(self._consolidator))

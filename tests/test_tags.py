@@ -12,10 +12,10 @@ from app.core.note_manager import NoteManager
 from app.core.db_manager import DatabaseManager
 
 
-def test_tag_functions():
+def test_tag_functions(tmp_path):
     """测试标签相关功能。"""
     print("初始化数据库...")
-    db = DatabaseManager()
+    db = DatabaseManager(tmp_path / "notes.db")
     mgr = NoteManager(db)
 
     print("\n1. 创建测试笔记...")
@@ -64,4 +64,6 @@ def test_tag_functions():
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    test_tag_functions()
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        test_tag_functions(Path(directory))

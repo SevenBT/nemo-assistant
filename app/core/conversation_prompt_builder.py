@@ -4,7 +4,6 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from app.core.config import cfg
 from app.core.constants import (
     get_builtin_tools_instruction,
     get_default_user_prompt,
@@ -22,14 +21,19 @@ class ConversationPromptBuilder:
         self,
         session_mgr,
         memory_mgr=None,
-        config=cfg,
+        config=None,
         datetime_info_provider: Callable[[], str] = get_current_datetime_info,
         time_hint_provider: Callable[[], str] = get_current_time_hint,
         enabled_tools_provider: Callable[[], list[str]] | None = None,
+        vision_enabled_provider: Callable[[], bool] | None = None,
     ):
         self._sessions = session_mgr
         self._memory_mgr = memory_mgr
+        if config is None:
+            from app.core.config import cfg
+            config = cfg
         self._config = config
+        self._vision_enabled_provider = vision_enabled_provider
         self._datetime_info_provider = datetime_info_provider
         self._time_hint_provider = time_hint_provider
         # 返回当前已启用工具名列表；None 表示不做过滤（拼全部工具说明）。
@@ -67,16 +71,15 @@ class ConversationPromptBuilder:
         name heuristic on the LiteLLM default model. Fails safe to False
         (text-only) if config can't be resolved.
         """
-        from app.core.config import current_vision_enabled
-        import logging
-        logger = logging.getLogger(__name__)
-
+        if self._vision_enabled_provider is not None:
+            return bool(self._vision_enabled_provider())
         try:
-            enabled = current_vision_enabled()
-            logger.info(f"[PromptBuilder] vision_enabled={enabled}, model={self._config.get(self._config.litellmDefaultModel)}")
-            return enabled
-        except (AttributeError, KeyError) as e:
-            logger.warning(f"[PromptBuilder] vision check failed: {e}")
+            setting = self._config.get(self._config.visionSupport)
+            if setting != "auto":
+                return setting == "on"
+            from app.core.model_capabilities import model_supports_vision
+            return model_supports_vision(self._config.get(self._config.litellmDefaultModel))
+        except (AttributeError, KeyError):
             return False
 
     def _build_system_prompt(self, session_id: str | None) -> str:

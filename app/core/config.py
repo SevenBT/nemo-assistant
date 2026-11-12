@@ -29,56 +29,13 @@ from qfluentwidgets import (
 
 # ── Path constants ────────────────────────────────────────────────────
 
-if getattr(sys, "frozen", False):
-    # Writable data (config/, data/) lives next to the executable.
-    BASE_DIR = Path(sys.executable).parent
-    # Bundled read-only resources (tools/, assets/) are unpacked by the
-    # PyInstaller bootloader. In onefile mode that is the _MEIPASS temp dir;
-    # in onedir mode it falls back to the executable's directory.
-    BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR))
-    # 可写数据（config/、data/）放在可执行文件旁边；
-    # 打包的只读资源（tools/、assets/）由 PyInstaller 引导器解压：
-    # onefile 模式下在 _MEIPASS 临时目录，onedir 模式回退到 exe 同级目录。
-else:
-    BASE_DIR = Path(__file__).parent.parent.parent
-    BUNDLE_DIR = BASE_DIR
-
-CONFIG_DIR = BASE_DIR / "config"
-DATA_DIR = BASE_DIR / "data"
-SESSIONS_DIR = DATA_DIR / "sessions"
-NOTES_DIR = DATA_DIR / "notes"
-NOTES_IMAGES_DIR = NOTES_DIR / "images"
-TRASH_DIR = NOTES_DIR / "trash"
-SCREENSHOTS_DIR = DATA_DIR / "screenshots"
-TOOLS_DIR = BUNDLE_DIR / "tools"
-ASSETS_DIR = BUNDLE_DIR / "assets"
-USER_TOOLS_DIR = DATA_DIR / "user_tools"
-TOOL_RUNTIME_DIR = DATA_DIR / "tool_runtime"
-TOOL_SITE_PACKAGES = TOOL_RUNTIME_DIR / "site-packages"
-TOOL_BUILDS_DIR = DATA_DIR / "tool_builds"
+from app.core.runtime_paths import (BASE_DIR, BUNDLE_DIR, CONFIG_DIR, DATA_DIR, SESSIONS_DIR,
+    NOTES_DIR, NOTES_IMAGES_DIR, TRASH_DIR, SCREENSHOTS_DIR, TOOLS_DIR, ASSETS_DIR,
+    USER_TOOLS_DIR, TOOL_RUNTIME_DIR, TOOL_SITE_PACKAGES, TOOL_BUILDS_DIR)
 
 # ── Model metadata ────────────────────────────────────────────────────
 
-# Substrings that mark a model name as vision-capable.
-# Used only for the "auto" heuristic; users can override via visionSupport.
-_VISION_MODEL_MARKERS = (
-    "gpt-4o", "gpt-4.1", "gpt-4-turbo", "gpt-4-vision", "gpt-5",
-    "o1", "o3", "o4",
-    "claude-3", "claude-4", "claude-opus", "claude-sonnet", "claude-haiku",
-    "claude-fable", "claude-mythos", "claude-sonnet-5", "claude-haiku-5",
-    "gemini",
-    "deepseek",
-    "vl", "vision", "llava", "qwen-vl", "qwen2-vl", "qwen2.5-vl", "qwen3",
-    "pixtral", "internvl", "minicpm-v", "glm-4v", "glm-5v", "step-1v",
-)
-
-
-def model_supports_vision(model: str) -> bool:
-    """Heuristic: does this OpenAI-compatible model name imply image input?"""
-    name = (model or "").strip().lower()
-    if not name:
-        return False
-    return any(marker in name for marker in _VISION_MODEL_MARKERS)
+from app.core.model_capabilities import model_supports_vision
 
 
 def current_vision_enabled() -> bool:

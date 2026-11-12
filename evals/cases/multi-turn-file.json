@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "id": "multi-turn-file",
+  "revision": 1,
+  "status": "reviewed",
+  "suites": [
+    "core"
+  ],
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "read",
+        "user": "读取 plan.txt 并记住负责人。"
+      },
+      {
+        "id": "save",
+        "user": "将刚才的计划另存为 revised.txt，将日期改为 2026-11-10，保留负责人。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "plan.txt": "日期：2026-11-09\n负责人：甲\n"
+    },
+    "clock": "2026-11-09T09:00:00+08:00",
+    "model_script": [
+      [
+        {
+          "type": "tool_call",
+          "id": "c1",
+          "name": "read_file",
+          "arguments": {
+            "file_path": "plan.txt"
+          }
+        },
+        {
+          "type": "done"
+        }
+      ],
+      [
+        {
+          "type": "text",
+          "delta": "负责人是甲，日期是 2026-11-09。"
+        },
+        {
+          "type": "done"
+        }
+      ],
+      {
+        "request_contains": [
+          "负责人是甲",
+          "tool_call_id",
+          "plan.txt"
+        ],
+        "events": [
+          {
+            "type": "tool_call",
+            "id": "c2",
+            "name": "save_file",
+            "arguments": {
+              "filename": "revised.txt",
+              "content": "日期：2026-11-10\n负责人：甲\n"
+            }
+          },
+          {
+            "type": "done"
+          }
+        ]
+      },
+      [
+        {
+          "type": "text",
+          "delta": "已另存，负责人保持不变。"
+        },
+        {
+          "type": "done"
+        }
+      ]
+    ]
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "read_file",
+          "step": "read"
+        },
+        {
+          "name": "save_file",
+          "step": "save"
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "revised.txt",
+        "check": "text_equals",
+        "expected": "日期：2026-11-10\n负责人：甲\n"
+      },
+      {
+        "path": "plan.txt",
+        "check": "text_equals",
+        "expected": "日期：2026-11-09\n负责人：甲\n"
+      }
+    ]
+  },
+  "limits": {
+    "deadline_seconds": 30,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

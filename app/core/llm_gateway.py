@@ -25,11 +25,9 @@ from typing import Any, Callable, Iterator, Optional, Protocol
 
 import httpx
 
-from app.core.config import (
-    DATA_DIR,
-    cfg,
-    get_litellm_provider_api_key,
-)
+from app.core.runtime_paths import DATA_DIR
+from app.core.cancellation import CancellationToken, _close_resource
+from app.core.runtime_config import GatewayConfig
 
 logger = logging.getLogger(__name__)
 
@@ -55,58 +53,6 @@ _ABSOLUTE_PATH_RE = re.compile(
 
 def _is_cancelled(cancel_token: "CancellationToken | None") -> bool:
     return bool(cancel_token and cancel_token.is_cancelled())
-
-
-def _close_resource(resource: Any) -> None:
-    close = getattr(resource, "close", None)
-    if callable(close):
-        try:
-            close()
-        except Exception:
-            logger.debug("[LLMGateway] Failed to close cancellable resource", exc_info=True)
-
-
-class CancellationToken:
-    """Thread-safe cancellation token that can close active streaming resources."""
-
-    def __init__(self):
-        self._event = threading.Event()
-        self._lock = threading.Lock()
-        self._resources: list[Any] = []
-
-    def cancel(self) -> None:
-        self._event.set()
-        with self._lock:
-            resources = list(self._resources)
-        for resource in resources:
-            _close_resource(resource)
-
-    def is_cancelled(self) -> bool:
-        return self._event.is_set()
-
-    def wait(self, timeout: float) -> bool:
-        """Wait for cancellation and return whether cancellation occurred."""
-
-        return self._event.wait(max(0.0, timeout))
-
-    def add_resource(self, resource: Any) -> None:
-        if resource is None:
-            return
-        should_close = False
-        with self._lock:
-            if self._event.is_set():
-                should_close = True
-            else:
-                self._resources.append(resource)
-        if should_close:
-            _close_resource(resource)
-
-    def remove_resource(self, resource: Any) -> None:
-        with self._lock:
-            try:
-                self._resources.remove(resource)
-            except ValueError:
-                pass
 
 
 @dataclass(frozen=True)
@@ -555,6 +501,9 @@ class LiteLLMAdapter:
             "stream": True,
             "stream_options": {"include_usage": True},
             "api_key": request.api_key,
+            # The gateway owns retries and attempt accounting.
+            "num_retries": 0,
+            "max_retries": 0,
         }
         if request.provider == "deepseek":
             # DeepSeek enables thinking mode by default; keep standard chat
@@ -891,7 +840,9 @@ class LLMGateway:
         limiter: LocalRateLimiter | None = None,
         logger: GatewayLogger | None = None,
         trace_sink: Any = None,
+        config: GatewayConfig | None = None,
     ):
+        self._config = config
         self._proxy = config_proxy
         self._adapters = adapters or {
             "litellm": LiteLLMAdapter(),
@@ -963,12 +914,13 @@ class LLMGateway:
             if _is_cancelled(cancel_token) or (
                 deadline is not None and time.monotonic() >= deadline
             ):
-                self._write_log(request, t0, ttft_ms, retry_count, "cancelled", None, seq)
                 return
+            t0, ttft_ms = time.perf_counter(), None
             streamed = False
             attempt_request = LLMRequest(
                 **{**request.__dict__, "attempt_id": uuid.uuid4().hex}
             )
+            request = attempt_request
             stream_iter = adapter.stream(attempt_request, cancel_token=cancel_token)
             retry_next_attempt = False
             try:
@@ -987,6 +939,7 @@ class LLMGateway:
                         yield event
                         continue
                     if event_type == "error":
+                        error_usage = event.get("usage")
                         event = sanitize_error_event(event)
                         final_error = event
                         can_retry = (
@@ -996,6 +949,7 @@ class LLMGateway:
                             and not _is_cancelled(cancel_token)
                         )
                         if can_retry:
+                            self._write_log(request, t0, ttft_ms, retry_count, "error", event, seq, error_usage)
                             retry_count += 1
                             self._retry_policy.wait(
                                 attempt,
@@ -1006,20 +960,11 @@ class LLMGateway:
                             if _is_cancelled(cancel_token) or (
                                 deadline is not None and time.monotonic() >= deadline
                             ):
-                                self._write_log(
-                                    request,
-                                    t0,
-                                    ttft_ms,
-                                    retry_count,
-                                    "cancelled",
-                                    None,
-                                    seq,
-                                )
                                 return
                             retry_next_attempt = True
                             break
                         # 同 done：先写日志再 yield，否则消费者 break 后丢日志。
-                        self._write_log(request, t0, ttft_ms, retry_count, "error", event, seq)
+                        self._write_log(request, t0, ttft_ms, retry_count, "error", event, seq, error_usage)
                         yield event
                         return
                     if event_type == "done":
@@ -1034,9 +979,12 @@ class LLMGateway:
                         yield event
                         return
                     yield event
+            except Exception as exc:
+                error = _error_event(exc)
+                self._write_log(request, t0, ttft_ms, retry_count, "error", error, seq)
+                raise
             finally:
-                if _is_cancelled(cancel_token):
-                    _close_resource(stream_iter)
+                _close_resource(stream_iter)
             if retry_next_attempt:
                 continue
             status = "cancelled" if _is_cancelled(cancel_token) else final_status
@@ -1065,6 +1013,7 @@ class LLMGateway:
         safe_error = sanitize_error_event(error) if error else None
         record = {
             "trace_id": request.trace_id,
+            "attempt_id": request.attempt_id,
             "api_type": request.api_type,
             "provider": request.provider or request.api_type,
             "model": request.model,
@@ -1082,6 +1031,7 @@ class LLMGateway:
         }
         # token 用量（仅成功流末尾有），独立放进 record 供 sink 落库。
         if usage:
+            usage = {k: _coerce_int(usage.get(k)) for k in ("prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens")}
             record["usage"] = usage
             for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
                 if usage.get(key) is not None:
@@ -1103,39 +1053,14 @@ class LLMGateway:
         """把全局配置或 config_proxy 解析为 provider-neutral 请求。"""
         trace_id = trace_id or uuid.uuid4().hex
 
-        model = self._value("litellm_default_model", cfg.litellmDefaultModel)
-        model_config = self._litellm_model_config(model)
-        provider = model_config.get("provider", "") if model_config else ""
-        base_url = model_config.get("api_base", "") if model_config else ""
+        config = self._config
+        if config is None:
+            from app.core.desktop_runtime import gateway_config
+            config = gateway_config(self._proxy)
         return LLMRequest(
-            trace_id=trace_id,
-            attempt_id=uuid.uuid4().hex,
-            api_type="litellm",
-            model=model,
-            provider=provider,
-            messages=messages,
-            tools=tools,
-            max_tokens=cfg.get(cfg.maxTokens),
-            temperature=cfg.get(cfg.temperature),
-            top_p=cfg.get(cfg.topP),
-            api_key=get_litellm_provider_api_key(provider) if provider else "",
-            base_url=base_url,
-            stream_timeout=stream_timeout,
-        )
-
-    def _value(self, proxy_attr: str, config_item: Any) -> Any:
-        """优先读取调用方覆盖配置，否则读取全局 cfg。"""
-        if self._proxy is not None and hasattr(self._proxy, proxy_attr):
-            return getattr(self._proxy, proxy_attr)
-        return cfg.get(config_item)
-
-    def _litellm_model_config(self, model_id: str) -> dict | None:
-        """查找 LiteLLM 模型配置，支持 tool_generator 的临时模型覆盖。"""
-        if self._proxy is not None and hasattr(self._proxy, "get_litellm_model_by_id"):
-            model = self._proxy.get_litellm_model_by_id(model_id)
-            if model:
-                return model
-        return next(
-            (m for m in cfg.get(cfg.litellmModels) if m.get("id") == model_id),
-            None,
+            trace_id=trace_id, attempt_id=uuid.uuid4().hex, api_type="litellm",
+            model=config.model, provider=config.provider, base_url=config.base_url,
+            api_key=config.api_key, messages=messages, tools=tools,
+            max_tokens=config.max_tokens, temperature=config.temperature,
+            top_p=config.top_p, stream_timeout=stream_timeout,
         )
