@@ -41,7 +41,6 @@ jobs:
 
   eval-offline:
     runs-on: ubuntu-latest
-    env:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
