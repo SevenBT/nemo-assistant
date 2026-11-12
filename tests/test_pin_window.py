@@ -1,5 +1,7 @@
 """Pin chrome must glow outside the image without altering capture pixels."""
 
+from math import floor
+
 import pytest
 from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QColor, QPixmap, QWheelEvent
@@ -32,8 +34,9 @@ def test_frame_preserves_capture_position_and_logical_size(make_pin, dpr, pos):
     assert image_rect.height() == 120
 
 
-def test_glow_fades_to_transparency_outside_unchanged_image(make_pin):
-    window = make_pin()
+@pytest.mark.parametrize("source_dpr", [1.0, 1.5, 2.0])
+def test_glow_fades_to_transparency_outside_unchanged_image(make_pin, source_dpr):
+    window = make_pin(source_dpr)
     window.show()
     QApplication.setActiveWindow(window)
     rendered = window.grab().toImage()
@@ -41,7 +44,9 @@ def test_glow_fades_to_transparency_outside_unchanged_image(make_pin):
     dpr = rendered.devicePixelRatio()
 
     def pixel(x, y):
-        return rendered.pixelColor(round((x + 0.5) * dpr), round((y + 0.5) * dpr))
+        # Select the physical pixel containing this logical pixel's center.
+        # Rounding can cross the image boundary at the right/bottom edge.
+        return rendered.pixelColor(floor((x + 0.5) * dpr), floor((y + 0.5) * dpr))
 
     for point in (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight(), rect.center()):
         assert pixel(point.x(), point.y()) == QColor("#F7EFE2")
