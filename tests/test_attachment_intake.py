@@ -19,7 +19,7 @@ _app = QApplication.instance() or QApplication(sys.argv)
 import tempfile
 from app.ui.attachment_intake import attachments_from_mime
 from app.ui.input_widget import InputWidget
-from app.core.config import SCREENSHOTS_DIR
+from app.config.config import SCREENSHOTS_DIR
 
 
 def test_image_file_url_becomes_image_attachment():

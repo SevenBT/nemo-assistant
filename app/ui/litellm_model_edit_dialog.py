@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app.core.config import cfg
+from app.config.config import cfg
 from app.i18n import t
 
 

@@ -3,7 +3,7 @@
 from PyQt6.QtCore import Qt
 from qfluentwidgets import ComboBox, FluentIcon, SegmentedWidget, SettingCard
 
-from app.core.config import cfg
+from app.config.config import cfg
 from app.i18n import t
 from app.ui.settings_pages.base_auto_page import AutoSettingPage, CardSpec
 from app.ui.style import is_dark_theme, themes_by_mode

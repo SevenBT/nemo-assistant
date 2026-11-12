@@ -18,10 +18,10 @@ class MockRapidOCR:
     def __call__(self, image_path):
         return [["bbox", "Mock OCR text", 0.9]], 0.1
 
-import app.core.file_parser as fp_module
+import app.content.file_parser as fp_module
 fp_module.RapidOCR = MockRapidOCR
 
-from app.core.file_parser import FileParser, FileParseError
+from app.content.file_parser import FileParser, FileParseError
 
 
 def test_parse_text_file():

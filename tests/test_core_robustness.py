@@ -2,9 +2,9 @@
 import unittest
 from unittest import mock
 
-from app.core import consolidator as cons
-from app.core.context_manager import message_to_token_text, count_messages_tokens
-from app.core.dream import Dream
+from app.conversation import consolidator as cons
+from app.conversation.context_manager import message_to_token_text, count_messages_tokens
+from app.conversation.dream import Dream
 from app.models.message import Message, MessageRole, ToolCall
 
 
@@ -84,7 +84,7 @@ class DreamIdWhitelistTest(unittest.TestCase):
 
 class SchedulerJobErrorTest(unittest.TestCase):
     def test_tool_exception_reported_via_callback(self):
-        from app.core.scheduler import SchedulerManager
+        from app.desktop.scheduler import SchedulerManager
 
         results = []
         mgr = SchedulerManager()

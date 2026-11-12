@@ -15,7 +15,7 @@ permission notices are retained in this distribution.
 The following files in this project are ported or adapted from noteration
 (`noteration/editor/*`):
 
-- `app/core/wiki_links.py` — adapted from `noteration/editor/wiki_links.py`
+- `app/content/wiki_links.py` — adapted from `noteration/editor/wiki_links.py`
 - `app/ui/components/find_replace_dialog.py` — adapted from `noteration/editor/find_replace.py`
 - `app/ui/components/markdown_highlighter.py` — adapted from `noteration/editor/syntax_highlighter.py`
 - `app/ui/components/markdown_editor.py` — portions adapted from noteration

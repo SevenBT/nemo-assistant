@@ -23,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 _PROJECT_ROOT = Path(__file__).parent.parent
 
-from app.core.note_manager import NoteManager
-from app.core.db_manager import DatabaseManager
+from app.storage.note_manager import NoteManager
+from app.storage.db_manager import DatabaseManager
 
 
 def test_note_creation():

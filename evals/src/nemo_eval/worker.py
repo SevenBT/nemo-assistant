@@ -9,7 +9,7 @@ from pathlib import Path
 
 class HeadlessImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split(".")[0] in {"PyQt6", "qfluentwidgets", "uiautomation", "keyring"} or fullname == "app.core.config":
+        if fullname.split(".")[0] in {"PyQt6", "qfluentwidgets", "uiautomation", "keyring"} or fullname == "app.config.config":
             raise ImportError(f"Desktop dependency forbidden in eval worker: {fullname}")
 
 

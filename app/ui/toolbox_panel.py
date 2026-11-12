@@ -395,14 +395,14 @@ class ToolboxPanel(QWidget):
         self._loaded = False
         self._build()
 
-        from app.core.config import cfg
+        from app.config.config import cfg
         from app.ui.components.font_delegate import FontAwareListDelegate
         self._list.setItemDelegate(FontAwareListDelegate(self._list))
         self._apply_font_size()
         cfg.navigationFontSize.valueChanged.connect(self._apply_font_size)
 
     def _apply_font_size(self, _value: object = None) -> None:
-        from app.core.config import cfg
+        from app.config.config import cfg
         from PyQt6.QtGui import QFont  # noqa: F401
         size = cfg.get(cfg.navigationFontSize)
         font = self._list.font()
@@ -492,7 +492,7 @@ class ToolboxPanel(QWidget):
 
     def _reload_user_tools(self) -> None:
         """重新加载用户脚本工具(保留内置工具),并重新应用开关状态。"""
-        from app.core.config import cfg, USER_TOOLS_DIR
+        from app.config.config import cfg, USER_TOOLS_DIR
         from app.tools.loader import load_user_script_tools
         for tool in list(self._registry.get_all()):
             if isinstance(tool, ScriptToolAdapter):
@@ -568,7 +568,7 @@ class ToolboxPanel(QWidget):
         self._detail_pane.show()
 
     def _on_tool_toggled(self, name: str, enabled: bool) -> None:
-        from app.core.config import cfg
+        from app.config.config import cfg
         tool = self._registry.get(name)
         if tool is not None:
             tool.enabled = enabled
@@ -588,7 +588,7 @@ class ToolboxPanel(QWidget):
     def _on_generated_tool_saved(self, name: str) -> None:
         """Persist a successful generated-tool installation as enabled, then reload."""
 
-        from app.core.config import cfg
+        from app.config.config import cfg
 
         states = {**dict(cfg.get(cfg.toolStates)), name: True}
         cfg.set(cfg.toolStates, states)

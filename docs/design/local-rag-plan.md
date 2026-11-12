@@ -48,11 +48,11 @@
 - `tests/test_embedder.py`、`test_chunker.py`、`test_rag_manager.py` —— 测试
 
 **改动：**
-- `app/core/db_manager.py` —— 加 `rag_chunks` / `rag_sources` 表(模块6)
-- `app/core/file_parser.py` —— 多格式解析 + 图文占位符输出(模块4)
-- `app/core/config.py` —— `ragEnabled` / `ragImageCaption`(模块7.1)
-- `app/core/config_migrate.py` —— 同步两个新配置(否则老用户漏迁移)
-- `app/core/note_manager.py` —— 删除/更新笔记时回调 rag_manager 清理 chunk
+- `app/storage/db_manager.py` —— 加 `rag_chunks` / `rag_sources` 表(模块6)
+- `app/content/file_parser.py` —— 多格式解析 + 图文占位符输出(模块4)
+- `app/config/config.py` —— `ragEnabled` / `ragImageCaption`(模块7.1)
+- `app/config/config_migrate.py` —— 同步两个新配置(否则老用户漏迁移)
+- `app/storage/note_manager.py` —— 删除/更新笔记时回调 rag_manager 清理 chunk
 - `app/ui/main_window.py` —— stackedWidget 加第四页 + Dream 式后台索引
 - `app/ui/title_bar.py` —— 导航加「知识库」项 + 搜索信号
 - `app/ui/settings_pages/` —— 新增 RAG 开关页(或并入现有页)
@@ -185,7 +185,7 @@ class KnowledgeSource(Protocol):
 
 > 引擎层(chunker/embedder/存储/检索)对 source_type 完全无感，只认 `ParsedDoc`。新增源(将来如网页收藏)只实现一个 KnowledgeSource。
 
-### 模块 4：文件解析扩展(改 `app/core/file_parser.py`)
+### 模块 4：文件解析扩展(改 `app/content/file_parser.py`)
 
 现状：只支持 `.txt/.md/.png/.jpg/.jpeg`，图片走 OCR(`_parse_image`)，10MB 上限。
 
@@ -213,7 +213,7 @@ class KnowledgeSource(Protocol):
 - **必须可关闭**：`cfg.ragImageCaption`，默认关，尊重「本地优先」。关闭时纯画面图只靠相邻文字(做法 1)被动召回。
 - caption 结果写回该图所在 chunk 的文本，参与 embedding。
 
-### 模块 6：向量存储(改 `app/core/db_manager.py` + 新增 manager)
+### 模块 6：向量存储(改 `app/storage/db_manager.py` + 新增 manager)
 
 新增表(`db_manager._create_tables` 里加)。**关键：带 `source_type` + `source_ref`，不再外键死绑 notes**：
 
@@ -324,7 +324,7 @@ bge-small-zh 对「中文为主、夹英文术语/代码」几乎无损。整段
 
 RAG 做成**开关 + 懒加载 + 优雅降级**，不做插件化(YAGNI)，模型文件**直接打包进分发包**(不按需下载)。开关目的是省运行时开销、可选关闭。
 
-### 7.1 配置项（`app/core/config.py`，声明式 QConfig）
+### 7.1 配置项（`app/config/config.py`，声明式 QConfig）
 
 - `ragEnabled: bool = False` —— 总开关。关闭时 embedder 永不实例化、不建索引、检索工具隐藏/禁用。默认关，开箱不强加 ~100MB 内存。
 - `ragImageCaption: bool = False` —— 纯画面图云端 caption 开关，依赖 `ragEnabled`。

@@ -8,10 +8,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import httpx
 import pytest
 
-from app.core.cancellation import CancellationToken
-from app.core.providers.adapter import HTTPProviderAdapter
-from app.core.providers.contracts import LLMRequest
-from app.core.providers.transport import HttpTransport, MAX_EVENT
+from app.llm.cancellation import CancellationToken
+from app.llm.providers.adapter import HTTPProviderAdapter
+from app.llm.providers.contracts import LLMRequest
+from app.llm.providers.transport import HttpTransport, MAX_EVENT
 
 
 @pytest.fixture

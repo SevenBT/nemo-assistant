@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from app.core.trace_store import TraceStore
+from app.observability.trace_store import TraceStore
 
 
 def test_runtime_preserves_usage_without_loading_pricing(tmp_path, monkeypatch):

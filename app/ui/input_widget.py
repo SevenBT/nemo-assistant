@@ -292,7 +292,7 @@ class InputWidget(QWidget):
     # -- 待发送附件 -----------------------------------------------------
 
     def _choose_files(self):
-        from app.core.file_parser import FileParser
+        from app.content.file_parser import FileParser
         from app.ui.attachment_intake import attachments_from_paths
 
         patterns = " ".join(f"*{suffix}" for suffix in FileParser.SUPPORTED_TYPES)

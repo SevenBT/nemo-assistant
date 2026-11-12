@@ -276,7 +276,7 @@ runner = EvalRunner(
 
 #### 步骤 1：数据库加列【10 分钟】
 
-**文件**：`app/core/trace_store.py`
+**文件**：`app/observability/trace_store.py`
 
 1. 在 `_ensure_tables` 方法里，`llm_calls` 表定义加一列（大约 :150）
 ```python
@@ -295,7 +295,7 @@ cost_usd REAL,  # 加这一行，放在 cached_tokens 后面
 
 #### 步骤 2：调用 completion_cost【20 分钟】
 
-**文件**：`app/core/llm_gateway.py`
+**文件**：`app/llm/llm_gateway.py`
 
 找到记录 usage 的地方（大约在 `_log_completion` 或类似方法里，搜 `INSERT INTO llm_calls`），加两行：
 
@@ -364,7 +364,7 @@ uv add tiktoken
 
 #### 步骤 2：替换字符估算【1 小时】
 
-**文件**：`app/core/consolidator.py`
+**文件**：`app/conversation/consolidator.py`
 
 ```python
 # 文件开头加导入
@@ -436,7 +436,7 @@ def _messages_to_text(messages: list, model: str) -> str:
 
 #### 步骤 4：max_context_tokens 按模型查表【1 小时】
 
-**文件**：`app/core/consolidator.py` 和 `app/core/agent_loop.py`
+**文件**：`app/conversation/consolidator.py` 和 `app/core/agent_loop.py`
 
 ```python
 # consolidator.py 加一个模型上下文映射
@@ -488,7 +488,7 @@ def should_consolidate(self, messages: list, model: str) -> bool:
 ```python
 def _check_first_run(self):
     """首次启动检查"""
-    from app.core.config import config_manager
+    from app.config.config import config_manager
     
     # 检查是否配置了任何 provider
     if not config_manager.get_litellm_models():  # 假设有这个方法返回配置的模型列表
@@ -576,7 +576,7 @@ ignore = ["E501"]    # 忽略行长
 
 ### W3.4 外键约束 + 清孤儿数据【P1 / 1 小时】
 
-**文件**：`app/core/db_manager.py`
+**文件**：`app/storage/db_manager.py`
 
 ```python
 # 在连接打开后立即执行（找 connect() 或 _get_connection()）

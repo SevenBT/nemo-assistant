@@ -7,13 +7,13 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from app.core.providers.adapter import HTTPProviderAdapter
-from app.core.llm_gateway import GatewayLogger
+from app.llm.providers.adapter import HTTPProviderAdapter
+from app.llm.llm_gateway import GatewayLogger
 from app.tools.multi_model_consult import MultiModelConsultTool
 
 
 def test_deepseek_consult_uses_lightweight_gateway_and_records_tokens(monkeypatch, tmp_path):
-    import app.core.llm_gateway as module
+    import app.llm.llm_gateway as module
     calls = []
     barrier = threading.Barrier(2)
 
@@ -58,7 +58,7 @@ def test_consult_timeout_cancels_worker_before_closing_shared_gateway(monkeypatc
         def close(self):
             state.closed = True
 
-    monkeypatch.setattr('app.core.llm_gateway.LLMGateway', Gateway)
+    monkeypatch.setattr('app.llm.llm_gateway.LLMGateway', Gateway)
     tool = MultiModelConsultTool(model='test', provider='deepseek', api_key='dummy')
     result = tool.execute({'query': 'design', 'perspectives': ['architect'], 'timeout': 0.05})
     assert '超时' in result['data']['result']

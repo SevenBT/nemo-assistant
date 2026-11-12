@@ -142,7 +142,7 @@ main.py
 
 **性质：已验证；复杂度：中；兼容风险：中。**
 
-证据：`app/tools/registry.py:188` 只在导出模型工具列表时过滤 `enabled`；`app/tools/registry.py:226` 的执行入口未检查启用状态。`app/core/scheduler.py:118` 可直接通过该入口执行任务，因此已关闭或默认关闭的工具仍可能被计划任务或内部调用执行。
+证据：`app/tools/registry.py:188` 只在导出模型工具列表时过滤 `enabled`；`app/tools/registry.py:226` 的执行入口未检查启用状态。`app/desktop/scheduler.py:118` 可直接通过该入口执行任务，因此已关闭或默认关闭的工具仍可能被计划任务或内部调用执行。
 
 改造范围：
 
@@ -187,7 +187,7 @@ main.py
 
 **性质：已验证；复杂度：中；兼容风险：中。**
 
-证据：`app/core/trace_store.py:776` 仅检查顶层参数键名；`app/core/trace_store.py:353` 将工具结果直接写入数据库。嵌套对象、Authorization、Bearer token、URL query、剪贴板和文件内容可能明文落库。
+证据：`app/observability/trace_store.py:776` 仅检查顶层参数键名；`app/observability/trace_store.py:353` 将工具结果直接写入数据库。嵌套对象、Authorization、Bearer token、URL query、剪贴板和文件内容可能明文落库。
 
 改造范围：
 
@@ -209,7 +209,7 @@ main.py
 
 **性质：部分静态确认，部分待专项验证；复杂度：高；兼容风险：中高。**
 
-证据：`app/tools/fetch_url.py:145` 使用普通 `client.get()` 缓冲完整响应，直到解析后才截断文本；URL 安全检查和实际连接分别解析 DNS。`app/core/llm_gateway.py` 定义了超时配置，但需验证所有 LiteLLM 路径是否实际使用。
+证据：`app/tools/fetch_url.py:145` 使用普通 `client.get()` 缓冲完整响应，直到解析后才截断文本；URL 安全检查和实际连接分别解析 DNS。`app/llm/llm_gateway.py` 定义了超时配置，但需验证所有 LiteLLM 路径是否实际使用。
 
 改造范围：
 
@@ -237,7 +237,7 @@ main.py
 
 **性质：静态确认；复杂度：中；风险：中。**
 
-证据：`app/core/db_manager.py:45` 声明多处 `ON DELETE CASCADE`，但 `app/core/db_manager.py:27` 创建连接后没有启用 `PRAGMA foreign_keys=ON`。当前迁移依靠逐列检查，笔记 HTML 转 Markdown 还可能在启动时扫描全库。
+证据：`app/storage/db_manager.py:45` 声明多处 `ON DELETE CASCADE`，但 `app/storage/db_manager.py:27` 创建连接后没有启用 `PRAGMA foreign_keys=ON`。当前迁移依靠逐列检查，笔记 HTML 转 Markdown 还可能在启动时扫描全库。
 
 改造范围：统一连接工厂，设置 foreign keys、busy timeout 和 WAL；用 `PRAGMA user_version` 建立顺序迁移；迁移前检测并处理孤儿记录；把 HTML 转换改为一次性、可回滚的迁移。
 
@@ -247,7 +247,7 @@ main.py
 
 **性质：静态确认；复杂度：中高；风险：中。**
 
-证据：`app/core/session_manager.py:46` 在锁外序列化会话；消息 append 和部分字段修改也发生在锁外。较旧快照存在最后写入并覆盖较新数据的窗口。现有并发测试只验证 JSON 可解析，没有验证消息完整数目。
+证据：`app/storage/session_manager.py:46` 在锁外序列化会话；消息 append 和部分字段修改也发生在锁外。较旧快照存在最后写入并覆盖较新数据的窗口。现有并发测试只验证 JSON 可解析，没有验证消息完整数目。
 
 改造范围：以命令式 API 收口 `append`、`replace_tail`、`finalize_turn`、归档和删除；在同一锁内完成内存变更、不可变快照和原子替换；查询返回快照而非可任意修改的内部对象。
 
@@ -280,7 +280,7 @@ main.py
 
 **性质：高可信性能候选；复杂度：高；风险：高。**
 
-证据：`app/ui/chat_session_controller.py:399` 在启动 Agent worker 前同步执行历史压缩和 Prompt 构建；`app/core/consolidator.py:106` 可能同步等待完整 LLM 请求；`app/core/conversation_prompt_builder.py:136` 会读取、缩放、编码图片或执行 OCR。
+证据：`app/ui/chat_session_controller.py:399` 在启动 Agent worker 前同步执行历史压缩和 Prompt 构建；`app/conversation/consolidator.py:106` 可能同步等待完整 LLM 请求；`app/conversation/conversation_prompt_builder.py:136` 会读取、缩放、编码图片或执行 OCR。
 
 改造范围：以不可变会话快照执行“压缩、图片/OCR、Prompt 构建、Agent 启动”；准备结果回主线程时校验 session id 和 revision；支持取消和切换会话。
 
@@ -302,7 +302,7 @@ main.py
 
 **性质：静态确认的未闭环能力；复杂度：中；风险：高。**
 
-证据：`app/core/checkpoint.py:60` 提供恢复函数，但仓库没有调用恢复；公开文档声称异常后可恢复。
+证据：`app/agent/checkpoint.py:60` 提供恢复函数，但仓库没有调用恢复；公开文档声称异常后可恢复。
 
 待维护者选择：
 
@@ -343,7 +343,7 @@ main.py
 
 ### 2.1 图片与 OCR 缓存
 
-`app/core/conversation_prompt_builder.py:38` 每轮遍历历史；图片可能重复读取、解码、缩放、base64 或 OCR。缓存键至少包含规范路径、大小、mtime、目标尺寸和编码参数，并设置容量与失效策略。
+`app/conversation/conversation_prompt_builder.py:38` 每轮遍历历史；图片可能重复读取、解码、缩放、base64 或 OCR。缓存键至少包含规范路径、大小、mtime、目标尺寸和编码参数，并设置容量与失效策略。
 
 ### 2.2 长会话渐进或窗口化渲染
 

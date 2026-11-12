@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import (
+from app.config.config import (
     cfg,
     get_search_api_key,
     set_search_api_key,

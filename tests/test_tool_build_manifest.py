@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from app.core.tool_build.manifest import (
+from app.tooling.tool_build.manifest import (
     manifest_to_json,
     manifest_to_parameters,
     parse_manifest_text,
 )
-from app.core.tool_build.models import ToolManifest, ToolPermission
+from app.tooling.tool_build.models import ToolManifest, ToolPermission
 
 
 def valid_manifest(**overrides):

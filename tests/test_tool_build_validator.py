@@ -2,14 +2,14 @@ import json
 
 import pytest
 
-from app.core.tool_build.models import ToolPermission
-from app.core.tool_build.validator import validate_workspace
-from app.core.tool_build.workspace import BuildWorkspace
+from app.tooling.tool_build.models import ToolPermission
+from app.tooling.tool_build.validator import validate_workspace
+from app.tooling.tool_build.workspace import BuildWorkspace
 
 
 def make_workspace(monkeypatch, tmp_path, manifest=None, script="print('ok')"):
     monkeypatch.setattr(
-        "app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds"
+        "app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds"
     )
     manifest = manifest or {
         "manifest_version": 1,
@@ -220,7 +220,7 @@ def test_non_python_entrypoint_is_blocked(monkeypatch, tmp_path):
 
 def test_oversized_source_is_blocked_before_content_read(monkeypatch, tmp_path):
     workspace = make_workspace(monkeypatch, tmp_path)
-    monkeypatch.setattr("app.core.tool_build.validator._MAX_SOURCE_FILE_BYTES", 1)
+    monkeypatch.setattr("app.tooling.tool_build.validator._MAX_SOURCE_FILE_BYTES", 1)
     monkeypatch.setattr(
         BuildWorkspace,
         "read_source",
@@ -236,7 +236,7 @@ def test_oversized_source_is_blocked_before_content_read(monkeypatch, tmp_path):
 def test_excessive_source_file_count_is_blocked_before_content_read(monkeypatch, tmp_path):
     workspace = make_workspace(monkeypatch, tmp_path)
     (workspace.source_dir / "extra.py").write_text("pass", encoding="utf-8")
-    monkeypatch.setattr("app.core.tool_build.validator._MAX_SOURCE_FILES", 2)
+    monkeypatch.setattr("app.tooling.tool_build.validator._MAX_SOURCE_FILES", 2)
     monkeypatch.setattr(
         BuildWorkspace,
         "read_source",

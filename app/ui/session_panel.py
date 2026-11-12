@@ -52,14 +52,14 @@ class SessionPanel(QFrame):
         self._active_reading_id = ""       # 激活中的阅读会话 id（● 标记）
         self._build()
 
-        from app.core.config import cfg
+        from app.config.config import cfg
         from app.ui.components.font_delegate import FontAwareListDelegate
         self._list.setItemDelegate(FontAwareListDelegate(self._list))
         self._apply_font_size()
         cfg.navigationFontSize.valueChanged.connect(self._apply_font_size)
 
     def _apply_font_size(self, _value=None):
-        from app.core.config import cfg
+        from app.config.config import cfg
         from PyQt6.QtGui import QFont
         size = cfg.get(cfg.navigationFontSize)
         font = self._list.font()

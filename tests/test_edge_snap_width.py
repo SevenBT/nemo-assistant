@@ -19,7 +19,7 @@ pytest.skip(
     allow_module_level=True,
 )
 
-from app.core.config import ConfigManager
+from app.config.config import ConfigManager
 
 
 def test_config_default():

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from app.core.tool_build.models import ToolPermission
-from app.core.tool_build.validator import validate_workspace
-from app.core.tool_build.workspace import BuildWorkspace
+from app.tooling.tool_build.models import ToolPermission
+from app.tooling.tool_build.validator import validate_workspace
+from app.tooling.tool_build.workspace import BuildWorkspace
 
 
 def _manifest(name="safe_tool", permissions=None):
@@ -27,8 +27,8 @@ def _manifest(name="safe_tool", permissions=None):
 
 @pytest.fixture
 def install_environment(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
-    monkeypatch.setattr("app.core.tool_build.installer.USER_TOOLS_DIR", tmp_path / "user_tools")
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
+    monkeypatch.setattr("app.tooling.tool_build.installer.USER_TOOLS_DIR", tmp_path / "user_tools")
     return tmp_path / "user_tools"
 
 
@@ -48,7 +48,7 @@ def _install(
     overwrite=False,
     acknowledged_overrides=frozenset(),
 ):
-    from app.core.tool_build.installer import install_verified_build
+    from app.tooling.tool_build.installer import install_verified_build
 
     return install_verified_build(
         workspace,
@@ -139,8 +139,8 @@ def test_install_requires_frozen_typed_permission_approval(install_environment, 
 
 
 def test_reports_match_rejects_issue_message_difference():
-    from app.core.tool_build import installer
-    from app.core.tool_build.models import BuildStatus, IssueSeverity, ValidationIssue, ValidationReport
+    from app.tooling.tool_build import installer
+    from app.tooling.tool_build.models import BuildStatus, IssueSeverity, ValidationIssue, ValidationReport
 
     review = ValidationReport(
         build_id="build",
@@ -165,7 +165,7 @@ def test_reports_match_rejects_issue_message_difference():
 
 
 def test_uninstallable_fresh_report_does_not_capture_source_snapshot(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     workspace = _workspace(script="def broken(:")
     report = _review(workspace)
@@ -181,7 +181,7 @@ def test_uninstallable_fresh_report_does_not_capture_source_snapshot(install_env
 
 
 def test_snapshot_uses_validator_file_limits(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     workspace = _workspace()
     report = _review(workspace)
@@ -194,7 +194,7 @@ def test_snapshot_uses_validator_file_limits(install_environment, monkeypatch):
 
 
 def test_manifest_switch_during_revalidation_is_stale(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     workspace = _workspace("alpha")
     report = _review(workspace)
@@ -278,7 +278,7 @@ def test_rejects_actual_builtin_and_reserved_names(install_environment):
 
 
 def test_windows_move_uses_thread_local_last_error_binding(monkeypatch, tmp_path):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     source = tmp_path / "source"
     destination = tmp_path / "destination"
@@ -311,7 +311,7 @@ def test_windows_move_uses_thread_local_last_error_binding(monkeypatch, tmp_path
 
 
 def test_staging_extra_file_is_rejected_before_commit(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     workspace = _workspace()
     real_copy = installer._copy_snapshot_to_stage
@@ -330,7 +330,7 @@ def test_staging_extra_file_is_rejected_before_commit(install_environment, monke
 
 
 def test_staging_replaced_directory_is_rejected_before_commit(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     workspace = _workspace()
     real_copy = installer._copy_snapshot_to_stage
@@ -348,7 +348,7 @@ def test_staging_replaced_directory_is_rejected_before_commit(install_environmen
 
 
 def test_staging_modified_file_is_rejected_before_commit(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     workspace = _workspace()
     real_copy = installer._copy_snapshot_to_stage
@@ -366,7 +366,7 @@ def test_staging_modified_file_is_rejected_before_commit(install_environment, mo
 
 
 def test_first_install_detects_target_created_during_commit(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     workspace = _workspace()
     real_verify = installer._verify_staging
@@ -392,7 +392,7 @@ def test_first_install_detects_target_created_during_commit(install_environment,
 
 
 def test_final_target_race_uses_atomic_no_clobber(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     workspace = _workspace()
     real_move = installer._move_no_replace
@@ -410,7 +410,7 @@ def test_final_target_race_uses_atomic_no_clobber(install_environment, monkeypat
 
 
 def test_overwrite_detects_target_replacement_before_commit(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     target = install_environment / "safe_tool"
     target.mkdir(parents=True)
@@ -434,7 +434,7 @@ def test_overwrite_detects_target_replacement_before_commit(install_environment,
 
 
 def test_overwrite_detects_backup_root_replacement_before_commit(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     target = install_environment / "safe_tool"
     target.mkdir(parents=True)
@@ -462,7 +462,7 @@ def test_overwrite_detects_backup_root_replacement_before_commit(install_environ
 
 
 def test_cleanup_preserves_nested_stage_when_ancestor_is_replaced(install_environment, monkeypatch, caplog):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     user_tools = install_environment
     staging = user_tools / ".staging"
@@ -510,7 +510,7 @@ def test_cleanup_preserves_nested_stage_when_ancestor_is_replaced(install_enviro
 
 
 def test_cleanup_preserves_stage_when_staging_root_is_replaced(install_environment, monkeypatch, caplog):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     workspace = _workspace()
     real_copy = installer._copy_snapshot_to_stage
@@ -533,7 +533,7 @@ def test_cleanup_preserves_stage_when_staging_root_is_replaced(install_environme
 
 
 def test_overwrite_rollback_when_final_replace_fails(install_environment, monkeypatch):
-    from app.core.tool_build import installer
+    from app.tooling.tool_build import installer
 
     target = install_environment / "safe_tool"
     target.mkdir(parents=True)

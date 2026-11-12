@@ -21,14 +21,14 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import PrimaryPushButton, PushButton, ScrollArea
 
-from app.core.tool_build import (
+from app.tooling.tool_build import (
     BuildReview,
     InstallResult,
     IssueSeverity,
     ToolBuildService,
     ToolPermission,
 )
-from app.core.tool_generator import ModelOverride, build_model_options, parse_result
+from app.tooling.tool_generator import ModelOverride, build_model_options, parse_result
 from app.i18n import t
 from app.tools.registry import ToolRegistry
 from app.ui.tool_build_review_dialog import ToolBuildReviewPanel

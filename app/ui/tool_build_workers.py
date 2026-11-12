@@ -5,9 +5,9 @@ from typing import Protocol
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from app.core.llm_gateway import CancellationToken
-from app.core.tool_build import BuildReview, InstallResult, ToolPermission
-from app.core.tool_generator import ModelOverride, stream_generate
+from app.llm.llm_gateway import CancellationToken
+from app.tooling.tool_build import BuildReview, InstallResult, ToolPermission
+from app.tooling.tool_generator import ModelOverride, stream_generate
 
 
 class ToolBuildServiceProtocol(Protocol):

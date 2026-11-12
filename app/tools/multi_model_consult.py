@@ -73,7 +73,7 @@ class MultiModelConsultTool(BuiltinTool):
     @classmethod
     def create(cls, ctx: "ToolContext") -> "MultiModelConsultTool":
         """从配置中读取当前默认模型的连接信息。"""
-        from app.core.config import cfg, get_litellm_provider_api_key
+        from app.config.config import cfg, get_litellm_provider_api_key
 
         model_id = cfg.get(cfg.litellmDefaultModel)
         model_cfg = next(
@@ -152,9 +152,9 @@ class MultiModelConsultTool(BuiltinTool):
 
     async def _consult_async(self, query: str, perspectives: list, context: str, timeout: float) -> str:
         """通过统一网关并行调用，复用路由、取消、错误脱敏和 token 记录。"""
-        from app.core.cancellation import CancellationToken
-        from app.core.llm_gateway import LLMGateway
-        from app.core.runtime_config import GatewayConfig
+        from app.llm.cancellation import CancellationToken
+        from app.llm.llm_gateway import LLMGateway
+        from app.llm.runtime_config import GatewayConfig
 
         gateway = LLMGateway(config=GatewayConfig(
             model=self._model, provider=self._provider, api_key=self._api_key,

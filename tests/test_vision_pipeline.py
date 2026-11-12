@@ -10,12 +10,12 @@ import pytest
 from PyQt6.QtCore import QMimeData
 from PyQt6.QtGui import QColor, QImage
 
-from app.core.agent_hooks import BeforeTurnContext, ConsolidatorHook
-from app.core.consolidator import Consolidator, _messages_to_text
-from app.core.context_manager import count_messages_tokens, message_to_token_text
-from app.core.conversation_prompt_builder import merge_attachments_to_content
-from app.core.llm_gateway import LLMRequest
-from app.core.providers.adapter import HTTPProviderAdapter
+from app.agent.agent_hooks import BeforeTurnContext, ConsolidatorHook
+from app.conversation.consolidator import Consolidator, _messages_to_text
+from app.conversation.context_manager import count_messages_tokens, message_to_token_text
+from app.conversation.conversation_prompt_builder import merge_attachments_to_content
+from app.llm.llm_gateway import LLMRequest
+from app.llm.providers.adapter import HTTPProviderAdapter
 from app.i18n import t
 from app.models.attachment import Attachment
 from app.models.message import Message, MessageRole

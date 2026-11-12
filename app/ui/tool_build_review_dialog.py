@@ -8,7 +8,7 @@ from PyQt6.QtGui import QFocusEvent
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPlainTextEdit, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon, IconWidget, PrimaryPushButton, PushButton
 
-from app.core.tool_build import BuildReview, IssueSeverity, ToolPermission, ValidationIssue
+from app.tooling.tool_build import BuildReview, IssueSeverity, ToolPermission, ValidationIssue
 from app.i18n import t
 from app.ui import style
 

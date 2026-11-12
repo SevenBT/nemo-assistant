@@ -2,7 +2,7 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from app.core.conversation_prompt_builder import ConversationPromptBuilder
+from app.conversation.conversation_prompt_builder import ConversationPromptBuilder
 from app.models.message import Message, MessageRole, ToolCall
 
 

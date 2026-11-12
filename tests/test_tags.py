@@ -8,8 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from PyQt6.QtWidgets import QApplication
-from app.core.note_manager import NoteManager
-from app.core.db_manager import DatabaseManager
+from app.storage.note_manager import NoteManager
+from app.storage.db_manager import DatabaseManager
 
 
 def test_tag_functions(tmp_path):

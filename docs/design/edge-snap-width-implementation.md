@@ -6,7 +6,7 @@
 
 ## 修改的文件
 
-### 1. `app/core/config.py`
+### 1. `app/config/config.py`
 - ✓ 在 `DEFAULT_APP_CONFIG["window"]` 中添加 `edge_snap_width_threshold: 0.4`
 - ✓ 添加 `edge_snap_width_threshold` 属性访问方法
 - ✓ 向后兼容：旧配置文件自动使用默认值 0.4
@@ -128,7 +128,7 @@ python test_edge_snap_width.py
 
 ## 完成状态
 
-- [x] 修改 `app/core/config.py` 添加配置项
+- [x] 修改 `app/config/config.py` 添加配置项
 - [x] 修改 `app/ui/edge_snap.py` 添加宽度检查逻辑
 - [x] 修改 `app/ui/settings_window.py` 添加设置界面
 - [x] 创建测试脚本 `test_edge_snap_width.py`

@@ -34,9 +34,9 @@ from qfluentwidgets import (
     TransparentToolButton,
 )
 
-from app.core.config import NOTES_IMAGES_DIR, cfg
+from app.config.config import NOTES_IMAGES_DIR, cfg
 from app.i18n import t
-from app.core.note_manager import NoteManager
+from app.storage.note_manager import NoteManager
 from app.models.note import Folder
 from app.ui.components.markdown_editor import MarkdownEditor
 from app.ui.components.markdown_preview import MarkdownPreview

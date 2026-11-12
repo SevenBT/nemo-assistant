@@ -11,8 +11,8 @@ from collections.abc import Iterable
 from PyQt6.QtCore import QMimeData
 from PyQt6.QtGui import QImage
 
-from app.core.config import SCREENSHOTS_DIR
-from app.core.file_parser import FileParser, FileParseError
+from app.config.config import SCREENSHOTS_DIR
+from app.content.file_parser import FileParser, FileParseError
 from app.models.attachment import Attachment
 
 logger = logging.getLogger(__name__)

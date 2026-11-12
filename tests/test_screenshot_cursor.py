@@ -5,7 +5,7 @@ from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QApplication
 
-from app.core.ocr_engine import OcrEngineService
+from app.content.ocr_engine import OcrEngineService
 from app.ui.screenshot_annotations import ScreenshotTool
 from app.ui.screenshot_overlay import ScreenshotOverlay
 

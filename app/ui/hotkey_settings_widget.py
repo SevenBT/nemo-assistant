@@ -285,6 +285,6 @@ class HotkeySettingsWidget(QWidget):
         )
 
     def _reset_defaults(self):
-        from app.core.hotkey_manager import DEFAULT_HOTKEYS
+        from app.desktop.hotkey_manager import DEFAULT_HOTKEYS
         for row in self._rows:
             row.reset_combo(DEFAULT_HOTKEYS.get(row.action, ""))

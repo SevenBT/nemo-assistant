@@ -13,7 +13,7 @@ if sys.platform == "win32":
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.core.selection_inject import strip_ai_preamble, selection_unchanged
+from app.desktop.selection_inject import strip_ai_preamble, selection_unchanged
 
 
 # ── strip_ai_preamble ─────────────────────────────────────────────────────

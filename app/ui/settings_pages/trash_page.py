@@ -30,7 +30,7 @@ from qfluentwidgets import (
     FluentIcon,
 )
 
-from app.core.note_manager import NoteManager
+from app.storage.note_manager import NoteManager
 from app.i18n import t
 
 

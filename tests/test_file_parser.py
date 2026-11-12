@@ -2,7 +2,7 @@
 import tempfile
 from pathlib import Path
 
-from app.core.file_parser import FileParser, FileParseError
+from app.content.file_parser import FileParser, FileParseError
 
 
 def test_parse_text_file():

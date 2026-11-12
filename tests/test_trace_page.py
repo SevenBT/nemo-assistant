@@ -4,7 +4,7 @@ import json
 from PyQt6.QtWidgets import QDialog, QFileDialog, QPlainTextEdit, QLabel
 from qfluentwidgets import HyperlinkButton
 
-from app.core.trace_store import TraceStore
+from app.observability.trace_store import TraceStore
 from app.ui.settings_pages.trace_page import TracePage
 from app.ui.settings_window import SettingsWindow
 from app.i18n import t

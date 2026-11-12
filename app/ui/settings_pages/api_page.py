@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 
 from app.ui.litellm_model_edit_dialog import LiteLLMModelEditDialog
 from app.ui.litellm_template_dialog import LiteLLMTemplateDialog
-from app.core.config import (
+from app.config.config import (
     cfg,
     get_litellm_provider_api_key,
     set_litellm_provider_api_key,

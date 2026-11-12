@@ -21,6 +21,6 @@
 | 文件 | 说明 |
 | --- | --- |
 | `app/models/session.py` | 会话模型，仅保留 `system_prompt` |
-| `app/core/session_manager.py` | 创建会话和更新会话级 System Prompt |
+| `app/storage/session_manager.py` | 创建会话和更新会话级 System Prompt |
 | `app/ui/session_settings_dialog.py` | 编辑会话级 System Prompt |
 | `app/ui/main_window.py` | 构建发送给模型的 system 消息 |

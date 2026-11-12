@@ -33,7 +33,7 @@ from qfluentwidgets import (
 )
 
 from app.i18n import t
-from app.core.billing import normalize_provider_cost, validate_billing_url
+from app.llm.billing import normalize_provider_cost, validate_billing_url
 
 # 状态 → (i18n key, 语义色)。语义色固定不随主题，对齐 InfoBadge 内部用色。
 # 文案存 key，在 _status_meta 运行时取（语言启动后才锁定）。
@@ -148,7 +148,7 @@ class TracePage(QWidget):
         self._detail.set_data(data)
 
     def _on_export(self):
-        from app.core.diagnostics import build_diagnostic
+        from app.observability.diagnostics import build_diagnostic
         row = self._list.currentRow()
         if self._store is None or not (0 <= row < len(self._traces)):
             return

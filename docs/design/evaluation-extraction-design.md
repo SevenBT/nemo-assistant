@@ -27,16 +27,16 @@
 | 位置 | 静态确认的行为 | 设计要求 |
 | --- | --- | --- |
 | `app/eval/runner.py` | 导入 AgentThread，同步调用 run，并读取私有 `_trace_id` | 适配器调用 Agent 的公开同步入口和公开运行结果 |
-| `app/core/agent_context.py` | CancellationToken 来自 llm_gateway；gateway 导入 config，config 基于 QConfig | 清理传递性 Qt 依赖，不能只替换 AgentThread |
-| `app/core/checkpoint.py`、`trace_store.py` | 模块级导入 config 中的路径常量 | 路径与存储由组合入口注入，导入不读取桌面配置 |
-| `app/core/llm_gateway.py` | config_proxy 只覆盖部分配置；采样参数、密钥及模型查找仍依赖全局 cfg | 显式、完整、不可变的网关配置；桌面配置转换放到桌面组合层 |
-| `app/core/conversation_prompt_builder.py` | 模块级导入 cfg，视觉支持也回查桌面 config | scenario 使用同一构建器，但配置、视觉能力、记忆与会话读取显式注入 |
+| `app/agent/agent_context.py` | CancellationToken 来自 llm_gateway；gateway 导入 config，config 基于 QConfig | 清理传递性 Qt 依赖，不能只替换 AgentThread |
+| `app/agent/checkpoint.py`、`trace_store.py` | 模块级导入 config 中的路径常量 | 路径与存储由组合入口注入，导入不读取桌面配置 |
+| `app/llm/llm_gateway.py` | config_proxy 只覆盖部分配置；采样参数、密钥及模型查找仍依赖全局 cfg | 显式、完整、不可变的网关配置；桌面配置转换放到桌面组合层 |
+| `app/conversation/conversation_prompt_builder.py` | 模块级导入 cfg，视觉支持也回查桌面 config | scenario 使用同一构建器，但配置、视觉能力、记忆与会话读取显式注入 |
 | `app/eval/cases.py` | 丢弃多轮上下文；成功工具调用集合被自动作为 expected_tools | Trace 只能生成草稿；预期由维护者明确编写和审核 |
 | `app/eval/runner.py::_build_messages` | 有 prompt_builder 时只用单条 user 输入重建，优先于保存的 api_messages | 明确回放模式，不能静默重建或降级 |
 | `app/eval/judge.py`、`scripts/eval/run_eval_with_judge.py` | Judge 看问答，脚本复用被测网关；标准答案和工具证据未进入评判 | 独立 Judge 配置、结构化证据与任务验收条件 |
 | `app/eval/runner.py`、`app/eval/metrics.py` | 用例异常被记录后跳过，只对已有数值求均值，仍完成 run | 每个计划用例必须有终态；区分失败、错误、不适用与未评判 |
 | `app/eval/rule_checks.py` | completed 等同 Trace status=ok；重复调用被命名为不必要调用；JSON 校验针对落库后的字符串 | 将运行观测与任务达标分开；指标准确命名并注明局限 |
-| `app/core/trace_store.py` | 观测和评估共库；写入吞异常；字段通常截断到 2000 字符 | 用户观测可 best-effort，评估证据和结果必须严格持久化；不能依赖截断 Trace 作为完整证据 |
+| `app/observability/trace_store.py` | 观测和评估共库；写入吞异常；字段通常截断到 2000 字符 | 用户观测可 best-effort，评估证据和结果必须严格持久化；不能依赖截断 Trace 作为完整证据 |
 | `app/ui/settings_window.py`、`app/ui/settings_pages/trace_page.py` | 用户可见评估页、打分、保存回归用例、评估详情 | 移除评估操作和评分展示，保留诊断能力 |
 | `pyproject.toml`、`.github/workflows/tests.yml` | Qt 属于根运行依赖，现有 CI 为 Windows 全依赖测试 | 增加独立无 Qt 离线作业；保留现有桌面测试 |
 
@@ -405,7 +405,7 @@ manifest 记录应用 Git commit、dirty 状态和受跟踪改动指纹、case/s
 - 新增 eval-offline 作业，评估独立环境不安装 Qt、qfluentwidgets、pytest-qt、pywin32、uiautomation 等；执行 schema 校验、评估内核测试和 reviewed core 套件。
 - 新作业建议在 Linux 运行，直接检验无桌面平台依赖；对 platform-neutral 路径与文件检查同时在现有 Windows 测试中做代表性验证。
 - 运行阶段阻断外部网络并移除真实模型凭据；依赖安装阶段可联网。依赖 import 的联网路径也必须禁用或使用固定 fixture。
-- 加入动态导入守卫：在干净进程禁止 PyQt6/qfluentwidgets/app.core.config 导入，再实际运行 Agent 和 scenario；不只 grep 直接 import。
+- 加入动态导入守卫：在干净进程禁止 PyQt6/qfluentwidgets/app.config.config 导入，再实际运行 Agent 和 scenario；不只 grep 直接 import。
 - 加入依赖方向检查：app 不得导入 nemo_eval；评估内核不导入 app；适配器是唯一例外。
 - JUnit 对 fail/error/inconclusive 和必跑缺项映射为失败或错误；不映射为 ignored。无论执行是否通过，都上传已脱敏 summary/JUnit/report，不吞主命令退出码。
 - 真实模型手动作业只在可信分支及显式触发下取凭据，不能对不可信 PR 代码提供密钥；首期不创建定时作业。

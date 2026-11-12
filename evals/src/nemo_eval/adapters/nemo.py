@@ -54,8 +54,8 @@ class PromptConfig:
 
 
 def make_live_gateway(profile, logger):
-    from app.core.llm_gateway import LLMGateway, RetryPolicy
-    from app.core.runtime_config import GatewayConfig
+    from app.llm.llm_gateway import LLMGateway, RetryPolicy
+    from app.llm.runtime_config import GatewayConfig
     key_name = profile.get("api_key_env")
     if not profile.get("model") or not key_name or not os.environ.get(key_name):
         raise ValueError("Live model requires model and a populated api_key_env")
@@ -70,17 +70,17 @@ def make_live_gateway(profile, logger):
 
 def default_prompt(language="zh"):
     from app.i18n import init_language
-    from app.core.constants import get_default_user_prompt
+    from app.conversation.constants import get_default_user_prompt
     init_language(language)
     return get_default_user_prompt()
 
 
 def execute(case, workdir: Path, mode="offline", config=None, variant=None):
-    from app.core.agent import Agent
-    from app.core.agent_context import AgentContext
-    from app.core.agent_interface import AgentCallbacks
-    from app.core.agent_hooks import AgentHook, reject
-    from app.core.conversation_prompt_builder import ConversationPromptBuilder
+    from app.agent.agent import Agent
+    from app.agent.agent_context import AgentContext
+    from app.agent.agent_interface import AgentCallbacks
+    from app.agent.agent_hooks import AgentHook, reject
+    from app.conversation.conversation_prompt_builder import ConversationPromptBuilder
     from app.i18n import init_language
     from app.models.message import Message, ToolCall
     from app.tools.registry import ToolRegistry

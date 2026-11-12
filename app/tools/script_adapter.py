@@ -29,9 +29,9 @@ from pathlib import Path
 from typing import Any
 
 from app.tools.base import BuiltinTool
-from app.core.tool_build.manifest import manifest_to_parameters, parse_manifest_text
-from app.core.tool_build.models import ToolPermission
-from app.core.tool_deps import ToolDependencyManager
+from app.tooling.tool_build.manifest import manifest_to_parameters, parse_manifest_text
+from app.tooling.tool_build.models import ToolPermission
+from app.tooling.tool_deps import ToolDependencyManager
 from app.tools.registry import ToolErrorType
 from app.i18n import t
 

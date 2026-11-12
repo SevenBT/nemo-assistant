@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import cfg
+from app.config.config import cfg
 from app.i18n import t
 
 

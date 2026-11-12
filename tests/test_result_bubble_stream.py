@@ -1,4 +1,4 @@
-from app.core.llm_gateway import CancellationToken
+from app.llm.llm_gateway import CancellationToken
 from app.i18n import t
 from app.ui.result_bubble import _run_prompt_stream
 import time

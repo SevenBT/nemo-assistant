@@ -1,8 +1,8 @@
 import json
 import sqlite3
 
-from app.core.trace_store import TraceStore
-from app.core.diagnostics import build_diagnostic, redact
+from app.observability.trace_store import TraceStore
+from app.observability.diagnostics import build_diagnostic, redact
 
 
 def test_fresh_runtime_database_has_no_evaluation_tables(tmp_path):

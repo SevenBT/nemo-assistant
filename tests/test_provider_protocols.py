@@ -6,11 +6,11 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from app.core.providers.adapter import HTTPProviderAdapter
-from app.core.providers.contracts import LLMRequest
-from app.core.providers.registry import endpoint, resolve_protocol
-from app.core.providers import anthropic, chat, responses
-from app.core.agent_hooks import _api_dicts_to_messages
+from app.llm.providers.adapter import HTTPProviderAdapter
+from app.llm.providers.contracts import LLMRequest
+from app.llm.providers.registry import endpoint, resolve_protocol
+from app.llm.providers import anthropic, chat, responses
+from app.agent.agent_hooks import _api_dicts_to_messages
 from app.models.message import Message, ToolCall
 
 
@@ -239,10 +239,10 @@ def test_reasoning_model_does_not_receive_unsupported_sampling_controls():
 
 @pytest.mark.parametrize('protocol', ['openai_chat', 'anthropic_messages', 'responses'])
 def test_agent_next_iteration_retains_provider_history(protocol):
-    from app.core.agent import Agent
-    from app.core.agent_context import AgentContext
-    from app.core.agent_interface import AgentCallbacks
-    from app.core.providers.common import tool_event
+    from app.agent.agent import Agent
+    from app.agent.agent_context import AgentContext
+    from app.agent.agent_interface import AgentCallbacks
+    from app.llm.providers.common import tool_event
     signature = {'google': {'thought_signature': 'signed'}}
     state = {'protocol': protocol, 'output': [{'type': 'reasoning', 'encrypted_content': 'opaque'}]}
     records, completed = [], []

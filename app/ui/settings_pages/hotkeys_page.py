@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import QVBoxLayout, QScrollArea, QWidget
 
-from app.core.config import cfg
+from app.config.config import cfg
 from app.ui.hotkey_settings_widget import HotkeySettingsWidget
 
 

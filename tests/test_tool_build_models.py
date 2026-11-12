@@ -2,8 +2,8 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-import app.core.tool_build as tool_build
-from app.core.tool_build.models import (
+import app.tooling.tool_build as tool_build
+from app.tooling.tool_build.models import (
     BuildReview,
     BuildStatus,
     InstallResult,
@@ -155,7 +155,7 @@ def test_validation_report_is_installable_only_without_blocking_issue():
 
 
 def test_non_overridable_issue_codes_cover_unrunnable_and_unsafe_findings():
-    from app.core.tool_build.models import NON_OVERRIDABLE_ISSUE_CODES
+    from app.tooling.tool_build.models import NON_OVERRIDABLE_ISSUE_CODES
 
     assert isinstance(NON_OVERRIDABLE_ISSUE_CODES, frozenset)
     # Findings whose tool could never load or run, plus installer-fatal states.
