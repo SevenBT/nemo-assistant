@@ -14,7 +14,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from app.core.context_manager import ContextManager, content_to_text
+from app.core.context_manager import MAX_CONSOLIDATION_RATIO, ContextManager, content_to_text
 from app.models.memory import MemoryCategory, MemoryScope
 
 if TYPE_CHECKING:
@@ -56,19 +56,20 @@ class Consolidator:
         llm_gateway: "LLMGateway",
         memory_mgr: "MemoryManager",
         model: str = "default",
-        consolidation_ratio: float = 0.5,
+        consolidation_ratio: float = MAX_CONSOLIDATION_RATIO,
     ):
         """
         Args:
             llm_gateway: LLM 网关
             memory_mgr: 记忆管理器
             model: 模型名称（用于确定上下文窗口和 encoding）
-            consolidation_ratio: 压缩后的目标 token 占比（默认 50%）
+            consolidation_ratio: 摘要和保留消息占模型总上下文的比例（默认且最多 10%）
         """
         self._llm = llm_gateway
         self._mem = memory_mgr
         self._ratio = consolidation_ratio
         self._ctx_mgr = ContextManager(model=model, reserve_ratio=0.2)
+        self._ctx_mgr.consolidation_budget(consolidation_ratio)
 
     def maybe_consolidate(
         self,
@@ -89,11 +90,14 @@ class Consolidator:
         current_tokens = self._ctx_mgr.count_messages_tokens(messages)
         logger.info(f"[Consolidator] Token count {current_tokens} exceeds threshold, starting consolidation")
 
-        # 计算需要保留多少消息（目标：压缩到 50%）
+        # 总预算包含摘要；先为摘要预留 20%，其余用于完整的近期消息。
+        target_tokens = self._ctx_mgr.consolidation_budget(self._ratio)
+        summary_budget = max(1, target_tokens // 5)
         keep_count = self._ctx_mgr.calculate_keep_count(
             messages,
             target_ratio=self._ratio,
             min_keep=4,
+            reserved_tokens=summary_budget,
         )
 
         if keep_count >= len(messages):
@@ -103,7 +107,12 @@ class Consolidator:
         to_keep = messages[len(messages) - keep_count:]
 
         # 调用 LLM 生成摘要
-        summary = self._summarize(to_compress)
+        summary_prefix = "[以下是之前对话的摘要]\n"
+        available = max(0, target_tokens - self._ctx_mgr.count_messages_tokens(to_keep) - 1)
+        summary = self._summarize(
+            to_compress,
+            max_tokens=max(1, available - self._ctx_mgr.count_tokens(summary_prefix)),
+        )
 
         # 存入 memories 表
         self._mem.add(
@@ -125,15 +134,22 @@ class Consolidator:
 
         summary_msg = Message(
             role=MessageRole.SYSTEM,
-            content=f"[以下是之前对话的摘要]\n{summary}",
+            content=summary_prefix + summary,
             timestamp=time.time(),
         )
-        return [summary_msg] + to_keep
+        # LLM 和 raw fallback 都可能超过提示词要求；将摘要标签和分隔符
+        # 一并计数后强制执行预算。超大的近期消息也会进入摘要，而非越界保留。
+        summary_msg.content = self._ctx_mgr.truncate_text(summary_msg.content, available)
+        result = [summary_msg] + to_keep
+        while self._ctx_mgr.count_messages_tokens(result) > target_tokens:
+            available -= 1
+            summary_msg.content = self._ctx_mgr.truncate_text(summary_msg.content, available)
+        return result
 
-    def _summarize(self, messages: list["Message"]) -> str:
+    def _summarize(self, messages: list["Message"], max_tokens: int) -> str:
         """调用 LLM 生成摘要。失败时返回 raw 截断。"""
         text = _messages_to_text(messages)
-        prompt = _CONSOLIDATION_PROMPT + text
+        prompt = f"摘要正文不得超过 {max_tokens} tokens。\n\n" + _CONSOLIDATION_PROMPT + text
 
         try:
             result_parts = []

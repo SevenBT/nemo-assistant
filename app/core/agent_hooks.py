@@ -260,7 +260,7 @@ class ConsolidatorHook(AgentHook):
     def before_turn(self, ctx: BeforeTurnContext) -> list[dict[str, Any]] | None:
         messages = _api_dicts_to_messages(ctx.messages)
         compressed = self._consolidator.maybe_consolidate(messages, ctx.session_id)
-        if len(compressed) < len(messages):
+        if compressed is not messages:
             logger.info(
                 "[ConsolidatorHook] Compressed %d → %d messages",
                 len(messages), len(compressed),
