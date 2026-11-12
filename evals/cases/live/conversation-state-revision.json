@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "id": "conversation-state-revision",
+  "revision": 1,
+  "status": "reviewed",
+  "title": "多轮口头需求更正与明确撤销",
+  "category": "multi-turn",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "帮我记录一份待办草案：项目灯塔，负责人林澈，日期2026-11-20，通知渠道邮件和群聊。不调用工具，不保存文件，先口头复述。"
+      },
+      {
+        "id": "step-2",
+        "user": "更正：项目名不变；负责人换成方宁，日期推迟到2026-11-27；取消群聊通知，保留邮件。仍然不调用工具。"
+      },
+      {
+        "id": "step-3",
+        "user": "邮件也取消，改为只通知站内信。日期撤回上一步的修改，恢复最初的日期；其他更正保留，不调用工具。"
+      },
+      {
+        "id": "step-4",
+        "user": "输出当前最终草案，纯 JSON，不要 Markdown，也不要解释，只含 project、owner、release_date、channels（数组）。不要调用工具。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {},
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "no_tools": true
+    },
+    "answer": {
+      "schema": {
+        "const": {
+          "project": "灯塔",
+          "owner": "方宁",
+          "release_date": "2026-11-20",
+          "channels": [
+            "站内信"
+          ]
+        }
+      }
+    }
+  },
+  "limits": {
+    "deadline_seconds": 180,
+    "max_iterations_per_step": 8
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

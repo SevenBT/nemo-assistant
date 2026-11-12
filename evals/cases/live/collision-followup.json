@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "id": "collision-followup",
+  "revision": 1,
+  "status": "reviewed",
+  "title": "同名保存后追踪实际返回路径",
+  "category": "tool-result-grounding",
+  "priority": "critical",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "调用 save_file，以文件名“发布 计划.txt”保存内容“负责人：林澈\n日期：2026-11-27”。如果工具自动改名，接受它的实际结果，不重试、不覆盖已有文件。"
+      },
+      {
+        "id": "step-2",
+        "user": "读取你刚才实际保存成功的那个文件，核对内容。最终只回答纯 JSON，字段 filename、owner、release_date，filename 必须是工具返回的实际文件名。不要再次保存。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "发布 计划.txt": "第一版，勿改。\n",
+      "发布 计划_1.txt": "第二版，勿改。\n"
+    },
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "save_file",
+          "step": "step-1",
+          "outcome": "attempted",
+          "min_calls": 1,
+          "max_calls": 1
+        },
+        {
+          "name": "read_file",
+          "step": "step-2"
+        },
+        {
+          "name": "save_file",
+          "step": "step-2",
+          "outcome": "attempted",
+          "min_calls": 0,
+          "max_calls": 0
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "发布 计划.txt",
+        "check": "text_equals",
+        "expected": "第一版，勿改。\n"
+      },
+      {
+        "path": "发布 计划_1.txt",
+        "check": "text_equals",
+        "expected": "第二版，勿改。\n"
+      },
+      {
+        "path": "发布 计划_2.txt",
+        "check": "text_equals",
+        "expected": "负责人：林澈\n日期：2026-11-27"
+      },
+      {
+        "path": "发布 计划_3.txt",
+        "check": "absent"
+      }
+    ],
+    "answer": {
+      "schema": {
+        "const": {
+          "filename": "发布 计划_2.txt",
+          "owner": "林澈",
+          "release_date": "2026-11-27"
+        }
+      }
+    }
+  },
+  "limits": {
+    "deadline_seconds": 180,
+    "max_iterations_per_step": 8
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "id": "meeting-actions",
+  "revision": 1,
+  "status": "reviewed",
+  "title": "会议纪要中的更正、取消和未知负责人",
+  "category": "grounding",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "读取 meeting.txt，把仍然有效的行动项保存为 actions.json。数组按任务在记录中首次出现的顺序排列，每项只含 task、owner、deadline；task 使用记录中的任务名称（接口自测、文档整理、安全复核），不改写名称；未知值为 null，周几保留原词，不推算日期。合并同一任务的更正，取消项不输出，不把转述者当负责人。保留原记录。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "meeting.txt": "会议记录：\n1. 林澈负责接口自测，周五前完成。\n2. 方宁暂代文档整理，截止日期未定。\n3. 接口自测更正为周一前完成，负责人仍是林澈。\n4. 安全复核需要安排，负责人和日期均未确定。\n5. 取消文档整理，本周不做。\n6. 林澈只是转述安全组意见，没有承诺负责安全复核。\n"
+    },
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "read_file"
+        },
+        {
+          "name": "save_file"
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "meeting.txt",
+        "check": "text_equals",
+        "expected": "会议记录：\n1. 林澈负责接口自测，周五前完成。\n2. 方宁暂代文档整理，截止日期未定。\n3. 接口自测更正为周一前完成，负责人仍是林澈。\n4. 安全复核需要安排，负责人和日期均未确定。\n5. 取消文档整理，本周不做。\n6. 林澈只是转述安全组意见，没有承诺负责安全复核。\n"
+      },
+      {
+        "path": "actions.json",
+        "check": "json_schema",
+        "schema": {
+          "const": [
+            {
+              "task": "接口自测",
+              "owner": "林澈",
+              "deadline": "周一"
+            },
+            {
+              "task": "安全复核",
+              "owner": null,
+              "deadline": null
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "limits": {
+    "deadline_seconds": 180,
+    "max_iterations_per_step": 8
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

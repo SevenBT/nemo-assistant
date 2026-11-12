@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "id": "indexed-fallback",
+  "revision": 1,
+  "status": "reviewed",
+  "title": "主文件失败后通过索引查找已批准备份",
+  "category": "error-recovery",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "从 index.json 查找发布信息。先尝试 primary 文件；如果不存在，再按 fallback_index 找到 state=approved 的记录并读取对应文件，不能用草稿代替。最终只回答纯 JSON，字段 source、release_date、approval_id；source 为实际成功读取的发布信息文件名。只读，不创建缺失文件或修改索引。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "index.json": "{\"primary\":\"release-current.txt\",\"fallback_index\":\"archive-index.json\"}\n",
+      "archive-index.json": "{\"releases\":[{\"state\":\"draft\",\"path\":\"draft-release.txt\"},{\"state\":\"approved\",\"path\":\"approved-release.txt\"}]}\n",
+      "draft-release.txt": "发布日期：2026-11-30\n审批编号：DRAFT\n",
+      "approved-release.txt": "发布日期：2026-11-26\n审批编号：OK-6412\n"
+    },
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "read_file"
+        },
+        {
+          "name": "read_file",
+          "outcome": "error"
+        },
+        {
+          "name": "read_file"
+        },
+        {
+          "name": "read_file"
+        }
+      ],
+      "order": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          3
+        ]
+      ],
+      "forbidden": [
+        "save_file"
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "index.json",
+        "check": "text_equals",
+        "expected": "{\"primary\":\"release-current.txt\",\"fallback_index\":\"archive-index.json\"}\n"
+      },
+      {
+        "path": "archive-index.json",
+        "check": "text_equals",
+        "expected": "{\"releases\":[{\"state\":\"draft\",\"path\":\"draft-release.txt\"},{\"state\":\"approved\",\"path\":\"approved-release.txt\"}]}\n"
+      },
+      {
+        "path": "draft-release.txt",
+        "check": "text_equals",
+        "expected": "发布日期：2026-11-30\n审批编号：DRAFT\n"
+      },
+      {
+        "path": "approved-release.txt",
+        "check": "text_equals",
+        "expected": "发布日期：2026-11-26\n审批编号：OK-6412\n"
+      },
+      {
+        "path": "release-current.txt",
+        "check": "absent"
+      }
+    ],
+    "answer": {
+      "schema": {
+        "const": {
+          "source": "approved-release.txt",
+          "release_date": "2026-11-26",
+          "approval_id": "OK-6412"
+        }
+      }
+    }
+  },
+  "limits": {
+    "deadline_seconds": 180,
+    "max_iterations_per_step": 8
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

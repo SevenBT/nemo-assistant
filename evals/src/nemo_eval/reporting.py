@@ -90,7 +90,7 @@ def markdown(view):
     if view.get("judge"):
         lines.append(f"Judge: `{view['judge']['cost']}`; same model source: `{view['judge']['same_model_source']}`.")
     lines.append(f"Observed execution statistics: `{view.get('statistics', {})}`.")
-    lines.append("Unknown usage/cost is not zero. Configured price estimates are not provider invoices.")
+    lines.append("Unknown usage/cost is not zero. New runs only summarize provider-reported charges; consult the provider billing console for actual charges. Historical estimate fields, if present, are not invoices.")
     return "\n".join(lines) + "\n"
 
 

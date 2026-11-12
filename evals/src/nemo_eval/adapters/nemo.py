@@ -209,5 +209,5 @@ def execute(case, workdir: Path, mode="offline", config=None, variant=None):
             evidence_complete = False
     return {"execution_status": status, "error": error, "answer": answer, "tool_calls": calls,
             "events": events, "steps": step_results, "requests": requests, "model_requests": gateway.requests, "artifacts": artifacts,
-            "llm_calls": llm_calls, "cost": cost_summary(llm_calls, config.get("target", {}), expected_calls=budget.calls), "model_calls": budget.calls, "output_reserved": budget.output_reserved, "evidence_complete": evidence_complete,
+            "llm_calls": llm_calls, "cost": cost_summary(llm_calls, expected_calls=budget.calls), "model_calls": budget.calls, "output_reserved": budget.output_reserved, "evidence_complete": evidence_complete,
             "expected_statuses": case["expectations"].get("execution_statuses", ["completed"])}

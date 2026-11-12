@@ -1,7 +1,7 @@
 # Agent 离线回归与真实模型发布评估方案
 
 > 日期：2026-11-12。
-> 状态：主要流程已实现；日常实际命令以 `evals/README.md` 和 `docs/zh/agent-evaluation.md` 为准。下文保留设计依据；新增的单命令流程见第 13 节。
+> 状态：主要流程已实现；日常实际命令以 `evals/README.md` 和 `docs/zh/agent-evaluation.md` 为准。下文保留设计依据；真实评估的单命令流程见第 13 节，自动化测试入口调整见第 15 节。
 > 依据：当前 `evals/` 源码、用例和 CI；承接 `evaluation-extraction-design.md`。
 > 设计阶段未调用付费模型；实现验证使用离线 Agent 和受控模型客户端，真实供应商联通仍须维护者配置后验证。
 
@@ -75,17 +75,17 @@ artifacts/eval/
   comparisons/<comparison-id>/
 ```
 
-拟定两个主要入口：
+当前开发测试与真实评估入口：
 
 ```powershell
 # 无模型调用，CI 使用。
-uv run --project evals --frozen nemo-eval regression --suite offline-core --out artifacts/eval/offline/check-01
+uv run --project evals --extra dev --frozen pytest evals/tests -q
 
 # 有真实模型调用，本地显式执行。
 uv run --project evals --frozen nemo-eval evaluate --suite live-smoke --config evals/configs/live.toml --variant evals/variants/production.toml --out artifacts/eval/live/smoke-01
 ```
 
-`regression` 只接受 offline 套件，`evaluate` 只接受 live 套件；类型不匹配时在任何模型调用前报配置错误。`validate` 也依据套件类型校验。
+自动化测试通过 pytest 运行离线场景；`evaluate` 只接受 live 套件，类型不匹配时在任何模型调用前报配置错误。`validate` 也依据套件类型校验。
 
 共用 runner、worker、生产适配器、checks 和证据格式，不另写一套 Agent。框架测试中的模拟 live client 只证明接口正确，不计入真实质量报告。
 
@@ -214,9 +214,9 @@ path = './candidate.txt'
 | 稳定通过用例数 | 每次计划重复均通过的用例数 / 用例数 |
 | 错误与待评判 | 独立列出 error、inconclusive 和未执行数，不隐藏在平均值中 |
 | 执行开销 | 工具尝试数、成功数、模型请求数、已知 Token、总耗时中位数及范围 |
-| 费用 | target / Judge 分列；供应商明确返回费用、配置价格估算、未知分别展示 |
+| 费用 | target / Judge 分列；只汇总供应商明确返回金额，币种分别展示，缺少费用为未知 |
 
-Token 缺失不填零；费用未知不填免费；估算不是账单费用。总耗时需要补充任务执行计时，不能只累加模型请求耗时。
+Token 缺失不填零；费用未知不填免费；不进行本地价格估算，实际费用查看服务商账单。总耗时需要补充任务执行计时，不能只累加模型请求耗时。
 
 12 个任务、3 次重复只提供初步波动观察，不做“统计显著提升”的结论。报告展示具体变化，例如“该例从 3/3 降到 1/3”，由维护者决定是否扩大样本。
 
@@ -267,7 +267,6 @@ Judge 不负责判断文件是否真的写入；这由硬检查验证。Judge �
 ```powershell
 uv sync --project evals --extra dev --frozen
 uv run --project evals --frozen pytest evals/tests -q
-uv run --project evals --frozen nemo-eval regression --suite offline-core --out artifacts/eval/offline/dev-01
 ```
 
 ### 10.2 发布前修改提示词
@@ -302,7 +301,7 @@ uv run --project evals --frozen nemo-eval compare --baseline artifacts/eval/live
 ## 11. 兼容与迁移
 
 1. 原 3 个 core 用例原样迁入 offline；保持稳定 id 和原始版本，目录变动不冒充任务标准变化。
-2. 新增 suite manifest。老 `run --suite core --mode offline` 暂保留为 offline-core 的兼容入口并提示新命令。
+2. 新增 suite manifest。老 `run --suite core --mode offline` 保留为离线诊断兼容入口；日常代码测试与 CI 使用 pytest。
 3. 老 `run --suite core --mode live` 明确提示迁移到 live-smoke/live-release，不再把离线剧本用例作为默认真实质量集。所有拒绝均发生在付费调用之前。
 4. 历史 run 可继续 report；旧单次结果与新重复结果不能直接作为严格可比的发布结论。历史缺项保持未知，不反填新契约字段来伪造兼容。
 5. 升级 manifest schema / evaluator_version。新比较逻辑采用明确兼容规则，不以“同为版本 1”代替评估器代码兼容验证。
@@ -312,7 +311,7 @@ uv run --project evals --frozen nemo-eval compare --baseline artifacts/eval/live
 
 | 阶段 | 交付 | 必须证明的结果 |
 | --- | --- | --- |
-| A：分开入口与用例 | suite 类型、regression/evaluate、原 core 迁移、4 例 live-smoke | offline 仍无模型请求；live 不接受剧本；跨类型误用在调用前报错；CI 仅跑离线 |
+| A：分开入口与用例 | suite 类型、pytest/evaluate、原 core 迁移、4 例 live-smoke | offline 仍无模型请求；live 不接受剧本；跨类型误用在调用前报错；CI 仅跑离线 |
 | B：提示词版本比较 | variant、指纹拆分、实际提示词证据、显式 change | 只改提示词可比较；改任务/模型/评估器不能混进提示词比较；生产构建链路不复制 |
 | C：发布集与重复报告 | 12 例、repeat、独立状态、成本与耗时、逐例对比 | 2/3 与 3/3 可区分；超时/预算/未执行不从分母消失；每次重复无状态污染 |
 | D：评判闭环与文档 | 按 repeat 评判、显式 assessment 报告、发布记录示例 | 硬失败不可被评分覆盖；缺 required 评判不可通过；重评分不修改旧结果；真实 smoke 手动验证 |
@@ -323,9 +322,9 @@ uv run --project evals --frozen nemo-eval compare --baseline artifacts/eval/live
 
 ## 13. 单命令流程与实现说明
 
-维护者补充要求：通过单一命令执行离线回归或真实模型评估。
+维护者最初要求分别提供离线与真实评估命令；后续简化为 pytest 自动化代码测试和单一 evaluate 真实评估入口（见第 15 节）。
 
-- `nemo-eval regression` 默认运行 offline-core，自动创建唯一输出目录和报告。
+- 生产 Agent 离线场景由 `pytest evals/tests` 执行，与评估器测试一同在 CI 中自动验证。
 - `nemo-eval evaluate` 默认运行 live-release × 3，读取 configs/live.toml 与 configs/judge.toml；调用前校验所需配置，随后自动运行目标模型、required rubric 的 Judge 并保存合并后的派生报告。
 - evaluate 可附加 --baseline、--change，在同一命令里对比；基线条件提前检查。基线默认使用其初次流水线冻结的 assessment ID，不选择后来追加的“最新评分”。
 - 初次流程选定结果写入 pipeline.json；原始执行和所有 assessment 保留，重评分不更新该选择。report/compare 支持显式选择另一 assessment。
@@ -333,3 +332,19 @@ uv run --project evals --frozen nemo-eval compare --baseline artifacts/eval/live
 - 人工结构化 assessment 导入仍为后续扩展；当前人工复核通过发布决定记录完成。
 
 上文第 10 节的分步 judge/compare 仍可用于诊断和重新评判；日常完整评估无需分步调用。实际接口、兼容方式和首次模型配置见维护者指南。
+
+## 14. 难例扩充
+
+在首批 12 例基础上新增 12 例，默认 live-release 扩为 24 例 × 3 次；live-challenge 单独运行新增 12 例 × 1 次。完整集的必需 Judge 为 5 例 × 3 次，难例集为 3 例 × 1 次。具体任务和验收依据见 [用例目录](../../evals/cases/README.md)。
+
+覆盖范围仍为当前适配器提供的基础对话、文件工具和多轮任务。新增跨文件核对、来源冲突、多轮撤销、上下文切换、重名路径追踪、截断补读、索引回退、拒绝后诚实说明及间接指令注入。参考动作和错误证据用于验证任务可完成、常见错误不能误通过；真实模型难度与波动需由实际运行评估。未变更目标模型、Judge、本地预算和历史结果；扩充后的任务集需要重新建立同条件基线。
+
+## 15. 删除独立回归命令
+
+维护者确认无需单独维护和运行离线回归接口，因此删除 CLI 的 `regression` 子命令。保留离线 fixture、runner、worker 与现有 pytest 覆盖；CI 通过 pytest 执行代码测试，移除重复的三场景命令运行，并上传 pytest 的 JUnit 结果。维护者使用 `evaluate` 管理真实模型评估；开发者修改功能或修复问题时更新相关自动化测试。历史结果仍可读取，旧 `run` 仅保留作兼容诊断，不是日常测试入口。
+
+## 16. 费用语义与重点测试
+
+评估模块与应用统一停止本地价格估算，profile 不再接受 pricing；新增记录只保留服务商明确返回的金额、币种、已返回金额的调用数、费用未知调用数及完整性。Token、调用次数、耗时和输出预留预算继续记录；target 与 Judge 分别统计，不主动查询官网账单。历史执行和 assessment 保持原样。
+
+补充函数级测试覆盖 Judge 非法 JSON、评分项缺失/重复/伪造、无效证据及拒评；预算恰好耗尽、仅 Token 超限与预留失败的原子性；执行错误、硬失败、缺证据及 Judge 状态的最终判定优先级。无效 Judge 的集成测试同时验证原始执行不变、失败响应与已消耗预算可追溯。

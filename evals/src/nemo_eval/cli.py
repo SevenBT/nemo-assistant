@@ -1,4 +1,4 @@
-"""Single-command offline regression and live evaluation pipelines."""
+"""Live evaluation pipeline and evidence inspection commands."""
 import argparse
 from datetime import datetime, timezone
 import json
@@ -53,27 +53,25 @@ def save_comparison(rows, out):
 def pipeline(args):
     from nemo_eval.reporting import save_report
     from nemo_eval.variants import resolve_variant
-    live = args.command == "evaluate"
-    mode = "live" if live else "offline"
+    mode = "live"
     suite = select_suite(args.suite, mode=mode, cases_dir=args.cases)
     repeat = args.repeat if args.repeat is not None else suite.repeat
-    config, judge_config, variant = {}, None, None
-    if live:
-        config = read_config(args.config or ROOT / "configs/live.toml")
-        if config.get("judge"):
-            judge_config = {"judge": config.pop("judge"), "budget": dict(config.get("budget", {}))}
-        preflight_profile(config, "target")
-        variant = resolve_variant(args.variant, language=config.get("language", "zh"))
-        needs_judge = any(c.get("judge_required") for c in suite.cases)
-        judge_path = args.judge_config or ROOT / "configs/judge.toml"
-        if args.judge_config or (any(c.get("rubric") for c in suite.cases) and judge_path.is_file()):
-            judge_config = read_config(judge_path)
-        if needs_judge and judge_config is None:
-            raise ValueError("This suite requires Judge assessment. Configure evals/configs/judge.toml or --judge-config before any paid target calls. Use live-smoke for tasks needing no Judge.")
-        if judge_config:
-            preflight_profile(judge_config, "judge")
-        if args.baseline and not args.change:
-            raise ValueError("--baseline requires --change prompt or application")
+    config = read_config(args.config or ROOT / "configs/live.toml")
+    judge_config = None
+    if config.get("judge"):
+        judge_config = {"judge": config.pop("judge"), "budget": dict(config.get("budget", {}))}
+    preflight_profile(config, "target")
+    variant = resolve_variant(args.variant, language=config.get("language", "zh"))
+    needs_judge = any(c.get("judge_required") for c in suite.cases)
+    judge_path = args.judge_config or ROOT / "configs/judge.toml"
+    if args.judge_config or (any(c.get("rubric") for c in suite.cases) and judge_path.is_file()):
+        judge_config = read_config(judge_path)
+    if needs_judge and judge_config is None:
+        raise ValueError("This suite requires Judge assessment. Configure evals/configs/judge.toml or --judge-config before any paid target calls. Use live-smoke for tasks needing no Judge.")
+    if judge_config:
+        preflight_profile(judge_config, "judge")
+    if args.baseline and not args.change:
+        raise ValueError("--baseline requires --change prompt or application")
     out = args.out or new_output(mode)
     if out.exists():
         raise ValueError("Output directory must be new")
@@ -86,7 +84,7 @@ def pipeline(args):
                 judge_config["budget"]["max_output_tokens"] < required_output):
             raise ValueError("Judge budget cannot cover required assessments; increase it or reduce --repeat before target calls")
     baseline_assessment = None
-    if live and args.baseline:
+    if args.baseline:
         from nemo_eval.reporting import make_view
         from nemo_eval.comparison import compatible_conditions
         from nemo_eval.runner import make_manifest
@@ -103,15 +101,14 @@ def pipeline(args):
             from nemo_eval.judge import profile_hash
             if judge_config is None or baseline_view["judge"]["judge_hash"] != profile_hash(judge_config["judge"]):
                 raise ValueError("Incompatible baseline: judge_hash")
-    print(f"{'Live-model evaluation' if live else 'Offline regression'}: {suite.name}, {len(suite.cases)} cases x {repeat} repeats = {len(suite.cases) * repeat} tasks", flush=True)
-    if live:
-        print(f"Target budget: {config['budget']}; Judge budget: {judge_config['budget'] if judge_config else 'not required'}. Not an input-token or dollar ceiling.", flush=True)
+    print(f"Live-model evaluation: {suite.name}, {len(suite.cases)} cases x {repeat} repeats = {len(suite.cases) * repeat} tasks", flush=True)
+    print(f"Target budget: {config['budget']}; Judge budget: {judge_config['budget'] if judge_config else 'not required'}. Not an input-token or dollar ceiling.", flush=True)
     print(f"Output: {out.resolve()}", flush=True)
     def progress(result, finished, total):
         print(f"[{finished}/{total}] {result['case_id']} repeat {result['repeat_id']}: {result['verdict']}", flush=True)
     summary = run(suite.cases, out, mode=mode, config=config, repeat=repeat, variant=variant, suite=suite.name, progress=progress)
     assessment_id = None
-    if live and judge_config and any(c.get("rubric") for c in suite.cases) and not summary.get("interrupted"):
+    if judge_config and any(c.get("rubric") for c in suite.cases) and not summary.get("interrupted"):
         from nemo_eval.judge import assess_run
         print("Assessing recorded task evidence with Judge...", flush=True)
         assessments = assess_run(out, judge_config)
@@ -124,7 +121,7 @@ def pipeline(args):
                                       "report": "reports/initial/report.md"})
     print(f"Report: {(report_dir / 'report.md').resolve()}", flush=True)
     code = exit_code(view)
-    if live and args.baseline and code not in {3, 130}:
+    if args.baseline and code not in {3, 130}:
         rows = compare(out, args.baseline, change=args.change, current_assessment=assessment_id,
                        baseline_assessment=baseline_assessment)
         compare_dir = out / "comparisons" / "baseline"
@@ -140,19 +137,17 @@ def pipeline(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="nemo-eval")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name, default in (("regression", "offline-core"), ("evaluate", "live-release")):
-        sub = commands.add_parser(name)
-        sub.add_argument("--suite", default=default)
-        sub.add_argument("--cases", type=Path)
-        sub.add_argument("--repeat", type=int)
-        sub.add_argument("--out", type=Path)
-        if name == "evaluate":
-            sub.add_argument("--config", type=Path)
-            sub.add_argument("--judge-config", type=Path)
-            sub.add_argument("--variant", type=Path)
-            sub.add_argument("--baseline", type=Path)
-            sub.add_argument("--baseline-assessment")
-            sub.add_argument("--change", choices=["prompt", "application"])
+    sub = commands.add_parser("evaluate")
+    sub.add_argument("--suite", default="live-release")
+    sub.add_argument("--cases", type=Path)
+    sub.add_argument("--repeat", type=int)
+    sub.add_argument("--out", type=Path)
+    sub.add_argument("--config", type=Path)
+    sub.add_argument("--judge-config", type=Path)
+    sub.add_argument("--variant", type=Path)
+    sub.add_argument("--baseline", type=Path)
+    sub.add_argument("--baseline-assessment")
+    sub.add_argument("--change", choices=["prompt", "application"])
     for name in ("validate", "run"):
         sub = commands.add_parser(name)
         sub.add_argument("--cases", type=Path)
@@ -181,7 +176,7 @@ def main(argv=None):
     sub.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        if args.command in {"regression", "evaluate"}:
+        if args.command == "evaluate":
             return pipeline(args)
         if args.command in {"run", "validate"}:
             mode = args.mode or ("offline" if args.command == "run" or args.cases else None)
@@ -191,7 +186,7 @@ def main(argv=None):
                 return 0
             if suite.mode != "offline":
                 raise ValueError("Use evaluate for live-model evaluation and automatic assessments")
-            print("Compatibility entry: prefer nemo-eval regression", file=sys.stderr)
+            print("Legacy offline diagnostic entry; use pytest evals/tests for automated regression checks", file=sys.stderr)
             config = read_config(args.config) if args.config else {}
             summary = run(suite.cases, args.out, mode="offline", config=config, suite=suite.name)
             print(json.dumps(summary, ensure_ascii=False, indent=2))

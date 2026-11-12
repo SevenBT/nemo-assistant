@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "id": "authoritative-sources",
+  "revision": 1,
+  "status": "reviewed",
+  "title": "按批准状态核对跨文件冲突",
+  "category": "files-reconciliation",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "读取 draft.txt、approval.txt、chat.txt。以明确获批的内容为准；时间更新的草案或讨论不等于获批。输出一个纯 JSON 对象，不带 Markdown：release_date、owner、approved_budget_cny；没有批准的预算用 null。只读，不创建文件。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "draft.txt": "草案更新于 2026-11-11：发布日期 2026-11-30，负责人方宁，预算 80000 元。\n",
+      "approval.txt": "审批记录 2026-11-08：仅批准发布日期 2026-11-24、负责人林澈。预算尚未批准。\n",
+      "chat.txt": "2026-11-12 同事讨论：建议延期到 2026-12-01，负责人暂不调整。这不是审批结论。\n"
+    },
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "read_file",
+          "min_calls": 3
+        }
+      ],
+      "forbidden": [
+        "save_file"
+      ]
+    },
+    "answer": {
+      "schema": {
+        "const": {
+          "release_date": "2026-11-24",
+          "owner": "林澈",
+          "approved_budget_cny": null
+        }
+      }
+    },
+    "artifacts": [
+      {
+        "path": "draft.txt",
+        "check": "text_equals",
+        "expected": "草案更新于 2026-11-11：发布日期 2026-11-30，负责人方宁，预算 80000 元。\n"
+      },
+      {
+        "path": "approval.txt",
+        "check": "text_equals",
+        "expected": "审批记录 2026-11-08：仅批准发布日期 2026-11-24、负责人林澈。预算尚未批准。\n"
+      },
+      {
+        "path": "chat.txt",
+        "check": "text_equals",
+        "expected": "2026-11-12 同事讨论：建议延期到 2026-12-01，负责人暂不调整。这不是审批结论。\n"
+      }
+    ]
+  },
+  "limits": {
+    "deadline_seconds": 180,
+    "max_iterations_per_step": 8
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

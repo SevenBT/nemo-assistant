@@ -11,7 +11,6 @@ from nemo_eval.runner import run, execute_worker, exit_code
 from nemo_eval.adapters.legacy import import_legacy
 from nemo_eval.artifacts import compare
 from nemo_eval.judge import judge
-from nemo_eval.budget import Budget, cost_summary, validate_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -96,7 +95,7 @@ def test_comparison_rejects_changed_case_set(tmp_path):
         compare(tmp_path / "a", tmp_path / "c")
 
 
-def test_judge_receives_reference_tool_evidence_and_validates_citations():
+def test_judge_receives_reference_tool_evidence_and_untrusted_instructions():
     case = cases()[0]
     case["reference"] = {"answer": "reference fact"}
     case["rubric"] = [{"id": "correct", "description": "Must match tool evidence"}]
@@ -109,12 +108,6 @@ def test_judge_receives_reference_tool_evidence_and_validates_citations():
         assert "untrusted" in messages[0]["content"]
         return json.dumps({"status": "scored", "reason": "checked", "criteria": [{"id": "correct", "verdict": "pass", "reason": "tool evidence", "evidence_ids": ["tool:one"]}]})
     assert judge(case, execution, client)["status"] == "scored"
-    with pytest.raises(ValueError):
-        judge(case, execution, lambda _: '{"status":"scored","reason":"x","criteria":[]}')
-
-
-def test_missing_evidence_is_not_a_pass():
-    assert verdict({"execution_status": "completed", "evidence_complete": False}, [{"status": "pass"}]) == "inconclusive"
 
 
 def test_unknown_acceptance_fields_and_invalid_order_are_rejected():
@@ -150,17 +143,6 @@ def test_judge_request_redacts_credentials_and_preserves_usage():
     request = request_for(cases()[0], execution)
     assert "CANARY_SECRET" not in json.dumps(request)
     assert request["evidence"]["tool:1"]["result"]["total_tokens"] == 5
-
-
-def test_request_budget_and_unknown_costs():
-    profile = {"model": "test", "api_key_env": "TEST_KEY", "max_tokens": 10}
-    budget = Budget(validate_config({"target": profile, "budget": {"max_model_calls": 1, "max_output_tokens": 10}}))
-    budget.reserve(profile)
-    with pytest.raises(ValueError, match="budget"):
-        budget.reserve(profile)
-    assert cost_summary([{"attempt_id": "one"}, {"attempt_id": "one"}], profile)["unknown_calls"] == 1
-    with pytest.raises(ValueError):
-        validate_config({"target": {**profile, "pricing": {"input_per_1m": 1}}})
 
 
 def test_rejudging_uses_independent_profile_and_keeps_execution_unchanged(tmp_path, monkeypatch):

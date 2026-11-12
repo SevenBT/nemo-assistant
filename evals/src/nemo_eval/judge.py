@@ -141,5 +141,5 @@ def assess_run(run_dir: Path, config):
                "evidence_hash": digest(manifest.get("artifact_hashes", {})), "artifact_hashes": hashes,
                "judge_hash": profile_hash(profile), "interrupted": interrupted,
                "profile": profile, "target_profile": target, "same_model_source": same_source, "template_version": TEMPLATE_VERSION,
-               "budget_usage": {"model_calls": budget.calls, "output_reserved": budget.output_reserved}, "cost": cost_summary(records, profile, expected_calls=budget.calls), "results": results})
+               "budget_usage": {"model_calls": budget.calls, "output_reserved": budget.output_reserved}, "cost": cost_summary(records, expected_calls=budget.calls), "results": results})
     return results

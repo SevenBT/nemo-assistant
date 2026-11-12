@@ -310,7 +310,7 @@ JudgeRequest 包含：用户任务及相关多轮上下文、参考答案/参考
 
 run profile 显式包含 mode、suite、被测模型配置、Judge 配置引用、工具 profile、Prompt/记忆策略、采样参数、语言、时区、固定时间、超时、重试和预算。credentials 仅保存环境变量名；resolved config 中只写脱敏值和环境变量是否存在，不写密钥或从 keyring 偷读配置。
 
-offline 模式拒绝真实模型配置与外部网络，未声明的模型或工具外调立即失败。live 模式需要显式配置；预算同时限制调用次数、输出上限与 Token，价格已知时再增加估算费用限制。费用上限无法保证供应商实时账单绝不超额，报告清楚标注估算和缺失价格。未知价格不能用于宣称满足美元预算。
+offline 模式拒绝真实模型配置与外部网络，未声明的模型或工具外调立即失败。live 模式需要显式配置；预算限制模型调用次数和最大输出 Token 预留量，不是输入 Token 或金额上限。不维护价格或估算费用，仅汇总服务商明确返回的金额；没有金额则保持未知，实际扣费到服务商官网账单查看，不自动查询账户账单。
 
 以下是待实现的命令契约，不是当前可运行命令。命令从仓库根目录调用，案例/配置/产物路径相对显式仓库根或配置所在目录解析，并写入解析后的 manifest：
 
@@ -404,7 +404,7 @@ manifest 记录应用 Git commit、dirty 状态和受跟踪改动指纹、case/s
 - 保留现有 Windows 桌面 pytest 作业，安装 desktop/dev extra 并沿用 UI 集成验证。
 - 新增 eval-offline 作业，评估独立环境不安装 Qt、qfluentwidgets、pytest-qt、pywin32、uiautomation 等；执行 schema 校验、评估内核测试和 reviewed core 套件。
 - 新作业建议在 Linux 运行，直接检验无桌面平台依赖；对 platform-neutral 路径与文件检查同时在现有 Windows 测试中做代表性验证。
-- 运行阶段阻断外部网络并移除真实模型凭据；依赖安装阶段可联网。包含价格表等 import 时联网路径也必须禁用或使用固定 fixture。
+- 运行阶段阻断外部网络并移除真实模型凭据；依赖安装阶段可联网。依赖 import 的联网路径也必须禁用或使用固定 fixture。
 - 加入动态导入守卫：在干净进程禁止 PyQt6/qfluentwidgets/app.core.config 导入，再实际运行 Agent 和 scenario；不只 grep 直接 import。
 - 加入依赖方向检查：app 不得导入 nemo_eval；评估内核不导入 app；适配器是唯一例外。
 - JUnit 对 fail/error/inconclusive 和必跑缺项映射为失败或错误；不映射为 ignored。无论执行是否通过，都上传已脱敏 summary/JUnit/report，不吞主命令退出码。
@@ -469,7 +469,7 @@ manifest 记录应用 Git commit、dirty 状态和受跟踪改动指纹、case/s
 ## 15. 实施记录（2026-11-09）
 
 产品边界已按确认结果落实：普通设置移除评估页、打分与保存用例入口；
-运行记录保留 Token 和可编辑预览的脱敏诊断导出。2026-11-12 起，费用策略改为 V4：停用本地估算，仅展示服务商明确返回的费用；旧估算保留但明确区分。开发者独立评估的 profile 估算不受此普通用户产品策略影响。
+运行记录保留 Token 和可编辑预览的脱敏诊断导出。2026-11-12 起，费用策略改为 V4：停用本地估算，仅展示服务商明确返回的费用；旧估算保留但明确区分。开发者独立评估同样停用 profile 价格估算，旧 pricing 配置需移除；历史结果不改写。
 应用不再导入评估包，fresh runtime DB 不创建 eval_* 表。
 旧数据库迁移前备份，事务化复制无评分的迭代观测，旧表保留；
 只读导入工具把历史用例保留为 draft，把旧 expected_tools 标为 observed_tools。
@@ -490,7 +490,7 @@ CI 仅上传合成用例的 summary/JUnit/Markdown，完整证据留在本地。
 
 Judge 使用独立 profile/client，接收任务、参考事实、rubric、实际工具结果和文件产物；
 默认是可选诊断。结构化输出与证据引用须校验，脱敏请求与响应单独存档。
-target/Judge 分账，缺 usage/价格保持未知，正常应用聊天不触发 Judge。
+target/Judge 分别记录用量和服务商返回金额，缺 usage/费用保持未知，正常应用聊天不触发 Judge。
 本轮未配置或调用真实付费模型；live/Judge 的集成路径通过受控 client 测试，
 真实供应商 smoke 尚未执行。
 

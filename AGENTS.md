@@ -13,7 +13,6 @@
 - 开始修改前，先运行 `git branch --show-current` 和 `git status --short`，确认所在分支及已有改动。
 - **不得直接在 `main` / `master` 上修改或提交任务代码。** 新的独立任务从最新可用的 `main` 创建 `codex/<任务名>` 分支，再开始修改；用户指定分支时遵从用户要求。
 - 继续同一个任务时沿用它已有的工作分支，不重新切回主分支。
-- 一个分支只承载一个独立任务；不要在未完成的任务分支中混入无关工作。
 - 若发现任务改动已经发生在主分支，先完整保留改动，将本次任务保存到工作分支，再验证主分支恢复到原提交且工作区干净，最终切回工作分支。
 - 保留用户已有的修改和暂存状态，不使用整体重置、清理或覆盖操作丢弃其他工作。
 - 提交保持聚焦，英文提交信息使用 Conventional Commits，例如 `feat(eval): ...`、`fix: ...`、`docs: ...`。
@@ -38,12 +37,11 @@ uv run --extra desktop --extra dev --frozen python scripts/check_repo.py
 # 桌面应用测试；无显示环境按需设置 QT_QPA_PLATFORM=offscreen。
 uv run --extra desktop --extra dev --frozen pytest -q
 
-# 评估器测试与生产 Agent 离线回归。
+# 评估器自动化测试，包含生产 Agent 离线场景，不调用真实模型。
 uv run --project evals --extra dev --frozen pytest evals/tests -q
-uv run --project evals --frozen nemo-eval regression
 ```
 
-真实模型评估入口为 `uv run --project evals --frozen nemo-eval evaluate`。它会产生模型费用，在任务需要真实评估且配置就绪时执行。使用方法见 [维护者评估指南](docs/zh/agent-evaluation.md)。默认 CI 运行离线回归；真实评估和 Judge 使用显式配置，结果供维护者决定是否发布。
+真实模型评估入口为 `uv run --project evals --frozen nemo-eval evaluate`。它会产生模型费用，在任务需要真实评估且配置就绪时执行。使用方法见 [维护者评估指南](docs/zh/agent-evaluation.md)。默认 CI 通过 pytest 运行自动化测试；真实评估和 Judge 使用显式配置，结果供维护者决定是否发布。新增功能或修复缺陷时，按行为风险补充或更新相关自动化测试，并运行适当的检查；不为增加数量编写重复测试。
 
 ## 数据与发布
 

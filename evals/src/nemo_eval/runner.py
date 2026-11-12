@@ -18,7 +18,7 @@ import time
 from nemo_eval.artifacts import code_fingerprint, digest, write_json
 from nemo_eval.checks import evaluate, verdict
 from nemo_eval.contracts import validate
-from nemo_eval.budget import validate_config
+from nemo_eval.budget import cost_summary, validate_config
 
 
 def execute_worker(case, mode, config, variant=None):
@@ -150,21 +150,20 @@ def run(cases, out: Path, *, mode="offline", config=None, executor=None, repeat=
         executions.append(execution)
         if progress:
             progress(result, len(results), len(plan))
-    costs = [e.get("cost", {}) for e in executions if e["execution_status"] != "not_executed"]
+    costs = [e.get("cost") or cost_summary(e.get("llm_calls", []), expected_calls=e.get("model_calls"))
+             for e in executions if e["execution_status"] != "not_executed"]
     provider_amounts = {}
     for cost in costs:
         for currency, amount in cost.get("provider_reported", {}).items():
             provider_amounts[currency] = provider_amounts.get(currency, 0) + amount
-    known_cost = sum(c.get("known_cost_usd", 0) for c in costs)
     unknown_calls = sum(c.get("unknown_calls", 1) for c in costs)
     aggregated = aggregate(results)
     counts = aggregated["counts"]
     summary = {**aggregated, "mode": mode, "run_id": manifest["run_id"], "suite": suite,
-               "cost": {"target": {"known_cost_usd": known_cost, "estimated_cost_usd": known_cost,
-                                   "provider_reported": provider_amounts, "unknown_calls": unknown_calls,
-                                   "provider_unknown_calls": sum(c.get("provider_unknown_calls", 1) for c in costs),
-                                   "complete": mode == "live" and all(c.get("complete", False) for c in costs) and not halt_reason,
-                                   "applicable": mode == "live", "scope": "Target attempts only; configured estimates separate from provider charges"}},
+               "cost": {"target": {"provider_reported": provider_amounts, "unknown_calls": unknown_calls,
+                                   "reported_calls": sum(c["reported_calls"] for c in costs),
+                                   "complete": mode == "live" and bool(costs) and all(c["complete"] for c in costs) and not halt_reason,
+                                   "applicable": mode == "live", "scope": "Target attempts only; consult provider billing for actual charges"}},
                "budget_usage": {"model_calls": spent_calls, "output_reserved": spent_output, "uncertain": halt_reason == "unknown_worker_usage"},
                "selected": len(cases), "attempted": aggregated["executed"], "finished": len(results),
                "interrupted": interrupted, "statistics": execution_statistics(executions), "results": results}

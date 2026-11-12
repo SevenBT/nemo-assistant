@@ -119,11 +119,12 @@ Nemo Assistant records the execution chain for each conversation turn, making de
 - Security audit details.
 - Editable, redacted diagnostic export with a preview before saving.
 
-Developer regression testing lives in the independent [evaluation package](evals/README.md), with a headless offline CI suite and opt-in live-model/Judge commands.
+Automated tests for the independent [evaluation package](evals/README.md) run through pytest in CI, including headless production Agent scenarios. Real-model evaluation and judging are opt-in.
 
-From the repository root, run `uv run --project evals --frozen nemo-eval regression`
-for offline execution checks, or `uv run --project evals --frozen nemo-eval evaluate`
+From the repository root, run `uv run --project evals --frozen nemo-eval evaluate`
 for real-model tasks, automatic required judging and a final report after model setup.
+Developers run `uv run --project evals --extra dev --frozen pytest evals/tests -q`
+for automated code checks without model calls.
 
 ---
 

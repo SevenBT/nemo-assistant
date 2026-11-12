@@ -36,7 +36,7 @@ def variant(text):
 def test_typed_suites_and_live_tasks_cannot_consume_model_scripts():
     assert len(select_suite("offline-core").cases) == 3
     smoke, release = select_suite("live-smoke"), select_suite("live-release")
-    assert (len(smoke.cases), smoke.repeat, len(release.cases), release.repeat) == (4, 1, 12, 3)
+    assert (len(smoke.cases), smoke.repeat, len(release.cases), release.repeat) == (4, 1, 24, 3)
     assert {c["id"] for c in smoke.cases} <= {c["id"] for c in release.cases}
     for name, mode in (("core", "live"), ("offline-core", "live"), ("live-smoke", "offline")):
         with pytest.raises(ValueError):
@@ -141,13 +141,20 @@ def test_source_fingerprints_reject_evaluator_and_undeclared_application_changes
         compare(tmp_path / "new", tmp_path / "old", change="application")
 
 
-def test_single_regression_command_creates_unique_reports(tmp_path, monkeypatch):
+def test_removed_regression_command_never_dispatches(tmp_path, monkeypatch, capsys):
+    import nemo_eval.cli as cli
+    dispatched = []
+    monkeypatch.setattr(cli, "run", lambda *a, **kw: dispatched.append(1))
     monkeypatch.chdir(tmp_path)
-    assert main(["regression"]) == 0
-    assert main(["regression"]) == 0
-    directories = list((tmp_path / "artifacts/eval/offline").iterdir())
-    assert len(directories) == 2
-    assert all((p / "reports/initial/report.md").is_file() for p in directories)
+    with pytest.raises(SystemExit) as exc:
+        main(["regression"])
+    assert exc.value.code == 2
+    assert "invalid choice: 'regression'" in capsys.readouterr().err
+    assert not dispatched and not (tmp_path / "artifacts").exists()
+    with pytest.raises(SystemExit) as exc:
+        main(["--help"])
+    assert exc.value.code == 0
+    assert "regression" not in capsys.readouterr().out
 
 
 def test_pipeline_preflight_never_dispatches_wrong_suite_or_missing_judge(tmp_path, monkeypatch):
@@ -157,7 +164,6 @@ def test_pipeline_preflight_never_dispatches_wrong_suite_or_missing_judge(tmp_pa
     monkeypatch.setenv("TEST_EVAL_TARGET", "controlled-test-credential")
     path = tmp_path / "target.toml"
     path.write_text("[target]\nmodel='controlled'\napi_key_env='TEST_EVAL_TARGET'\n[budget]\nmax_model_calls=100\nmax_output_tokens=100000\n", encoding="utf-8")
-    assert main(["regression", "--suite", "live-smoke"]) == 2
     assert main(["evaluate", "--suite", "offline-core", "--config", str(path)]) == 2
     # Explicitly direct default config lookup to an empty local config directory.
     monkeypatch.setattr(cli, "ROOT", tmp_path)
@@ -315,9 +321,47 @@ def test_live_command_uses_real_worker_and_http_gateway_without_paid_provider(tm
     view = make_view(out)
     assert view["counts"]["pass"] == 2
     assert view["statistics"]["usage"]["prompt_tokens"]["known_total"] == 8
+    assert view["cost"]["target"]["provider_reported"] == {}
+    assert view["cost"]["target"]["unknown_calls"] == 2
+    assert not view["cost"]["target"]["complete"]
+    assert not {"known_cost_usd", "estimated_cost_usd", "pricing"} & view["cost"]["target"].keys()
     assert (out / "reports/initial/report.md").is_file()
 
 
 def read_json_config(path):
     import tomllib
     return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def test_run_summarizes_provider_charges_and_keeps_usage(tmp_path):
+    from nemo_eval.budget import cost_summary
+    from nemo_eval.reporting import markdown
+    calls = iter([
+        {"attempt_id": "one", "provider_cost": {"amount": 0.01, "currency": "USD"}},
+        {"attempt_id": "two", "provider_cost": {"amount": 0, "currency": "CNY"}},
+        {"attempt_id": "three"},
+    ])
+    def executor(_):
+        record = {**next(calls), "usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+        return execution(llm_calls=[record], cost=cost_summary([record], expected_calls=1))
+    directory = tmp_path / "charges"
+    summary = run([live_case()], directory, mode="live", config=config(), repeat=3, executor=executor)
+    cost = summary["cost"]["target"]
+    assert cost["provider_reported"] == {"USD": 0.01, "CNY": 0}
+    assert (cost["reported_calls"], cost["unknown_calls"], cost["complete"]) == (2, 1, False)
+    assert summary["statistics"]["usage"]["prompt_tokens"]["known_total"] == 30
+    report = markdown(make_view(directory))
+    assert "estimated_cost_usd" not in report and "known_cost_usd" not in report
+    assert "provider billing console" in report
+
+
+def test_obsolete_pricing_fails_before_dispatch(tmp_path, monkeypatch):
+    import nemo_eval.cli as cli
+    monkeypatch.setenv("TEST_EVAL_TARGET", "controlled-test-credential")
+    cfg = tmp_path / "target.toml"
+    cfg.write_text("[target]\nmodel='controlled'\napi_key_env='TEST_EVAL_TARGET'\n[target.pricing]\ninput_per_1m=1\noutput_per_1m=2\n[budget]\nmax_model_calls=100\nmax_output_tokens=100000\n", encoding="utf-8")
+    dispatched = []
+    monkeypatch.setattr(cli, "run", lambda *a, **kw: dispatched.append(1))
+    out = tmp_path / "not-created"
+    assert main(["evaluate", "--suite", "live-smoke", "--config", str(cfg), "--out", str(out)]) == 2
+    assert not dispatched and not out.exists()

@@ -1,26 +1,28 @@
-# Offline regression and live-model evaluation
+# Live-model evaluation and automated tests
 
 Evaluation is a developer tool. Normal conversations never invoke a Judge.
 The adapter runs the production Agent without Qt, desktop settings or the
-user's runtime database. Run from the repository root. The everyday entry points
-each perform a complete pipeline and create a unique output directory:
+user's runtime database. Run from the repository root. The everyday evaluation
+entry point performs a complete pipeline and creates a unique output directory:
 
 ```powershell
-# Scripted production execution regression; no model calls or credentials.
-uv run --project evals --frozen nemo-eval regression
-
 # Real target model + required Judge + final report, after one-time configuration.
 uv run --project evals --frozen nemo-eval evaluate
 ```
 
 See the [Chinese maintainer guide](../docs/zh/agent-evaluation.md) for setup and
-prompt-release examples. `regression` defaults to offline-core (3 cases, once).
-`evaluate` defaults to live-release (12 tasks, three repetitions = 36 task
+prompt-release examples. Automated code checks, including the three scripted
+production Agent scenarios, run through pytest and CI rather than a separate
+regression command.
+`evaluate` defaults to live-release (24 tasks, three repetitions = 72 task
 executions). `evaluate --suite live-smoke` runs four tasks once and needs no Judge.
+`evaluate --suite live-challenge` runs the 12 harder tasks once, including three
+required Judge assessments. The full release suite includes these tasks and
+requires 15 Judge assessments. See the [case catalog](cases/README.md).
 Every task can require several model calls. This is not a dollar spending limit.
 
-Both commands print the complete report path. Optional `--out` must name a new
-directory; otherwise directories are created under artifacts/eval/offline or live.
+The evaluate command prints the complete report path. Optional `--out` must name a
+new directory; otherwise directories are created under artifacts/eval/live.
 JSON, JUnit and Markdown distinguish execution completion from task acceptance.
 Every planned repetition has a result, including errors, interruptions and tasks
 not executed after budget exhaustion. Missing required evidence never passes.
@@ -67,6 +69,9 @@ uv run --project evals --frozen nemo-eval evaluate
 
 # Quickly check target connectivity and representative tasks, without Judge.
 uv run --project evals --frozen nemo-eval evaluate --suite live-smoke
+
+# Run only the harder conversation, file and recovery tasks, once per task.
+uv run --project evals --frozen nemo-eval evaluate --suite live-challenge
 
 # Override the default production prompt with a versioned text variant.
 uv run --project evals --frozen nemo-eval evaluate --variant evals/variants/examples/custom-prompt.toml
@@ -121,13 +126,18 @@ file; exceeding this fails execution rather than silently truncating evidence.
 
 Paid runs reserve model-call count and maximum output tokens across the suite.
 They require one provider attempt per request; this is an output reservation,
-not an input-token or dollar spending ceiling. Profiles may provide explicit
-per-million-token pricing; missing prices or usage remain unknown. Cost records
-identify target versus Judge, with independent assessments and budget usage.
+not an input-token or dollar spending ceiling. Profiles no longer accept pricing:
+remove any old pricing section before running. No token prices or local monetary
+estimates are maintained. Only explicit provider charges are summarized, by
+currency, separately for target and Judge; absent charges remain unknown even
+when token usage is known. Consult your actual provider billing console for
+charges; the evaluator does not query account billing. Historical runs remain
+unchanged and any old estimate fields are not invoices. Assessments and request
+budgets remain independent.
 Judge input is redacted, capped at 60,000 characters and rejected if too large;
 requests, hashes, sanitized responses and structured verdicts are saved.
-Execution artifacts remain local and contain full fixture data. CI uploads only
-summary, JUnit and Markdown from reviewed synthetic cases.
+Execution artifacts remain local and contain full fixture data. CI uploads the
+pytest JUnit report from automated tests; it never runs paid evaluation.
 
 Baseline comparison refuses changed tasks, modes, repeat counts, environment,
 evaluator source and undeclared model/configuration changes. --change prompt
@@ -150,7 +160,9 @@ uv run --project evals --frozen nemo-eval validate --suite offline-core
 uv run --project evals --frozen nemo-eval validate --suite live-release
 ```
 
-The old run --suite core --mode offline remains an offline compatibility alias.
+The old run --suite core --mode offline remains available for legacy offline
+diagnostics; it is not a separate daily test workflow. Automated regression
+checks run through pytest, including the production Agent scenarios.
 The old core/live combination fails before any model call and directs developers
 to evaluate. Historical schema-1 reports remain readable, but cannot be formally
 compared against schema-2 repeated runs. Controlled-client tests verify pipeline
