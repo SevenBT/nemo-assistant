@@ -12,11 +12,18 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
+import threading
+import time
 from typing import Any
 
 # 缓存已加载的 litellm 模块，避免重复设置环境变量与重复 import 开销。
 _litellm: Any = None
+_load_lock = threading.Lock()
+_warmup_lock = threading.Lock()
+_warmup_thread: threading.Thread | None = None
+logger = logging.getLogger(__name__)
 
 
 class LiteLLMUnavailableError(ImportError):
@@ -30,9 +37,18 @@ def load_litellm() -> Any:
         LiteLLMUnavailableError: 顶层包缺失（真没装），或导入时发生其它异常。
             其 message 区分两种情况，便于用户对症处理。
     """
-    global _litellm
     if _litellm is not None:
         return _litellm
+
+    # Startup warmup and an early user request must share one initialization.
+    with _load_lock:
+        if _litellm is not None:
+            return _litellm
+        return _import_litellm()
+
+
+def _import_litellm() -> Any:
+    global _litellm
 
     # 必须在 import litellm 之前设置，禁用启动时的远程价格表拉取。
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
@@ -50,3 +66,38 @@ def load_litellm() -> Any:
 
     _litellm = litellm
     return litellm
+
+
+def warm_litellm_async() -> bool:
+    """Preload the shared SDK locally without inference or credential access.
+
+    Returns whether a background task started. Failures leave normal loading
+    retryable, so a startup failure never prevents a later user request.
+    """
+    global _warmup_thread
+    with _warmup_lock:
+        if _litellm is not None or (
+            _warmup_thread is not None and _warmup_thread.is_alive()
+        ):
+            return False
+        thread = threading.Thread(
+            target=_warm_litellm, name="llm-sdk-warmup", daemon=True
+        )
+        _warmup_thread = thread
+        try:
+            thread.start()
+        except Exception:
+            _warmup_thread = None
+            logger.debug("Unable to start LLM SDK warmup", exc_info=True)
+            return False
+        return True
+
+
+def _warm_litellm() -> None:
+    started = time.perf_counter()
+    try:
+        load_litellm()
+    except Exception:
+        logger.debug("LLM SDK warmup failed; will retry on demand", exc_info=True)
+    else:
+        logger.info("LLM SDK ready in %.0fms", (time.perf_counter() - started) * 1000)

@@ -113,10 +113,12 @@ def _setup_crash_log():
 
 _setup_crash_log()
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 from app.core.config import cfg
+from app.core.litellm_loader import warm_litellm_async
 from app.core.note_manager import NoteManager
 from app.core.scheduler import SchedulerManager
 from app.core.session_manager import SessionManager
@@ -167,6 +169,8 @@ def main():
     custom_qss = apply_theme(cfg.get(cfg.theme), content_font_size=cfg.get(cfg.contentFontSize), editor_font_size=cfg.get(cfg.editorFontSize))
     app.setStyleSheet(custom_qss)
     window.show()
+    # Let the first frame render before preloading the shared SDK off the UI thread.
+    QTimer.singleShot(500, warm_litellm_async)
     window.schedule_ocr_warmup()
 
     exit_code = app.exec()
