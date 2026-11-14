@@ -15,6 +15,10 @@
 
 from app.i18n.en import EN
 from app.i18n.zh import ZH
+from app.i18n.sticky import EN_STICKY, ZH_STICKY
+
+EN.update(EN_STICKY)
+ZH.update(ZH_STICKY)
 
 _TABLES: dict[str, dict[str, str]] = {"en": EN, "zh": ZH}
 

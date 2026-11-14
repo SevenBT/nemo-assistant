@@ -120,11 +120,11 @@ class ToolSummaryWidget(QFrame):
     def _refresh_detail(self, tool: dict, *, theme: dict | None = None) -> None:
         theme = theme or style.get_current_theme()
         if tool["status"] == "pending":
-            icon, color = "⟳", theme["warning"]
+            icon, color = "⟳", style.theme_text_color("warning", theme)
         elif tool["status"] == "success":
-            icon, color = "✓", theme["success"]
+            icon, color = "✓", style.theme_text_color("success", theme)
         else:
-            icon, color = "✗", theme["error"]
+            icon, color = "✗", style.theme_text_color("error", theme)
         label = tool["label"]
         label.setText(f"  {icon} {tool['name']}")
         label.setStyleSheet(f"color: {color}")

@@ -320,8 +320,8 @@ class _DetailPane(QWidget):
                 ptype = pdata.get("type", "string")
                 pdesc = pdata.get("description", "")
                 lines.append(
-                    f"<b>{pname}</b>{req}  <span style='color:#9CA3AF'>({ptype})</span><br>"
-                    f"<span style='color:#6B7280;font-size:11px'>{pdesc}</span>"
+                    f"<b>{pname}</b>{req}  ({ptype})<br>"
+                    f"<span style='font-size:11px'>{pdesc}</span>"
                 )
             params_lbl.setText("<br>".join(lines))
             params_lbl.setTextFormat(Qt.TextFormat.RichText)

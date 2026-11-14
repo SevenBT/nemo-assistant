@@ -98,6 +98,25 @@ class DatabaseManager:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS sticky_settings (
+                note_id INTEGER PRIMARY KEY,
+                settings TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS sticky_reminders (
+                note_id INTEGER PRIMARY KEY,
+                rule TEXT NOT NULL,
+                next_at TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS sticky_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                settings TEXT NOT NULL DEFAULT '{}'
+            );
             """
         )
         conn.commit()
@@ -138,16 +157,11 @@ class DatabaseManager:
         conn.commit()
 
     def _create_triggers(self, conn: sqlite3.Connection):
-        """创建触发器以自动更新时间戳。"""
-        conn.executescript(
-            """
-            CREATE TRIGGER IF NOT EXISTS update_notes_timestamp
-            AFTER UPDATE ON notes
-            FOR EACH ROW
-            BEGIN
-                UPDATE notes SET updated_at = datetime('now') WHERE id = NEW.id;
-            END;
-            """
-        )
+        """Remove the legacy trigger; content mutations write local ISO times.
+
+        The old trigger timestamped moves/pins and overwrote application times
+        with UTC text, making merely viewing a pinned note appear to edit it.
+        """
+        conn.execute("DROP TRIGGER IF EXISTS update_notes_timestamp")
         conn.commit()
 

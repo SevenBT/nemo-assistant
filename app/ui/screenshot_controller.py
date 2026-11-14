@@ -3,7 +3,7 @@
 import logging
 from io import BytesIO
 
-from PyQt6.QtCore import QObject, QPoint, QTimer, QBuffer, QIODevice
+from PyQt6.QtCore import QObject, QPoint, QTimer, QBuffer, QIODevice, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtWidgets import QApplication, QFileDialog, QWidget
 
@@ -31,6 +31,8 @@ class ScreenshotController(QObject):
       extracts text.
     """
 
+    capture_state_changed = pyqtSignal(bool)
+
     def __init__(
         self,
         window: QWidget,
@@ -43,6 +45,7 @@ class ScreenshotController(QObject):
         self._vision_callback = vision_callback
         self._ocr_engine_service = ocr_engine_service
         self._overlay: ScreenshotOverlay | None = None
+        self._starting = False
         self._pin_windows: list[PinWindow] = []
         self._shot_counter = 0
 
@@ -50,22 +53,42 @@ class ScreenshotController(QObject):
         """Wire the chat hook after the session controller exists."""
         self._vision_callback = vision_callback
 
+    @property
+    def active(self):
+        return self._starting or self._overlay is not None
+
     def start(self):
-        if self._overlay is not None:
+        if self._overlay is not None or self._starting:
             return
+        self._starting = True
+        self.capture_state_changed.emit(True)
         self._window.hide()
         QTimer.singleShot(200, self._show_overlay)
 
     def _show_overlay(self):
-        self._overlay = ScreenshotOverlay(
-            ocr_engine_service=self._ocr_engine_service,
-        )
+        try:
+            self._overlay = ScreenshotOverlay(ocr_engine_service=self._ocr_engine_service)
+        except Exception:
+            self._starting = False
+            self.capture_state_changed.emit(False)
+            self._window.show()
+            logger.exception("Failed to open screenshot overlay")
+            return
+        self._starting = False
         self._overlay.captured.connect(self._on_done)
+        overlay = self._overlay
+        overlay.closed.connect(lambda: self._on_overlay_closed(overlay))
         self._overlay.show()
         self._overlay.activateWindow()
 
+    def _on_overlay_closed(self, overlay):
+        if self._overlay is overlay:
+            self._on_done(QPixmap(), "cancel", "", QPoint())
+
     def _on_done(self, pixmap: QPixmap, action: str, ocr_text: str, pos: QPoint):
         self._overlay = None
+        self._starting = False
+        self.capture_state_changed.emit(False)
         self._window.show()
         self._window.raise_()
         self._window.activateWindow()

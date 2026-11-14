@@ -13,9 +13,10 @@ from typing import Optional, Union
 
 from app.core.db_manager import DatabaseManager
 from app.models.note import Note, Folder
+from app.core.sticky_store import StickyStore
 
 
-class NoteManager:
+class NoteManager(StickyStore):
     """笔记管理器，负责笔记的增删改查和回收站管理。"""
 
     def __init__(self, db_manager: Optional[DatabaseManager] = None):
@@ -137,6 +138,15 @@ class NoteManager:
         """
         note_id = self._normalize_id(note_id)
         with self.db.get_connection() as conn:
+            existing = conn.execute("SELECT * FROM notes WHERE id=? AND is_deleted=0", (note_id,)).fetchone()
+            if not existing:
+                return None
+            same_fields = all(existing[key] == value for key, value in (
+                ("title", title), ("content", content), ("priority", priority),
+                ("due_date", due_date), ("recurrence", recurrence)))
+            same_tags = tags is None or set(self._get_note_tags(conn, note_id)) == set(tags)
+            if same_fields and same_tags:
+                return self.get(note_id)
             now = datetime.now().isoformat()
             cursor = conn.execute(
                 """
@@ -176,6 +186,7 @@ class NoteManager:
                 """,
                 (now, now, note_id),
             )
+            conn.execute("UPDATE sticky_reminders SET enabled=0 WHERE note_id=?", (note_id,))
             conn.commit()
 
     # ------------------------------------------------------------------ trash CRUD
@@ -241,12 +252,18 @@ class NoteManager:
         """
         note_id = self._normalize_id(note_id)
         with self.db.get_connection() as conn:
+            if not conn.execute("SELECT 1 FROM notes WHERE id=? AND is_deleted=1", (note_id,)).fetchone():
+                return
+            conn.execute("DELETE FROM sticky_settings WHERE note_id=?", (note_id,))
+            conn.execute("DELETE FROM sticky_reminders WHERE note_id=?", (note_id,))
             conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
             conn.commit()
 
     def purge_all(self):
         """清空整个回收站。"""
         with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM sticky_settings WHERE note_id IN (SELECT id FROM notes WHERE is_deleted=1)")
+            conn.execute("DELETE FROM sticky_reminders WHERE note_id IN (SELECT id FROM notes WHERE is_deleted=1)")
             conn.execute("DELETE FROM notes WHERE is_deleted = 1")
             conn.commit()
 

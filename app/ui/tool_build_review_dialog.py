@@ -127,7 +127,7 @@ class ToolBuildReviewPanel(QWidget):
         self.set_install_enabled(False, t("tooldlg.review.install_blocked_simple"))
 
     def _set_status(self, text: str, color_key: str, icon: FluentIcon) -> None:
-        color = style.get_current_theme()[color_key]
+        color = style.theme_text_color(color_key)
         self._status_icon.setIcon(icon)
         self._summary_label.setText(text)
         self._summary_label.setAccessibleName(text)
