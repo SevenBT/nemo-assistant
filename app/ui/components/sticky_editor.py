@@ -1,4 +1,4 @@
-"""Shared rich-text sticky editor, including persistent native Qt checklist blocks."""
+"""Shared rich-text sticky editor for desktop notes and the note library."""
 import re
 import uuid
 import json
@@ -6,7 +6,7 @@ import html
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QImage, QPalette, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextFormat, QTextImageFormat, QTextListFormat
+from PyQt6.QtGui import QColor, QFont, QImage, QPalette, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextFormat, QTextImageFormat
 from PyQt6.QtWidgets import QColorDialog, QFileDialog, QFontDialog, QMenu, QMessageBox, QTextEdit
 
 from app.config.config import NOTES_IMAGES_DIR
@@ -29,7 +29,6 @@ class StickyEditor(QTextEdit):
         super().__init__(parent)
         self.images_dir = Path(images_dir or NOTES_IMAGES_DIR)
         self.document().setBaseUrl(QUrl.fromLocalFile(str(self.images_dir.parent) + "/"))
-        self._hide_completed = False
 
     def load_content(self, content):
         # QTextEdit retains the insertion format when replacing an empty/plain
@@ -44,11 +43,11 @@ class StickyEditor(QTextEdit):
         try:
             self._restore_explicit_colors(content)
             self._remove_legacy_theme_colors()
+            self._remove_legacy_checklists()
         finally:
             document.setUndoRedoEnabled(True)
         if document.isEmpty():
             self.setCurrentCharFormat(QTextCharFormat())
-        self.hide_completed(self._hide_completed)
 
     def _restore_explicit_colors(self, content):
         match = re.search(r'<meta\s+name="' + _COLOR_META + r'"\s+content="([^"]*)"\s*/?>', content)
@@ -126,137 +125,32 @@ class StickyEditor(QTextEdit):
         fmt.setProperty(_EXPLICIT_COLOR, True)
         self.mergeCurrentCharFormat(fmt)
 
-    def task_counts(self):
-        completed = total = 0
+    def _remove_legacy_checklists(self):
+        """Keep old checklist bodies as ordinary paragraphs without task state."""
         block = self.document().begin()
         while block.isValid():
-            marker = block.blockFormat().marker()
+            fmt = block.blockFormat()
+            marker = fmt.marker()
             if marker != QTextBlockFormat.MarkerType.NoMarker:
-                total += 1
-                completed += marker == QTextBlockFormat.MarkerType.Checked
-            block = block.next()
-        return completed, total
-
-    def insert_todo(self):
-        if self.isReadOnly():
-            return
-        cursor = self.textCursor()
-        start, end = cursor.selectionStart(), cursor.selectionEnd()
-        cursor.beginEditBlock()
-        cursor.setPosition(start)
-        while True:
-            if cursor.currentList() is None:
-                fmt = QTextListFormat()
-                fmt.setStyle(QTextListFormat.Style.ListDisc)
-                fmt.setIndent(1)
-                cursor.createList(fmt)
-            fmt = cursor.blockFormat()
-            fmt.setMarker(QTextBlockFormat.MarkerType.Unchecked)
-            cursor.setBlockFormat(fmt)
-            nxt = cursor.block().next()
-            if not nxt.isValid() or nxt.position() >= end:
-                break
-            cursor.setPosition(nxt.position())
-        cursor.endEditBlock()
-        self.setTextCursor(cursor)
-
-    def toggle_task(self, block=None):
-        if self.isReadOnly():
-            return
-        cursor = QTextCursor(block) if block is not None else self.textCursor()
-        fmt = cursor.blockFormat()
-        marker = fmt.marker()
-        if marker == QTextBlockFormat.MarkerType.NoMarker:
-            return
-        checked = marker != QTextBlockFormat.MarkerType.Checked
-        cursor.beginEditBlock()
-        fmt.setMarker(QTextBlockFormat.MarkerType.Checked if checked else QTextBlockFormat.MarkerType.Unchecked)
-        cursor.setBlockFormat(fmt)
-        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
-        char_fmt = QTextCharFormat()
-        char_fmt.setFontStrikeOut(checked)
-        cursor.mergeCharFormat(char_fmt)
-        cursor.endEditBlock()
-        self.hide_completed(self._hide_completed)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and not self.isReadOnly():
-            cursor = self.cursorForPosition(event.position().toPoint())
-            if cursor.blockFormat().marker() != QTextBlockFormat.MarkerType.NoMarker:
-                cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
-                rect = self.cursorRect(cursor)
-                if rect.x() - 28 <= event.position().x() < rect.x():
-                    self.toggle_task(cursor.block())
-                    event.accept()
-                    return
-        super().mousePressEvent(event)
-
-    def keyPressEvent(self, event):
-        cursor = self.textCursor()
-        is_task = cursor.blockFormat().marker() != QTextBlockFormat.MarkerType.NoMarker
-        if is_task and not self.isReadOnly():
-            if event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
-                current_list = cursor.currentList()
-                if current_list is None:
-                    return
-                fmt = current_list.format()
-                fmt.setIndent(max(1, min(6, fmt.indent() + (-1 if event.key() == Qt.Key.Key_Backtab else 1))))
-                cursor.createList(fmt)
-                return
-            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers():
-                if not cursor.block().text().strip():
-                    cursor.beginEditBlock()
-                    if cursor.currentList():
-                        cursor.currentList().remove(cursor.block())
-                    fmt = QTextBlockFormat()
-                    cursor.setBlockFormat(fmt)
-                    cursor.endEditBlock()
-                    self.setTextCursor(cursor)
-                    self._reset_task_strike()
-                    return
-                super().keyPressEvent(event)
-                cursor = self.textCursor()
-                fmt = cursor.blockFormat()
-                fmt.setMarker(QTextBlockFormat.MarkerType.Unchecked)
+                cursor = QTextCursor(block)
+                if cursor.currentList():
+                    cursor.currentList().remove(block)
+                fmt.setObjectIndex(-1)
+                fmt.setMarker(QTextBlockFormat.MarkerType.NoMarker)
+                fmt.setIndent(0)
+                fmt.setTextIndent(0)
                 cursor.setBlockFormat(fmt)
-                self.setTextCursor(cursor)
-                self._reset_task_strike()
-                return
-        super().keyPressEvent(event)
-
-    def _reset_task_strike(self):
-        fmt = self.currentCharFormat()
-        fmt.setFontStrikeOut(False)
-        self.setCurrentCharFormat(fmt)
-
-    def hide_completed(self, hide):
-        self._hide_completed = hide
-        block = self.document().begin()
-        while block.isValid():
-            block.setVisible(not (hide and block.blockFormat().marker() == QTextBlockFormat.MarkerType.Checked))
+                if marker == QTextBlockFormat.MarkerType.Checked:
+                    char_fmt = QTextCharFormat()
+                    char_fmt.setFontStrikeOut(False)
+                    cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+                    cursor.mergeCharFormat(char_fmt)
+                    cursor.mergeBlockCharFormat(char_fmt)
+                block.setVisible(True)
             block = block.next()
-        self.document().markContentsDirty(0, self.document().characterCount())
-        self.viewport().update()
-
-    def reset_completed(self):
-        cursor = QTextCursor(self.document())
-        cursor.beginEditBlock()
-        block = self.document().begin()
-        while block.isValid():
-            if block.blockFormat().marker() == QTextBlockFormat.MarkerType.Checked:
-                self.toggle_task(block)
-            block = block.next()
-        cursor.endEditBlock()
 
     def plain_text(self):
-        parts = []
-        block = self.document().begin()
-        while block.isValid():
-            marker = block.blockFormat().marker()
-            prefix = "[x] " if marker == QTextBlockFormat.MarkerType.Checked else "[ ] " if marker == QTextBlockFormat.MarkerType.Unchecked else ""
-            parts.append(prefix + block.text())
-            block = block.next()
-        return "\n".join(parts)
+        return self.toPlainText()
 
     def add_image(self, image):
         if self.isReadOnly() or image.isNull():
@@ -315,7 +209,12 @@ class StickyEditor(QTextEdit):
                     if not image.save(str(target), "PNG"):
                         raise OSError("Could not save pasted image")
                     tag["src"] = QUrl.fromLocalFile(str(target)).toString()
-            self.textCursor().insertHtml(str(soup))
+            cursor = self.textCursor()
+            cursor.beginEditBlock()
+            cursor.insertHtml(str(soup))
+            self._remove_legacy_checklists()
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
             return
         super().insertFromMimeData(source)
 
@@ -365,7 +264,6 @@ class StickyEditor(QTextEdit):
     def add_insert_menu(self, menu):
         from datetime import datetime
         insert = menu.addMenu(t("sticky.insert"))
-        insert.addAction(t("sticky.insert.todo"), self.insert_todo)
         insert.addAction(t("sticky.insert.image"), self.choose_image)
         insert.addAction(t("sticky.insert.divider"), lambda: self.textCursor().insertHtml("<hr>"))
         insert.addAction(t("sticky.insert.date"), lambda: self.insertPlainText(datetime.now().strftime("%Y-%m-%d %H:%M")))

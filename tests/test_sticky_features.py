@@ -1,4 +1,4 @@
-"""Sticky persistence, real Qt checklist editing, desktop state and local reminders."""
+"""Sticky persistence, legacy content compatibility, desktop state and local reminders."""
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -55,49 +55,72 @@ def test_preferences_and_reminders_survive_reload_without_mutating_content(notes
     assert reopened.get_sticky_reminder(note.id) is None
 
 
-def test_checklists_round_trip_mixed_text_enter_undo_and_completion(qtbot):
+@pytest.mark.parametrize("paste", [False, True])
+def test_legacy_checklists_become_plain_paragraphs_and_round_trip(qtbot, paste):
     editor = StickyEditor()
     qtbot.addWidget(editor)
-    editor.setPlainText("paragraph")
-    editor.moveCursor(QTextCursor.MoveOperation.End)
-    editor.append("first task")
-    editor.insert_todo()
-    assert editor.task_counts() == (0, 1)
-    editor.toggle_task()
-    assert editor.task_counts() == (1, 1)
-    editor.hide_completed(True)
-    assert not editor.textCursor().block().isVisible()
-    html = editor.toHtml()
-    assert 'class="checked"' in html
-    editor.load_content(html)
-    assert editor.task_counts() == (1, 1)
-    editor.hide_completed(False)
+    content = ('<p>paragraph</p><ul><li class="checked"><span style="text-decoration:line-through;font-weight:700">done</span></li>'
+               '<li class="unchecked">pending<ul><li class="checked"><s>nested</s></li></ul></li></ul>')
+    if paste:
+        mime = QMimeData()
+        mime.setHtml(content)
+        editor.insertFromMimeData(mime)
+    else:
+        editor.load_content(content)
+    assert editor.plain_text().splitlines() == ["paragraph", "done", "pending", "nested"]
+    block = editor.document().begin()
+    while block.isValid():
+        assert block.blockFormat().marker() == QTextBlockFormat.MarkerType.NoMarker
+        assert QTextCursor(block).currentList() is None
+        assert block.isVisible()
+        cursor = QTextCursor(block)
+        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+        assert not cursor.charFormat().fontStrikeOut()
+        block = block.next()
+    assert 'font-weight:700' in editor.toHtml()
+    assert 'line-through' not in editor.toHtml()
+    saved = editor.toHtml()
+    if paste:
+        editor.undo()
+        assert editor.toPlainText() == ""
+        editor.redo()
+        assert editor.toHtml() == saved
+    editor.load_content(saved)
+    assert editor.plain_text().splitlines() == ["paragraph", "done", "pending", "nested"]
+    assert not editor.document().isUndoAvailable()
     editor.moveCursor(QTextCursor.MoveOperation.End)
     qtbot.keyClick(editor, Qt.Key.Key_Return)
-    assert editor.task_counts() == (1, 2)
-    assert editor.textCursor().blockFormat().marker() == QTextBlockFormat.MarkerType.Unchecked
-    qtbot.keyClick(editor, Qt.Key.Key_Return)
-    assert editor.textCursor().blockFormat().marker() == QTextBlockFormat.MarkerType.NoMarker
-    editor.reset_completed()
-    assert editor.task_counts()[0] == 0
-    assert editor.plain_text().startswith("paragraph")
+    qtbot.keyClicks(editor, "next paragraph")
+    assert editor.textCursor().currentList() is None
+    assert not editor.currentCharFormat().fontStrikeOut()
 
 
-def test_multiline_to_checklist_and_locked_editor(qtbot):
-    editor = StickyEditor()
+def test_legacy_conversion_preserves_other_rich_text_and_locked_editor(qtbot, tmp_path):
+    editor = StickyEditor(images_dir=tmp_path)
     qtbot.addWidget(editor)
-    editor.setPlainText("one\ntwo\nthree")
+    image = QImage(10, 10, QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.blue)
+    image_path = tmp_path / "attachment.png"
+    assert image.save(str(image_path))
+    editor.load_content('<p><s>manual strike</s></p><ul><li>ordinary list</li></ul>'
+                        '<ul><li class="checked"><b>done</b><img src="' + QUrl.fromLocalFile(str(image_path)).toString() + '" /></li></ul>')
+    assert '<img ' in editor.toHtml()
+    assert 'manual strike' in editor.toPlainText()
+    assert 'line-through' in editor.toHtml()  # Ordinary formatting is still supported.
+    assert QTextCursor(editor.document().begin().next()).currentList() is not None
+    assert QTextCursor(editor.document().lastBlock()).currentList() is None
     editor.selectAll()
-    editor.insert_todo()
-    assert editor.task_counts() == (0, 3)
-    editor.toggle_task()
-    editor.undo()
-    assert editor.task_counts() == (0, 3)
+    from PyQt6.QtGui import QColor
+    editor.setTextColor(QColor("#ff4488"))
+    editor.load_content(editor.toHtml())
+    editor.selectAll()
+    assert editor.currentCharFormat().foreground().color() == QColor("#ff4488")
     editor.setReadOnly(True)
-    html = editor.toHtml()
-    editor.toggle_task()
-    editor.insert_todo()
-    assert editor.toHtml() == html
+    saved = editor.toHtml()
+    mime = QMimeData()
+    mime.setHtml('<ul><li class="unchecked">new task</li></ul>')
+    editor.insertFromMimeData(mime)
+    assert editor.toHtml() == saved
 
 
 def test_image_paste_and_html_copy_keep_owned_files(qtbot, tmp_path):
@@ -184,17 +207,17 @@ def test_title_buttons_have_larger_targets_hand_cursor_and_theme_feedback(deskto
     assert not win.isVisible()
 
 
-def test_no_stale_content_overwrite_and_cross_surface_checklist(desktop, notes):
+def test_no_stale_content_overwrite_and_cross_surface_plain_text(desktop, notes):
     panel, controller = desktop
     win = panel._on_new("sticky")
     key = win._note_id
-    win._content_edit.setPlainText("first task")
-    win._content_edit.insert_todo()
+    win._content_edit.setPlainText("first paragraph")
     win._flush()
-    assert panel._sticky_edit.task_counts() == (0, 1)
-    panel._sticky_edit.toggle_task()
+    assert panel._sticky_edit.toPlainText() == "first paragraph"
+    panel._sticky_edit.moveCursor(QTextCursor.MoveOperation.End)
+    panel._sticky_edit.insertPlainText(" library edit")
     panel._flush_current()
-    assert win._content_edit.task_counts() == (1, 1)
+    assert win._content_edit.toPlainText() == "first paragraph library edit"
     content = notes.get(key).content
     win._flush()
     assert notes.get(key).content == content
@@ -207,33 +230,33 @@ def test_no_stale_content_overwrite_and_cross_surface_checklist(desktop, notes):
 
 
 def test_template_and_duplicate_do_not_copy_active_reminders(desktop, notes):
+    from app.i18n import t
     panel, controller = desktop
     win = controller.create_note("template:today")
     key = win._note_id
-    assert win._content_edit.task_counts()[1] == 1
+    assert win._content_edit.plain_text() == t("sticky.template.todayBody")
+    assert win._content_edit.textCursor().currentList() is None
     future = datetime.now(timezone.utc) + timedelta(hours=1)
     notes.set_sticky_reminder(key, {"repeat": "once"}, future.isoformat())
     duplicate = controller.duplicate(key)
     assert notes.get_sticky_reminder(duplicate.id) is None
     assert duplicate.note_type == "sticky"
-    win._content_edit.toggle_task()
-    editor = StickyEditor()
-    editor.load_content(win._content_edit.toHtml())
-    editor.reset_completed()
-    template_id = notes.save_sticky_template("test", editor.toHtml(), notes.get_sticky_settings(key))
-    editor.deleteLater()
+    legacy = '<ul><li class="checked"><s>saved template body</s></li></ul>'
+    template_id = notes.save_sticky_template("test", legacy, notes.get_sticky_settings(key))
     templated = controller.create_note("saved:" + str(template_id))
-    assert templated._content_edit.task_counts() == (0, 1)
+    assert templated._content_edit.plain_text() == "saved template body"
+    assert 'class="checked"' not in notes.get(templated._note_id).content
+    assert 'line-through' not in notes.get(templated._note_id).content
     assert notes.get_sticky_reminder(templated._note_id) is None
 
 
 def test_filters_and_bulk_actions_use_shared_registry(desktop, notes):
     panel, controller = desktop
     win = panel._on_new("sticky")
-    win._content_edit.setPlainText("todo")
-    win._content_edit.insert_todo()
+    win._content_edit.setPlainText("body")
     win._flush()
-    panel._sticky_filter.setCurrentIndex(panel._sticky_filter.findData("tasks"))
+    assert panel._sticky_filter.findData("tasks") == -1
+    panel._sticky_filter.setCurrentIndex(panel._sticky_filter.findData("visible"))
     assert panel._list.count() == 1
     panel._list.setCurrentRow(0)
     panel._bulk_sticky("hide")
@@ -305,43 +328,44 @@ def test_reminder_settings_and_card_are_actionable(notes, qtbot):
     service.stop()
 
 
-def test_existing_text_and_checklists_load_on_selection_and_copy(desktop, notes, qapp):
+def test_legacy_checklists_show_plain_text_in_both_editors_and_copy(desktop, notes, qapp):
     panel, controller = desktop
-    note = notes.create("saved", "梯田体坛", "sticky")
+    legacy = '<p>梯田体坛</p><ul><li class="checked"><s>已完成</s></li><li class="unchecked">未完成</li></ul>'
+    note = notes.create("saved", legacy, "sticky")
     panel._current_note_id = note.id
     panel._load_note_into_editor(note.id)
-    assert panel._sticky_edit.toPlainText() == "梯田体坛"
-    panel._sticky_edit.insert_todo()
-    panel._sticky_edit.toggle_task()
-    panel._flush_current()
+    expected = "梯田体坛\n已完成\n未完成"
+    assert panel._sticky_edit.toPlainText() == expected
     panel._copy_note_content(note.id)
-    assert qapp.clipboard().text() == "[x] 梯田体坛"
+    assert qapp.clipboard().text() == expected
+    win = controller.show_note(note.id)
+    assert win._content_edit.toPlainText() == expected
+    assert 'line-through' not in win._content_edit.toHtml()
+    # Reading legacy content does not mutate the stored note or its timestamp.
+    assert notes.get(note.id).content == legacy
+    assert notes.get(note.id).updated_at == note.updated_at
+    panel._sticky_edit.moveCursor(QTextCursor.MoveOperation.End)
+    panel._sticky_edit.insertPlainText(" new text")
+    panel._flush_current()
+    assert 'class="checked"' not in notes.get(note.id).content
+    assert 'line-through' not in notes.get(note.id).content
+    assert win._content_edit.toPlainText() == expected + " new text"
     panel._sticky_edit.setPlainText("temporary")
     panel._editor_dirty = False
     panel._load_note_into_editor(note.id)
-    assert panel._sticky_edit.task_counts() == (1, 1)
+    assert panel._sticky_edit.toPlainText() == expected + " new text"
 
 
-def test_marker_mouse_nesting_and_context_formatting(qtbot):
-    from PyQt6.QtCore import QPoint
+def test_context_formatting_remains_available_without_checklist_entry(qtbot):
     from PyQt6.QtGui import QFont
+    from app.i18n import t
     editor = StickyEditor()
     qtbot.addWidget(editor)
-    editor.setPlainText("click task")
-    editor.insert_todo()
-    editor.show()
-    editor.setFocus()
-    qtbot.waitUntil(editor.hasFocus)
-    rect = editor.cursorRect()
-    qtbot.mouseClick(editor.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(rect.x() - 10, rect.center().y()))
-    assert editor.task_counts() == (1, 1)
-    qtbot.keyClick(editor, Qt.Key.Key_Tab)
-    assert editor.textCursor().currentList().format().indent() == 2
-    qtbot.keyClick(editor, Qt.Key.Key_Backtab)
-    assert editor.textCursor().currentList().format().indent() == 1
+    editor.setPlainText("format text")
     editor.selectAll()
-    from app.i18n import t
     menu = editor.create_edit_menu()
+    insert = next(action.menu() for action in menu.actions() if action.text() == t("sticky.insert"))
+    assert [action.text() for action in insert.actions()] == [t("sticky.insert." + key) for key in ("image", "divider", "date")]
     formats = next(action.menu() for action in menu.actions() if action.text() == t("sticky.format"))
     next(action for action in formats.actions() if action.text() == t("sticky.format.bold")).trigger()
     assert editor.textCursor().hasSelection()
@@ -372,22 +396,15 @@ def test_selection_does_not_show_formatting_toolbar(qtbot, reverse):
     assert not editor.findChildren(QToolBar)
 
 
-def test_completed_task_strike_does_not_leak_to_new_task_or_note(qtbot):
+def test_legacy_completed_strike_does_not_leak_to_new_paragraph_or_note(qtbot):
     editor = StickyEditor()
     qtbot.addWidget(editor)
-    editor.load_content("done")
+    editor.load_content('<ul><li class="checked"><s>done</s></li></ul>')
     editor.moveCursor(QTextCursor.MoveOperation.End)
-    editor.insert_todo()
-    editor.toggle_task()
-    assert editor.currentCharFormat().fontStrikeOut()
-    qtbot.keyClick(editor, Qt.Key.Key_Return)
-    qtbot.keyClicks(editor, "next")
-    assert editor.task_counts() == (1, 2)
     assert not editor.currentCharFormat().fontStrikeOut()
     qtbot.keyClick(editor, Qt.Key.Key_Return)
-    qtbot.keyClick(editor, Qt.Key.Key_Return)
-    qtbot.keyClicks(editor, "paragraph")
-    assert editor.textCursor().blockFormat().marker() == QTextBlockFormat.MarkerType.NoMarker
+    qtbot.keyClicks(editor, "next paragraph")
+    assert editor.textCursor().currentList() is None
     assert not editor.currentCharFormat().fontStrikeOut()
     editor.load_content('<p><s>old note</s></p>')
     editor.moveCursor(QTextCursor.MoveOperation.End)
@@ -478,11 +495,10 @@ def test_full_document_image_and_text_export(desktop, tmp_path, monkeypatch):
     win._export(True)
     assert not warning.called
     assert QImage(str(path)).height() > win.height() * 2
-    win._content_edit.setPlainText("task")
-    win._content_edit.insert_todo()
+    win._content_edit.load_content('<ul><li class="checked"><s>task</s></li></ul>')
     path = tmp_path / "note.txt"
     win._export(False)
-    assert "[ ] task" in path.read_text(encoding="utf-8")
+    assert path.read_text(encoding="utf-8").split("\n\n", 1)[1] == "task"
 
 
 def test_menus_templates_and_edge_edit_guards(desktop, qapp, qtbot):
@@ -495,7 +511,12 @@ def test_menus_templates_and_edge_edit_guards(desktop, qapp, qtbot):
     templates = next(action.menu() for action in new.actions() if action.text() == t("sticky.template"))
     next(action for action in templates.actions() if action.text() == t("sticky.template.shopping")).trigger()
     assert len(controller._windows) == 2
-    assert controller._windows[-1]._content_edit.task_counts() == (0, 1)
+    assert controller._windows[-1]._content_edit.plain_text() == t("sticky.template.shoppingBody")
+    assert controller._windows[-1]._content_edit.textCursor().currentList() is None
+    insert = next(action.menu() for action in menu.actions() if action.text() == t("sticky.insert"))
+    assert len(insert.actions()) == 3
+    display = next(action.menu() for action in menu.actions() if action.text() == t("sticky.display"))
+    assert [action.text() for action in display.actions()] == [t("sticky." + key) for key in ("top", "collapse", "lock", "edge")]
     menu.deleteLater()
     win._set_pref("edge", True)
     work = win.screen().availableGeometry()
@@ -637,3 +658,24 @@ def test_library_trash_preserves_pending_desktop_text(desktop, notes, monkeypatc
     editor.load_content(notes.get(key).content)
     assert editor.toPlainText() == "pending before trash"
     editor.deleteLater()
+
+
+def test_legacy_fold_setting_is_ignored_and_independent_todos_are_unchanged(notes):
+    import json
+    note = notes.create("sticky", "body", "sticky")
+    with notes.db.get_connection() as conn:
+        conn.execute("INSERT INTO sticky_settings(note_id,settings) VALUES(?,?)",
+                     (note.id, json.dumps({"hide_completed": True, "color": "green"})))
+        conn.commit()
+    assert "hide_completed" not in notes.get_sticky_settings(note.id)
+    assert notes.get_sticky_settings(note.id)["color"] == "green"
+    assert "hide_completed" not in notes.set_sticky_settings(note.id, hide_completed=True)
+    todo = notes.create("independent todo", "body", "todo")
+    notes.update(todo.id, todo.title, todo.content, priority="high", due_date="2026-11-20", recurrence="daily")
+    assert notes.toggle_todo_completed(todo.id)
+    saved = notes.get(todo.id)
+    assert saved.note_type == "todo"
+    assert saved.is_completed
+    assert saved.priority == "high"
+    assert saved.due_date == "2026-11-20"
+    assert saved.recurrence == "daily"
