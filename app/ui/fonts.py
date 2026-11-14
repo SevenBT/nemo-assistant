@@ -64,11 +64,20 @@ def apply_app_font() -> str | None:
         return None
     bundled = _register_bundled_fonts()
     family = _pick_family(bundled)
-    if family is None:
-        logger.info("未找到首选字体，沿用系统默认字体")
-        return None
-    font = QFont(family)
-    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    font = QFont(family) if family else QFont(app.font())
+    # Full hinting snaps both axes to pixels and distorts small CJK glyphs at
+    # fractional scale factors. Keep glyphs aligned vertically, but allow natural
+    # horizontal positioning; prefer scalable outlines over bitmap strikes.
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferOutline)
+    font.setHintingPreference(QFont.HintingPreference.PreferVerticalHinting)
     app.setFont(font)
-    logger.info("全局字体已设为: %s", family)
+
+    # Fluent widgets construct their own QFont from qconfig rather than using
+    # the application family. Keep that fallback chain in sync without writing
+    # a machine-specific font choice to the user's configuration. New QFonts
+    # inherit the application's rendering preferences.
+    from qfluentwidgets import qconfig
+    families = list(dict.fromkeys(font.families() + qconfig.get(qconfig.fontFamilies)))
+    qconfig.set(qconfig.fontFamilies, families, save=False)
+    logger.info("全局字体已设为: %s（垂直 hinting、轮廓抗锯齿）", font.family())
     return family

@@ -39,6 +39,7 @@ These notes capture implementation trade-offs that are useful for contributors. 
 
 ## Theming
 
+- Application fonts use outline antialiasing and vertical hinting to avoid horizontal pixel snapping at fractional display scales. Fluent's font-family configuration shares the application fallback chain in memory; keep explicit code/icon fonts and user-selected sizes intact.
 - FluentWindow may reapply internal styles after widgets are constructed.
 - QTextEdit foreground colors sometimes need reinforcement when focus changes.
 - QPlainTextEdit does not support `setTextColor`; use its Text palette and syntax highlighter. Changing character formats on focus can emit `textChanged` and incorrectly update note timestamps.
