@@ -23,6 +23,7 @@ from app.agent.agent_hooks import (
 )
 from app.agent.agent_interface import AgentCallbacks
 from app.llm.llm_gateway import CancellationToken
+from app.adapters.agent.tools import RegistryToolRuntime
 from app.agent.agent import Agent
 from app.agent.agent_context import AgentContext
 from app.agent.turn_context import StateTraceEntry, TurnContext, TurnState
@@ -122,7 +123,7 @@ def _make_agent(registry=None, gateway=None, hooks=None, callbacks=None,
     ctx = AgentContext(
         callbacks=callbacks or AgentCallbacks.silent(),
         llm_gateway=gateway or object(),
-        registry=registry or _FakeRegistry({}),
+        registry=RegistryToolRuntime(registry or _FakeRegistry({})),
         hooks=hooks or [],
         cancel_token=cancel_token or CancellationToken(),
     )
@@ -150,7 +151,7 @@ class InitValidationTest(unittest.TestCase):
     def test_missing_llm_gateway_raises_valueerror(self):
         ctx = AgentContext(
             callbacks=AgentCallbacks.silent(),
-            registry=_FakeRegistry({}),
+            registry=RegistryToolRuntime(_FakeRegistry({})),
         )
         with self.assertRaises(ValueError) as cm:
             Agent(ctx=ctx, messages=[])
@@ -197,7 +198,7 @@ class InitValidationTest(unittest.TestCase):
         ctx = AgentContext(
             callbacks=AgentCallbacks.silent(),
             llm_gateway=object(),
-            registry=_FakeRegistry({}),
+            registry=RegistryToolRuntime(_FakeRegistry({})),
         )
         agent = Agent(ctx=ctx, messages=[])
         self.assertIsNone(agent._hook)

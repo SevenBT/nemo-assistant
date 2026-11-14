@@ -193,7 +193,7 @@ class ChatSessionControllerTest(unittest.TestCase):
     def test_submit_creates_messages_and_starts_worker(self):
         self.controller.switch_session("s1")
 
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit("hello")
 
         self.assertEqual(len(self.sessions.session.messages), 2)
@@ -214,7 +214,7 @@ class ChatSessionControllerTest(unittest.TestCase):
             Message(role=MessageRole.ASSISTANT, content="a1"),
         ]
 
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.regenerate_last()
 
         # 旧 assistant 回复被丢弃，末尾是新的空 assistant 占位。
@@ -232,7 +232,7 @@ class ChatSessionControllerTest(unittest.TestCase):
         ]
         self.controller._workers["s1"] = object()  # 模拟进行中的 worker
 
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.regenerate_last()
 
         self.assertEqual(len(FakeWorker.instances), 0)
@@ -263,7 +263,7 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.input.take_pending_attachments.return_value = []
         self.controller.edit_last(user_msg)
 
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit("new question")
 
         self.assertEqual(
@@ -284,7 +284,7 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.input.take_pending_attachments.return_value = []
 
         self.controller.edit_last(user_msg)
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit_edit("edited question")
 
         roles = [m.role for m in self.sessions.session.messages]
@@ -303,7 +303,7 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.controller.edit_last(original[0])
 
         self.controller.cancel_edit()
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit("q2")
 
         self.assertEqual(
@@ -323,7 +323,7 @@ class ChatSessionControllerTest(unittest.TestCase):
     def test_switching_back_to_cancelling_session_stops_typing_when_finished(self):
         self.controller.switch_session("s1")
         self.input.take_pending_attachments.return_value = []
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit("hello")
         worker = FakeWorker.instances[0]
         self.controller.cancel_worker("s1")
@@ -350,7 +350,7 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.chat.add_message.side_effect = [Mock(), bubble]
         self.controller.switch_session("s1")
 
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit("hello")
 
         self.controller._on_text_chunk("s1", "partial")
@@ -368,7 +368,7 @@ class ChatSessionControllerTest(unittest.TestCase):
     def test_cancelled_worker_blocks_retry_until_finished(self):
         self.controller.switch_session("s1")
         self.input.take_pending_attachments.return_value = []
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit("hello")
             worker = FakeWorker.instances[0]
             self.controller.cancel_worker("s1")
@@ -388,7 +388,7 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.chat.add_message.side_effect = [Mock(), bubble]
         self.controller.switch_session("s1")
         self.input.take_pending_attachments.return_value = []
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit("hello")
         worker = FakeWorker.instances[0]
         worker.tool_event.emit(
@@ -418,7 +418,7 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.chat.add_message.side_effect = [Mock(), bubble]
         self.controller.switch_session("s1")
         self.input.take_pending_attachments.return_value = []
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit("hello")
         worker = FakeWorker.instances[0]
         worker.tool_event.emit(
@@ -441,7 +441,7 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.chat.add_message.side_effect = [Mock(), bubble]
         self.controller.switch_session("s1")
         self.input.take_pending_attachments.return_value = []
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit("hello")
         worker = FakeWorker.instances[0]
 
@@ -463,7 +463,7 @@ class ChatSessionControllerTest(unittest.TestCase):
     def test_signed_protocol_metadata_persists_across_tool_rounds(self):
         self.controller.switch_session('s1')
         self.input.take_pending_attachments.return_value = []
-        with patch('app.ui.chat_session_controller.AgentThread', FakeWorker):
+        with patch('app.desktop.agent_factory.AgentThread', FakeWorker):
             self.controller.submit('hello')
         worker = FakeWorker.instances[0]
         signature = {'google': {'thought_signature': 'opaque'}}
@@ -493,7 +493,7 @@ class ChatSessionControllerTest(unittest.TestCase):
         self.chat.add_message.side_effect = add_message
         self.controller.switch_session("s1")
         self.input.take_pending_attachments.return_value = []
-        with patch("app.ui.chat_session_controller.AgentThread", FakeWorker):
+        with patch("app.desktop.agent_factory.AgentThread", FakeWorker):
             self.controller.submit("question")
 
         self.controller._on_tool_event(

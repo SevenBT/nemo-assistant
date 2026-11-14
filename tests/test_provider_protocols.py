@@ -10,7 +10,7 @@ from app.llm.providers.adapter import HTTPProviderAdapter
 from app.llm.providers.contracts import LLMRequest
 from app.llm.providers.registry import endpoint, resolve_protocol
 from app.llm.providers import anthropic, chat, responses
-from app.agent.agent_hooks import _api_dicts_to_messages
+from app.conversation.agent_hooks import _api_dicts_to_messages
 from app.models.message import Message, ToolCall
 
 
@@ -239,6 +239,7 @@ def test_reasoning_model_does_not_receive_unsupported_sampling_controls():
 
 @pytest.mark.parametrize('protocol', ['openai_chat', 'anthropic_messages', 'responses'])
 def test_agent_next_iteration_retains_provider_history(protocol):
+    from app.adapters.agent.tools import RegistryToolRuntime
     from app.agent.agent import Agent
     from app.agent.agent_context import AgentContext
     from app.agent.agent_interface import AgentCallbacks
@@ -262,7 +263,7 @@ def test_agent_next_iteration_retains_provider_history(protocol):
             return type('Tool', (), {'read_only': False})()
         def execute(self, name, params):
             return {'status': 'success', 'data': 'result'}
-    agent = Agent(AgentContext(llm_gateway=Gateway(), registry=Registry(),
+    agent = Agent(AgentContext(llm_gateway=Gateway(), registry=RegistryToolRuntime(Registry()),
                   callbacks=AgentCallbacks(on_message_complete=completed.append)),
                   [dict(role='user', content='read')], session_id='')
     result = agent.run_sync()

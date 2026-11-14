@@ -44,7 +44,9 @@ from app.agent.agent_hooks import (
     ToolCallView,
     reject as _reject,
 )
-from app.agent.checkpoint import clear_checkpoint, save_checkpoint
+from app.agent.contracts import (
+    CheckpointSnapshot, ToolExecutionContext, ToolFailureKind, ToolRuntime, TraceSink,
+)
 from app.agent.agent_context import AgentContext
 from app.agent.turn_context import (
     TRANSITIONS,
@@ -52,7 +54,6 @@ from app.agent.turn_context import (
     TurnContext,
     TurnState,
 )
-from app.tools.registry import ToolErrorType, ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ _MAX_WORKERS = 4
 _MAX_TOOL_FAILURES = 5
 
 # 致命错误类型：检测到后终止 loop，不再进入下一轮 LLM 调用
-_FATAL_ERROR_TYPES = {ToolErrorType.TOOL_NOT_FOUND, ToolErrorType.PERMISSION}
+_FATAL_ERROR_TYPES = {ToolFailureKind.TOOL_NOT_FOUND, ToolFailureKind.PERMISSION}
 
 
 class Agent:
@@ -84,7 +85,7 @@ class Agent:
         messages: list[dict],
         session_id: str = "",
         max_turns: int = 10,
-        trace_store=None,
+        trace_store: TraceSink | None = None,
     ):
         """初始化 Agent。
 
@@ -105,11 +106,11 @@ class Agent:
 
         self._ctx = ctx
         self._llm = ctx.llm_gateway
-        self._registry: ToolRegistry = ctx.registry
+        self._registry: ToolRuntime = ctx.registry
         self._messages = list(messages)
         self._session_id = session_id
         self._max_turns = max_turns
-        self._trace_store = trace_store
+        self._trace_store = trace_store if trace_store is not None else ctx.trace_store
         self._trace_id = uuid.uuid4().hex
         self._llm_seq = 0
         self._hook = ctx.composite_hook
@@ -198,7 +199,7 @@ class Agent:
         """状态机主循环（在后台线程中执行）。"""
         ctx = TurnContext(
             messages=list(self._messages),
-            tools=self._registry.get_openai_functions(),
+            tools=self._registry.definitions(),
             max_turns=self._max_turns,
         )
         self._trace_start()
@@ -304,7 +305,7 @@ class Agent:
         return "has_tools"
 
     def _state_execute(self, ctx: TurnContext) -> str:
-        """执行工具调用：自动分区并发/串行，统一走 ToolRegistry。"""
+        """执行工具调用：自动分区并发/串行，统一走工具运行协议。"""
         assistant_msg: dict = {
             "role": "assistant",
             "content": ctx.full_text or None,
@@ -339,7 +340,7 @@ class Agent:
                     "status": "error",
                     "data": {
                         "message": decision.message or "该工具调用被安全策略拒绝。",
-                        "error_type": ToolErrorType.PERMISSION.value,
+                        "error_type": ToolFailureKind.PERMISSION.value,
                         "retryable": False,
                         "rejected_by_hook": True,
                     },
@@ -347,7 +348,7 @@ class Agent:
                 ctx.messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
-                    "content": ToolRegistry.format_result(reject_result),
+                    "content": self._registry.format_result(reject_result),
                 })
                 iteration_results.append((tc, reject_result))
                 self._trace_tool_call(
@@ -387,9 +388,9 @@ class Agent:
                     )
                     error_type_val = result.get("data", {}).get("error_type", "")
                     try:
-                        error_type = ToolErrorType(error_type_val)
+                        error_type = ToolFailureKind(error_type_val)
                     except ValueError:
-                        error_type = ToolErrorType.RUNTIME
+                        error_type = ToolFailureKind.RUNTIME
 
                     if error_type in _FATAL_ERROR_TYPES:
                         logger.error(
@@ -399,7 +400,7 @@ class Agent:
                         ctx.messages.append({
                             "role": "tool",
                             "tool_call_id": tc["id"],
-                            "content": ToolRegistry.format_result(result),
+                            "content": self._registry.format_result(result),
                         })
                         ctx.error_message = (
                             f"工具 {tool_name} 发生致命错误 ({error_type.value}): "
@@ -421,7 +422,7 @@ class Agent:
                 else:
                     self._tool_failure_counts.pop(tool_name, None)
 
-                content = ToolRegistry.format_result(result)
+                content = self._registry.format_result(result)
                 tool_msg = {
                     "role": "tool",
                     "tool_call_id": tc["id"],
@@ -433,20 +434,18 @@ class Agent:
             if self._session_id:
                 remaining = self._get_remaining_calls(pending_calls, batch, batches)
                 if remaining:
-                    checkpoint_save = (self._ctx.checkpoint_store.save
-                                       if self._ctx.checkpoint_store is not None else save_checkpoint)
-                    checkpoint_save(
+                    self._ctx.checkpoint_store.save(
                         self._session_id,
-                        ctx.messages,
-                        assistant_msg,
-                        completed_results,
-                        [{"id": t["id"], "name": t["name"]} for t in remaining],
+                        CheckpointSnapshot(
+                            messages=copy.deepcopy(ctx.messages),
+                            assistant_msg=copy.deepcopy(assistant_msg),
+                            completed_results=copy.deepcopy(completed_results),
+                            pending_tool_calls=[{"id": t["id"], "name": t["name"]} for t in remaining],
+                        ),
                     )
 
         if self._session_id:
-            checkpoint_clear = (self._ctx.checkpoint_store.clear
-                                if self._ctx.checkpoint_store is not None else clear_checkpoint)
-            checkpoint_clear(self._session_id)
+            self._ctx.checkpoint_store.clear(self._session_id)
 
         self._fire_after_iteration(ctx, iteration_results)
         return "ok"
@@ -535,7 +534,7 @@ class Agent:
         current_concurrent: list[dict] = []
 
         for tc in tool_calls:
-            tool = self._registry.get(tc["name"])
+            tool = self._registry.describe(tc["name"])
             is_ro = tool.read_only if tool else False
 
             if is_ro:
@@ -557,12 +556,11 @@ class Agent:
         tool_name = tc["name"]
         ai_args = tc["arguments"]
 
-        if self._session_id:
-            ai_args["_session_id"] = self._session_id
-
         self._emit_tool_start(call_id, tool_name, ai_args)
         t0 = time.perf_counter()
-        result = self._registry.execute(tool_name, ai_args)
+        result = self._registry.execute(
+            tool_name, copy.deepcopy(ai_args), self._tool_context(call_id),
+        )
         duration_ms = (time.perf_counter() - t0) * 1000
         self._emit_tool_done(call_id, tool_name, result)
         self._trace_tool_call(call_id, tool_name, ai_args, result, duration_ms)
@@ -573,8 +571,6 @@ class Agent:
         results: list[tuple[dict, dict] | None] = [None] * len(batch)
 
         for tc in batch:
-            if self._session_id:
-                tc["arguments"]["_session_id"] = self._session_id
             self._emit_tool_start(tc["id"], tc["name"], tc["arguments"])
 
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
@@ -582,7 +578,10 @@ class Agent:
             start_times: dict[int, float] = {}
             for i, tc in enumerate(batch):
                 start_times[i] = time.perf_counter()
-                future = pool.submit(self._registry.execute, tc["name"], tc["arguments"])
+                future = pool.submit(
+                    self._registry.execute, tc["name"], copy.deepcopy(tc["arguments"]),
+                    self._tool_context(tc["id"]),
+                )
                 future_to_idx[future] = i
 
             for future in as_completed(future_to_idx):
@@ -600,6 +599,12 @@ class Agent:
                 )
 
         return [r for r in results if r is not None]
+
+    def _tool_context(self, call_id: str) -> ToolExecutionContext:
+        return ToolExecutionContext(
+            session_id=self._session_id, trace_id=self._trace_id,
+            call_id=call_id, cancel_token=self._ctx.cancel_token,
+        )
 
     def _get_remaining_calls(
         self, all_calls: list[dict], current_batch: list[dict],
@@ -752,7 +757,7 @@ class Agent:
         cb = self._ctx.callbacks.on_tool_start
         if cb is not None:
             try:
-                cb(call_id, name, params)
+                cb(call_id, name, copy.deepcopy(params))
             except Exception:
                 logger.debug("[Agent] on_tool_start callback raised", exc_info=True)
 
@@ -760,7 +765,7 @@ class Agent:
         cb = self._ctx.callbacks.on_tool_done
         if cb is not None:
             try:
-                cb(call_id, name, result)
+                cb(call_id, name, copy.deepcopy(result))
             except Exception:
                 logger.debug("[Agent] on_tool_done callback raised", exc_info=True)
 

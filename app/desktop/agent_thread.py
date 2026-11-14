@@ -18,12 +18,9 @@ import logging
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from app.agent.agent_hooks import AgentHook
 from app.agent.agent_interface import AgentCallbacks
-from app.llm.llm_gateway import LLMGateway
 from app.agent.agent import Agent
 from app.agent.agent_context import AgentContext
-from app.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -55,26 +52,19 @@ class AgentThread(QThread):
 
     def __init__(
         self,
-        llm_gateway: LLMGateway,
-        registry: ToolRegistry,
+        context: AgentContext,
         api_messages: list[dict],
         session_id: str = "",
         max_turns: int = 10,
-        trace_store=None,
-        hooks: list[AgentHook] | None = None,
         parent=None,
     ):
         super().__init__(parent)
-        self._llm = llm_gateway
-        self._registry = registry
+        self._ctx = context
         self._messages = api_messages
         self._session_id = session_id
         self._max_turns = max_turns
-        self._trace_store = trace_store
-        self._hooks = hooks or []
 
         self._agent: Agent | None = None
-        self._ctx: AgentContext | None = None
 
     # ── External Control Interface ──────────────────────────────────────────
 
@@ -97,7 +87,7 @@ class AgentThread(QThread):
     def _trace_id(self) -> str:
         """Expose Agent's trace_id for eval runner post-run inspection."""
         if self._agent is not None:
-            return self._agent._trace_id
+            return self._agent.trace_id
         return ""
 
     # ── QThread Entry Point ─────────────────────────────────────────────────
@@ -130,19 +120,13 @@ class AgentThread(QThread):
             on_done=lambda info: self.done.emit(info),
         )
 
-        self._ctx = AgentContext(
-            callbacks=callbacks,
-            hooks=list(self._hooks),
-            llm_gateway=self._llm,
-            registry=self._registry,
-        )
+        self._ctx.callbacks = callbacks
 
         self._agent = Agent(
             ctx=self._ctx,
             messages=self._messages,
             session_id=self._session_id,
             max_turns=self._max_turns,
-            trace_store=self._trace_store,
         )
 
         self._agent.run_sync()

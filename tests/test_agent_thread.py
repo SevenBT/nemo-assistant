@@ -7,6 +7,7 @@ import unittest
 
 from app.agent.agent_hooks import AgentHook, BeforeToolsContext, reject
 from app.agent.agent_interface import AgentCallbacks
+from app.adapters.agent.tools import RegistryToolRuntime
 from app.agent.agent import Agent
 from app.agent.agent_context import AgentContext
 from app.agent.turn_context import StateTraceEntry, TurnContext, TurnState
@@ -36,7 +37,7 @@ def _make_agent(registry, **kwargs) -> Agent:
     ctx = AgentContext(
         callbacks=AgentCallbacks.silent(),
         llm_gateway=object(),
-        registry=registry,
+        registry=RegistryToolRuntime(registry),
         **kwargs,
     )
     return Agent(
@@ -168,7 +169,7 @@ class BeforeToolsHookTest(unittest.TestCase):
         ctx = AgentContext(
             callbacks=AgentCallbacks.silent(),
             llm_gateway=object(),
-            registry=_FakeRegistry({}),
+            registry=RegistryToolRuntime(_FakeRegistry({})),
             hooks=[_RejectAllHook()],
         )
         agent = Agent(ctx=ctx, messages=[], session_id="s1")
@@ -181,7 +182,7 @@ class BeforeToolsHookTest(unittest.TestCase):
         ctx = AgentContext(
             callbacks=AgentCallbacks.silent(),
             llm_gateway=object(),
-            registry=_FakeRegistry({}),
+            registry=RegistryToolRuntime(_FakeRegistry({})),
             hooks=[_BoomHook()],
         )
         agent = Agent(ctx=ctx, messages=[], session_id="s1")
@@ -208,7 +209,7 @@ class WrapUpStateTest(unittest.TestCase):
         ctx = AgentContext(
             callbacks=AgentCallbacks.silent(),
             llm_gateway=gw,
-            registry=_FakeRegistry({}),
+            registry=RegistryToolRuntime(_FakeRegistry({})),
         )
         agent = Agent(ctx=ctx, messages=[], session_id="s1")
         return agent, gw

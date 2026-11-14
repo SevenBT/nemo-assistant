@@ -9,26 +9,24 @@ AgentContext — Agent 运行的中央上下文。
 设计动机：
     当前 AgentThread.__init__ 接收大量零散参数。AgentContext 作为统一入口，
     让调用方只需构造一个上下文对象即可启动 Agent，降低参数传递复杂度，
-    同时为后续 Agent（无 Qt 依赖）铺路。
+    运行时依赖只指向核心协议。
 
 与现有组件的关系：
     - agent_interface.AgentCallbacks   → 通信接口（已有）
     - agent_hooks.AgentHook            → 生命周期 hook（已有）
-    - llm_gateway.CancellationToken    → 取消令牌（已有）
+    - runtime.cancellation.CancellationToken    → 取消令牌（已有）
     - turn_context.TurnContext         → 单轮对话上下文（独立，不纳入此处）
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from app.llm.llm_gateway import LLMGateway
-    from app.tools.registry import ToolRegistry
-
 from app.agent.agent_hooks import AgentHook, CompositeHook
 from app.agent.agent_interface import AgentCallbacks
-from app.llm.cancellation import CancellationToken
+from app.agent.contracts import (
+    CheckpointStore, ModelStream, NullCheckpointStore, NullTraceSink,
+    ToolRuntime, TraceSink,
+)
+from app.runtime.cancellation import CancellationToken
 
 
 @dataclass
@@ -42,7 +40,7 @@ class AgentContext:
         )
 
         # 传递给 Agent
-        agent = Agent(llm, registry, messages, ctx)
+        agent = Agent(ctx, messages)
 
         # 取消运行
         ctx.cancel()
@@ -65,14 +63,17 @@ class AgentContext:
     """线程安全的取消令牌。可跨线程安全地触发取消并关闭流式资源。"""
 
     # ── 核心依赖 ──
-    llm_gateway: "LLMGateway | None" = None
+    llm_gateway: ModelStream | None = None
     """LLM 网关。Agent 运行时必需。"""
 
-    registry: "ToolRegistry | None" = None
-    """工具注册中心。Agent 运行时必需。"""
+    registry: ToolRuntime | None = None
+    """工具运行协议（字段名沿用 registry）。Agent 运行时必需。"""
 
-    checkpoint_store: object | None = None
-    """Optional isolated checkpoint backend with save/clear methods."""
+    checkpoint_store: CheckpointStore = field(default_factory=NullCheckpointStore)
+    """Explicit checkpoint backend; the default never writes to disk."""
+
+    trace_store: TraceSink = field(default_factory=NullTraceSink)
+    """Explicit trace backend; the default discards observations."""
 
     # ── 便捷属性 ──
 

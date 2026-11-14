@@ -37,9 +37,10 @@ class IsolatedCheckpoints:
     def __init__(self, directory):
         self.directory = directory
 
-    def save(self, session_id, *args):
+    def save(self, session_id, snapshot):
+        from dataclasses import asdict
         from nemo_eval.artifacts import write_json
-        write_json(self.directory / "checkpoint.json", {"session_id": session_id, "state": args})
+        write_json(self.directory / "checkpoint.json", {"session_id": session_id, "state": asdict(snapshot)})
 
     def clear(self, session_id):
         (self.directory / "checkpoint.json").unlink(missing_ok=True)
@@ -76,6 +77,7 @@ def default_prompt(language="zh"):
 
 
 def execute(case, workdir: Path, mode="offline", config=None, variant=None):
+    from app.adapters.agent.tools import RegistryToolRuntime
     from app.agent.agent import Agent
     from app.agent.agent_context import AgentContext
     from app.agent.agent_interface import AgentCallbacks
@@ -164,7 +166,7 @@ def execute(case, workdir: Path, mode="offline", config=None, variant=None):
                             break
                 events.append({"step": step_id, "iteration": ctx.turn_count, "answer": ctx.full_text, "error": ctx.error})
         agent = Agent(AgentContext(
-            llm_gateway=gateway, registry=registry, callbacks=AgentCallbacks.silent(),
+            llm_gateway=gateway, registry=RegistryToolRuntime(registry), callbacks=AgentCallbacks.silent(),
             hooks=[EvidenceHook()], checkpoint_store=IsolatedCheckpoints(workdir),
         ), messages, session_id="", max_turns=case.get("limits", {}).get("max_iterations_per_step", 6))
         result = agent.run_sync()

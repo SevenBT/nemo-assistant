@@ -17,6 +17,7 @@ shipped behavior — check each document's header.
 | [security-eval-guide](security-eval-guide.md) | Observability / security / eval walkthrough |
 | [evaluation-extraction-design](evaluation-extraction-design.md) | Evaluation extraction — implemented core, verification and supported scope |
 | [agent-evaluation-release-design](agent-evaluation-release-design.md) | Separate offline regression and live-model release evaluation — implemented pipelines and design rationale |
+| [agent-core-decoupling](agent-core-decoupling.md) | Agent dependency boundaries, explicit adapters and desktop composition — P1–P4 implemented |
 | [local-rag-plan](local-rag-plan.md) | Local knowledge base (RAG) plan — design draft, not yet implemented |
 | [current-codebase-improvement-plan](current-codebase-improvement-plan.md) | Current codebase improvement plan — review draft, no implementation yet |
 | [workshop-advanced-generation-design](workshop-advanced-generation-design.md) | Workshop advanced generation design — only Phase 1 implemented |
