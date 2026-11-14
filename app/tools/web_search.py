@@ -38,7 +38,7 @@ class WebSearchTool(BuiltinTool):
     @classmethod
     def create(cls, ctx: "ToolContext") -> "WebSearchTool":
         """从配置中读取搜索引擎类型和 API Key。"""
-        from app.core.config import cfg, get_search_api_key
+        from app.config.config import cfg, get_search_api_key
         return cls(
             provider=cfg.get(cfg.searchProvider),
             api_key=get_search_api_key(),

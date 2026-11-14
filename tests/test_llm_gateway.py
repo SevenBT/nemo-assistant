@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.core.llm_gateway import (
+from app.llm.llm_gateway import (
     CancellationToken,
     GatewayLogger,
     LLMGateway,
@@ -105,8 +105,8 @@ def test_gateway_records_each_retry_once_with_usage(tmp_path):
 
 
 def test_gateway_records_only_explicit_provider_charges_for_each_attempt(tmp_path):
-    from app.core.runtime_config import GatewayConfig
-    from app.core.trace_store import TraceStore
+    from app.llm.runtime_config import GatewayConfig
+    from app.observability.trace_store import TraceStore
 
     adapter = ScriptedAdapter([
         [{"type": "error", "status_code": 429, "message": "busy",

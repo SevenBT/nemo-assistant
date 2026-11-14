@@ -7,9 +7,9 @@ import pytest
 from PyQt6.QtCore import Qt, QMimeData, QUrl
 from PyQt6.QtGui import QImage, QTextBlockFormat, QTextCursor, QTextDocument
 
-from app.core.db_manager import DatabaseManager
-from app.core.note_manager import NoteManager
-from app.core.sticky_reminders import StickyReminderService, next_occurrence
+from app.storage.db_manager import DatabaseManager
+from app.storage.note_manager import NoteManager
+from app.desktop.sticky_reminders import StickyReminderService, next_occurrence
 from app.ui.components.sticky_editor import StickyEditor
 from app.ui.notes_dialog import NotesPanel
 from app.ui.sticky_note_controller import StickyNoteController

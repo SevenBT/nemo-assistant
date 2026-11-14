@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "id": "reconcile-ledger",
+  "revision": 1,
+  "status": "reviewed",
+  "title": "订单去重、币种过滤与退款核对",
+  "category": "files-reconciliation",
+  "priority": "critical",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "读取 rules.txt、orders.csv 和 refunds.csv，按规则核对结算收入。另存为 settlement.json，只包含 settled_order_ids（数组）、gross_cny、refund_cny、net_cny（均为数值），保留全部源文件。不要凭直觉把所有订单或退款相加。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "rules.txt": "只统计 CNY 且 status=settled 的订单。同一 order_id 保留 updated_at 最新的一行后再过滤。退款只统计这些订单中 status=approved 且 approved_at 在 2026-11 的记录。requested 退款、其他月份和其他订单均忽略。金额按十进制计算。订单 ID 按字典序排列。\n",
+      "orders.csv": "order_id,currency,amount,status,updated_at\nA101,CNY,120.00,settled,2026-11-01\nA102,CNY,200.00,settled,2026-11-02\nA103,CNY,90.00,pending,2026-11-03\nA104,USD,50.00,settled,2026-11-03\nA105,CNY,75.50,settled,2026-11-04\nA106,CNY,40.00,cancelled,2026-11-04\nA107,CNY,64.50,settled,2026-11-05\nA102,CNY,180.00,settled,2026-11-05\nA108,CNY,150.00,settled,2026-11-02\nA108,CNY,150.00,cancelled,2026-11-08\nA109,CNY,40.00,settled,2026-11-01\nA109,USD,40.00,settled,2026-11-10\n",
+      "refunds.csv": "refund_id,order_id,amount,status,approved_at\nR1,A101,20.00,approved,2026-11-06\nR2,A102,30.00,requested,2026-11-07\nR3,A105,5.50,approved,2026-10-31\nR4,A107,14.50,approved,2026-11-09\nR5,A104,10.00,approved,2026-11-06\nR6,A999,7.00,approved,2026-11-07\n"
+    },
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "save_file"
+        },
+        {
+          "name": "read_file",
+          "min_calls": 3
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "rules.txt",
+        "check": "text_equals",
+        "expected": "只统计 CNY 且 status=settled 的订单。同一 order_id 保留 updated_at 最新的一行后再过滤。退款只统计这些订单中 status=approved 且 approved_at 在 2026-11 的记录。requested 退款、其他月份和其他订单均忽略。金额按十进制计算。订单 ID 按字典序排列。\n"
+      },
+      {
+        "path": "orders.csv",
+        "check": "text_equals",
+        "expected": "order_id,currency,amount,status,updated_at\nA101,CNY,120.00,settled,2026-11-01\nA102,CNY,200.00,settled,2026-11-02\nA103,CNY,90.00,pending,2026-11-03\nA104,USD,50.00,settled,2026-11-03\nA105,CNY,75.50,settled,2026-11-04\nA106,CNY,40.00,cancelled,2026-11-04\nA107,CNY,64.50,settled,2026-11-05\nA102,CNY,180.00,settled,2026-11-05\nA108,CNY,150.00,settled,2026-11-02\nA108,CNY,150.00,cancelled,2026-11-08\nA109,CNY,40.00,settled,2026-11-01\nA109,USD,40.00,settled,2026-11-10\n"
+      },
+      {
+        "path": "refunds.csv",
+        "check": "text_equals",
+        "expected": "refund_id,order_id,amount,status,approved_at\nR1,A101,20.00,approved,2026-11-06\nR2,A102,30.00,requested,2026-11-07\nR3,A105,5.50,approved,2026-10-31\nR4,A107,14.50,approved,2026-11-09\nR5,A104,10.00,approved,2026-11-06\nR6,A999,7.00,approved,2026-11-07\n"
+      },
+      {
+        "path": "settlement.json",
+        "check": "json_schema",
+        "schema": {
+          "const": {
+            "settled_order_ids": [
+              "A101",
+              "A102",
+              "A105",
+              "A107"
+            ],
+            "gross_cny": 440,
+            "refund_cny": 34.5,
+            "net_cny": 405.5
+          }
+        }
+      }
+    ]
+  },
+  "limits": {
+    "deadline_seconds": 180,
+    "max_iterations_per_step": 8
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

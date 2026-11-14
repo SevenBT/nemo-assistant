@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.core.llm_gateway import LLMGateway
-    from app.core.note_manager import NoteManager
-    from app.core.scheduler import SchedulerManager
+    from app.llm.llm_gateway import LLMGateway
+    from app.storage.note_manager import NoteManager
+    from app.desktop.scheduler import SchedulerManager
 
 
 @dataclass

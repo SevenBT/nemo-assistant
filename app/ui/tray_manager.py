@@ -4,7 +4,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
-from app.core.config import ASSETS_DIR
+from app.config.config import ASSETS_DIR
 from app.i18n import t
 
 _ICON_PATH = str(ASSETS_DIR / "app_icon.png")

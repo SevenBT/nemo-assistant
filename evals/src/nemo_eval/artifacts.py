@@ -31,12 +31,38 @@ def code_fingerprint(root):
     try:
         files = git("ls-files", "-z", "--cached", "--others", "--exclude-standard").decode().split("\0")
         hashes = {p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in files if p and (root / p).is_file()}
-        return {"commit": git("rev-parse", "HEAD").decode().strip(), "dirty": bool(git("status", "--porcelain")), "source_hash": digest(hashes)}
+        application = {p: h for p, h in hashes.items() if p.startswith(("app/", "assets/")) or p in {"uv.lock", "pyproject.toml"}}
+        evaluator = {p: h for p, h in hashes.items() if p.startswith("evals/src/") or p in {"evals/uv.lock", "evals/pyproject.toml"}}
+        return {"commit": git("rev-parse", "HEAD").decode().strip(), "dirty": bool(git("status", "--porcelain")),
+                "source_hash": digest(hashes), "application_hash": digest(application), "evaluator_hash": digest(evaluator)}
     except (OSError, subprocess.SubprocessError):
-        return {"commit": None, "dirty": None, "source_hash": None}
+        return {"commit": None, "dirty": None, "source_hash": None, "application_hash": None, "evaluator_hash": None}
 
 
-def compare(current: Path, baseline: Path, *, allow_changes=()):
+def read_json(path):
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def verify_run(path):
+    """Check frozen evidence before judging or deriving another report."""
+    manifest = read_json(path / "manifest.json")
+    if not manifest.get("complete"):
+        raise ValueError("Run evidence is incomplete")
+    if manifest.get("schema_version", 1) >= 2:
+        for name, expected in manifest["artifact_hashes"].items():
+            from nemo_eval.contracts import safe_path
+            artifact = safe_path(path, name)
+            if digest(artifact.read_text(encoding="utf-8")) != expected:
+                raise ValueError(f"Run evidence changed: {name}")
+    return manifest
+
+
+def compare(current: Path, baseline: Path, *, allow_changes=(), change=None,
+            current_assessment=None, baseline_assessment=None):
+    if read_json(current / "manifest.json").get("schema_version", 1) >= 2:
+        from nemo_eval.comparison import compare_runs
+        return compare_runs(current, baseline, change=change, allow_changes=allow_changes,
+                            current_assessment=current_assessment, baseline_assessment=baseline_assessment)
     cur = json.loads((current / "manifest.json").read_text(encoding="utf-8"))
     base = json.loads((baseline / "manifest.json").read_text(encoding="utf-8"))
     permitted = {"target.model", "target.api_protocol", "target.provider", "target.base_url", "target.temperature", "target.top_p", "target.max_tokens"}

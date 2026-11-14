@@ -121,7 +121,12 @@ Nemo Assistant records the execution chain for each conversation turn, making de
 - Security audit details.
 - Editable, redacted diagnostic export with a preview before saving.
 
-Developer regression testing lives in the independent [evaluation package](evals/README.md), with a headless offline CI suite and opt-in live-model/Judge commands.
+Automated tests for the independent [evaluation package](evals/README.md) run through pytest in CI, including headless production Agent scenarios. Real-model evaluation and judging are opt-in.
+
+From the repository root, run `uv run --project evals --frozen nemo-eval evaluate`
+for real-model tasks, automatic required judging and a final report after model setup.
+Developers run `uv run --project evals --extra dev --frozen pytest evals/tests -q`
+for automated code checks without model calls.
 
 ---
 
@@ -204,7 +209,7 @@ run.bat
 
 ## Project Structure
 
-Nemo Assistant uses a layered architecture: desktop tools have independent implementations, while the AI layer connects through a unified tool protocol.
+Nemo Assistant groups application code by responsibility. Desktop tools have independent implementations, while the Agent connects through a unified tool protocol.
 
 ```text
 main.py                  Entry: dependency checks → crash logs → Qt startup
@@ -217,14 +222,15 @@ main.py                  Entry: dependency checks → crash logs → Qt startup
 │   ├── text_actions         Explain / translate / polish / write back to selection
 │   └── components/          Reusable components (message bubbles, Markdown editor, etc.)
 │
-├── app/core/            Core business layer
-│   ├── llm_gateway          Unified LLM gateway (shared HTTP / protocol codecs / rate limit / retry / streaming)
-│   ├── agent_loop           Agent state machine (prepare → stream → execute → feedback → finalize)
-│   ├── note_manager         Notes / stickies / todo storage (SQLite)
-│   ├── memory_manager       Long-term memory
-│   ├── consolidator / dream Conversation compression and background memory consolidation
-│   ├── scheduler            Scheduled tasks (APScheduler)
-│   └── session_manager      Multi-session management
+├── app/agent/           Agent execution, callbacks, hooks, state and checkpoints
+├── app/conversation/    Prompts, context budgets, compression and memory consolidation
+├── app/llm/             Model gateway, provider protocols, billing and cancellation
+├── app/config/          Application configuration, migration and runtime paths
+├── app/desktop/         Qt adapters, selection, clipboard, hotkeys and scheduled tasks
+├── app/content/         File parsing, OCR and Markdown wiki links
+├── app/storage/         SQLite and JSON storage for notes, memories and sessions
+├── app/observability/   Run traces and local diagnostic exports
+├── app/tooling/         Tool generation, build validation, installation and dependencies
 │
 ├── app/tools/           Tool system
 │   ├── registry             Registration / discovery / execution / error classification and retry

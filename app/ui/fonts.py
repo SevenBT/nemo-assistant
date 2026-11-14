@@ -17,7 +17,7 @@ from pathlib import Path
 from PyQt6.QtGui import QFont, QFontDatabase
 from PyQt6.QtWidgets import QApplication
 
-from app.core.config import ASSETS_DIR
+from app.config.config import ASSETS_DIR
 
 logger = logging.getLogger(__name__)
 

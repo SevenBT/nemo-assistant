@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QImage, QPalette, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextFormat, QTextImageFormat, QTextListFormat
 from PyQt6.QtWidgets import QColorDialog, QFileDialog, QFontDialog, QMenu, QMessageBox, QTextEdit
 
-from app.core.config import NOTES_IMAGES_DIR
+from app.config.config import NOTES_IMAGES_DIR
 from app.i18n import t
 
 _EXPLICIT_COLOR = int(QTextFormat.Property.UserProperty) + 1

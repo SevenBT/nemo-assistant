@@ -1,6 +1,6 @@
 import pytest
 
-from app.core.context_manager import (
+from app.conversation.context_manager import (
     ContextManager,
     count_tokens,
     get_context_window_for_model,
@@ -56,7 +56,7 @@ def test_consolidation_budget_rejects_ratios_outside_limit(ratio):
 
 
 def test_keep_count_stays_within_budget_including_separators(monkeypatch):
-    monkeypatch.setattr("app.core.context_manager.get_context_window_for_model", lambda _: 100)
+    monkeypatch.setattr("app.conversation.context_manager.get_context_window_for_model", lambda _: 100)
     manager = ContextManager()
     messages = [Message(content="hello") for _ in range(12)]
 
@@ -68,7 +68,7 @@ def test_keep_count_stays_within_budget_including_separators(monkeypatch):
 
 
 def test_keep_count_does_not_keep_an_oversized_last_message(monkeypatch):
-    monkeypatch.setattr("app.core.context_manager.get_context_window_for_model", lambda _: 100)
+    monkeypatch.setattr("app.conversation.context_manager.get_context_window_for_model", lambda _: 100)
     manager = ContextManager()
 
     assert manager.calculate_keep_count([Message(content="hello " * 20)]) == 0
@@ -77,7 +77,7 @@ def test_keep_count_does_not_keep_an_oversized_last_message(monkeypatch):
 
 
 def test_keep_count_drops_orphaned_tool_results(monkeypatch):
-    monkeypatch.setattr("app.core.context_manager.get_context_window_for_model", lambda _: 100)
+    monkeypatch.setattr("app.conversation.context_manager.get_context_window_for_model", lambda _: 100)
     manager = ContextManager()
     messages = [
         Message(role="assistant", content="large call " * 20),

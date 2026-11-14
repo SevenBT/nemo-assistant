@@ -10,7 +10,7 @@ from PyQt6.QtCore import QThread, Qt, pyqtSlot
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QDialog
 
-from app.core.tool_build import (
+from app.tooling.tool_build import (
     BuildReview,
     BuildStatus,
     InstallResult,

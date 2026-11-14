@@ -1,0 +1,3 @@
+id = 'production'
+[prompt]
+source = 'production-default'

@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import USER_TOOLS_DIR
+from app.config.config import USER_TOOLS_DIR
 from app.i18n import t
 from app.tools.registry import ToolRegistry
 from app.tools.script_adapter import ScriptToolAdapter

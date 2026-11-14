@@ -8,7 +8,7 @@
 - 使用 `Attachment.from_dict` 处理附件列表
 
 ### 2. 文件解析器 ✓
-**文件**: `app/core/file_parser.py` (新建)
+**文件**: `app/content/file_parser.py` (新建)
 - 实现了 `FileParser` 类
 - 支持格式：
   - 文本文件：`.txt`, `.md`
@@ -53,7 +53,7 @@
 - 仅在用户消息中显示附件 (AI 消息不显示)
 
 ### 6. 附件上下文合并 ✓
-**文件**: `app/core/conversation_prompt_builder.py`
+**文件**: `app/conversation/conversation_prompt_builder.py`
 - 模块级函数 `merge_attachments_to_content`
 - 将附件内容格式化为：
   ```

@@ -6,10 +6,10 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
-from app.core.agent_hooks import ConsolidatorHook
-from app.core.agent_thread import AgentThread
-from app.core.audit_hooks import IterationTraceHook, SecurityAuditHook
-from app.core.config import cfg
+from app.agent.agent_hooks import ConsolidatorHook
+from app.desktop.agent_thread import AgentThread
+from app.agent.audit_hooks import IterationTraceHook, SecurityAuditHook
+from app.config.config import cfg
 from app.i18n import t, all_translations
 from app.models.message import Message, MessageRole, ToolCall
 from app.models.session import (

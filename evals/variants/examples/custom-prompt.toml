@@ -1,0 +1,4 @@
+id = 'custom'
+[prompt]
+source = 'text-file'
+path = './custom-prompt.txt'

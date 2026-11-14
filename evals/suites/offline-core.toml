@@ -1,0 +1,7 @@
+type = 'offline'
+repeat = 1
+cases = [
+  'cases/offline/multi-turn-file.json',
+  'cases/offline/no-tool-answer.json',
+  'cases/offline/recover-missing-file.json',
+]

@@ -13,7 +13,7 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.core.agent_hooks import (
+from app.agent.agent_hooks import (
     AfterIterationContext,
     AgentHook,
     BeforeToolsContext,
@@ -21,11 +21,11 @@ from app.core.agent_hooks import (
     ToolCallView,
     reject,
 )
-from app.core.agent_interface import AgentCallbacks
-from app.core.llm_gateway import CancellationToken
-from app.core.agent import Agent
-from app.core.agent_context import AgentContext
-from app.core.turn_context import StateTraceEntry, TurnContext, TurnState
+from app.agent.agent_interface import AgentCallbacks
+from app.llm.llm_gateway import CancellationToken
+from app.agent.agent import Agent
+from app.agent.agent_context import AgentContext
+from app.agent.turn_context import StateTraceEntry, TurnContext, TurnState
 from app.tools.registry import ToolErrorType, ToolRegistry
 
 

@@ -1,7 +1,7 @@
 # 记忆模块设计
 
 > 本文档梳理 Nemo Assistant 当前的长期记忆实现。
-> 涉及文件：`app/models/memory.py`、`app/core/memory_manager.py`、`app/tools/memory.py`、`app/core/consolidator.py`、`app/core/dream.py`，接线在 `app/ui/main_window.py`、`app/core/conversation_prompt_builder.py`、`app/core/agent_loop.py`、`app/ui/chat_session_controller.py`。
+> 涉及文件：`app/models/memory.py`、`app/storage/memory_manager.py`、`app/tools/memory.py`、`app/conversation/consolidator.py`、`app/conversation/dream.py`，接线在 `app/ui/main_window.py`、`app/conversation/conversation_prompt_builder.py`、`app/core/agent_loop.py`、`app/ui/chat_session_controller.py`。
 
 ## 1. 总览
 
@@ -69,7 +69,7 @@
 
 ## 3. MemoryManager —— 持久化与生命周期
 
-`app/core/memory_manager.py`
+`app/storage/memory_manager.py`
 
 基于 SQLite，启动时 `_ensure_table()` 建表 + 三个索引（scope+session_id / category / is_processed）。与 `NoteManager` **共用同一个 `DatabaseManager`**（`MemoryManager(self._notes.db)`）。
 
@@ -107,7 +107,7 @@
 
 ### 4.2 Consolidator（对话压缩 → archive）
 
-`app/core/consolidator.py`
+`app/conversation/consolidator.py`
 
 触发点：每轮发消息前，`chat_session_controller.py:366` 调 `maybe_consolidate`。
 
@@ -124,7 +124,7 @@
 
 ### 4.3 Dream（定时提炼 archive → 结构化记忆）
 
-`app/core/dream.py`
+`app/conversation/dream.py`
 
 触发：`main_window.py` 起一个 QTimer，**每小时**（`3600_000` ms）在后台线程跑 `_run_dream`，避免阻塞 UI。
 
@@ -144,7 +144,7 @@ Dream 的 prompt 显式要求：冲突则 UPDATE 覆盖，过时则 DELETE，不
 
 ## 5. 消费：注入 system prompt
 
-`app/core/conversation_prompt_builder.py:70-80`
+`app/conversation/conversation_prompt_builder.py:70-80`
 
 `_build_system_prompt(session_id)` 拼接顺序：
 

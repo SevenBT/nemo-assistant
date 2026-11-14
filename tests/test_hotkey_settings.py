@@ -7,7 +7,7 @@ import pytest
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import QApplication, QWidget
 
-from app.core.config import DEFAULT_HOTKEYS
+from app.config.config import DEFAULT_HOTKEYS
 import app.ui.settings_window as settings_window
 import app.ui.settings_pages.hotkeys_page as hotkeys_page
 

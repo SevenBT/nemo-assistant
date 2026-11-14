@@ -22,7 +22,7 @@ from app.tools.schema import Obj, Str, tool_params
 from app.i18n import t
 
 if TYPE_CHECKING:
-    from app.core.scheduler import SchedulerManager
+    from app.desktop.scheduler import SchedulerManager
     from app.tools.context import ToolContext
 
 

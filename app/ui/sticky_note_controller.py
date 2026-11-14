@@ -7,7 +7,7 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
 from app.i18n import t
-from app.core.note_manager import NoteManager
+from app.storage.note_manager import NoteManager
 from app.models.note import Note
 from app.ui.notes_dialog import NotesPanel
 from app.ui.sticky_note_window import StickyNoteWindow

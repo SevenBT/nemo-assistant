@@ -3,8 +3,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.core.agent_hooks import BeforeTurnContext, ConsolidatorHook
-from app.core.consolidator import Consolidator, _messages_to_text
+from app.agent.agent_hooks import BeforeTurnContext, ConsolidatorHook
+from app.conversation.consolidator import Consolidator, _messages_to_text
 from app.models.message import Message, MessageRole, ToolCall
 
 
@@ -43,7 +43,7 @@ def test_summary_text_hides_image_payloads():
 
 @pytest.mark.parametrize("response", ["long_summary", "error", "empty"])
 def test_compressed_messages_and_summary_fit_total_budget(monkeypatch, response):
-    monkeypatch.setattr("app.core.context_manager.get_context_window_for_model", lambda _: 1000)
+    monkeypatch.setattr("app.conversation.context_manager.get_context_window_for_model", lambda _: 1000)
     gateway = Mock()
     if response == "long_summary":
         gateway.chat_stream.return_value = [{"type": "text", "delta": "摘要内容。" * 1000}]
@@ -71,7 +71,7 @@ def test_compressed_messages_and_summary_fit_total_budget(monkeypatch, response)
 
 
 def test_large_tool_arguments_are_compressed_within_budget(monkeypatch):
-    monkeypatch.setattr("app.core.context_manager.get_context_window_for_model", lambda _: 1000)
+    monkeypatch.setattr("app.conversation.context_manager.get_context_window_for_model", lambda _: 1000)
     gateway = Mock()
     gateway.chat_stream.return_value = [{"type": "text", "delta": "工具已完成"}]
     consolidator = Consolidator(gateway, Mock())
@@ -89,7 +89,7 @@ def test_large_tool_arguments_are_compressed_within_budget(monkeypatch):
 
 
 def test_hook_applies_compression_even_when_message_count_is_unchanged(monkeypatch):
-    monkeypatch.setattr("app.core.context_manager.get_context_window_for_model", lambda _: 1000)
+    monkeypatch.setattr("app.conversation.context_manager.get_context_window_for_model", lambda _: 1000)
     gateway = Mock()
     gateway.chat_stream.return_value = [{"type": "text", "delta": "用户希望继续未完成任务"}]
     consolidator = Consolidator(gateway, Mock())

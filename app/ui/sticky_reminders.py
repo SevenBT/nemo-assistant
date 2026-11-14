@@ -5,7 +5,7 @@ from PyQt6.QtCore import QDateTime, Qt
 from PyQt6.QtWidgets import (QApplication, QComboBox, QDateTimeEdit, QDialog,
                             QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
-from app.core.sticky_reminders import local_timezone, next_occurrence
+from app.desktop.sticky_reminders import local_timezone, next_occurrence
 from app.i18n import t
 from qfluentwidgets import CheckBox
 

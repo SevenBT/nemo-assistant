@@ -1,0 +1,244 @@
+"""AI-powered tool script generator.
+
+Builds a prompt, calls LLMGateway, and parses the response into
+manifest.json + tool.py content.
+"""
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from typing import Iterator, Optional
+
+from app.config.config import cfg
+from app.llm.llm_gateway import CancellationToken, LLMGateway
+
+
+@dataclass
+class ModelOverride:
+    """Describes a specific model selection for tool generation.
+
+    api_type:  legacy storage identifier; gateway resolves the HTTP protocol
+    model_id:  model identifier (e.g. "gpt-4o", "claude-3-5-sonnet-20241022")
+    provider:  provider profile (e.g. "anthropic", "openai")
+    label:     human-readable display name
+    """
+    api_type: str
+    model_id: str
+    label: str
+    provider: str = ""
+
+
+class _ConfigProxy:
+    """Thin proxy that overrides the default model for LLMGateway.
+
+    LLMGateway normally reads from the cfg singleton. For tool generation we
+    provide the small attribute interface it needs so the dialog can call a
+    one-off model without mutating global settings.
+    """
+
+    def __init__(self, override: ModelOverride) -> None:
+        self._override = override
+
+    @property
+    def litellm_default_model(self) -> str:
+        return self._override.model_id
+
+    def get_litellm_model_by_id(self, model_id: str) -> dict | None:
+        if model_id == self._override.model_id:
+            configured = next((m for m in cfg.get(cfg.litellmModels) if m.get('id') == model_id), {})
+            return {
+                **configured,
+                "id": self._override.model_id,
+                "provider": self._override.provider,
+                "enabled": True,
+            }
+        return next(
+            (m for m in cfg.get(cfg.litellmModels) if m["id"] == model_id),
+            None,
+        )
+
+
+def build_model_options() -> list[ModelOverride]:
+    """Build the list of available model options from current config."""
+    options: list[ModelOverride] = []
+
+    # Enabled configured models; preserve their endpoint/protocol on override.
+    for m in cfg.get(cfg.litellmModels):
+        if m.get("enabled"):
+            options.append(ModelOverride(
+                api_type="litellm",
+                model_id=m["id"],
+                label=f"{m['name']}  ({m['provider']})",
+                provider=m["provider"],
+            ))
+
+    return options
+
+
+_SYSTEM_PROMPT = """\
+你是一个工具脚本生成助手，专门为「Nemo Assistant 桌面助手」生成可直接运行的工具脚本。
+
+## 系统协议
+
+工具由两个文件组成：manifest.json（工具描述和参数定义）和 tool.py（工具逻辑脚本）。
+
+### manifest.json strict v1 格式
+
+```json
+{
+  "manifest_version": 1,
+  "name": "tool_name",
+  "description": "简明描述工具用途，AI 根据此决定何时调用",
+  "script": "tool.py",
+  "version": "1.0.0",
+  "author": "",
+  "parameters": {
+    "param_name": {
+      "type": "string|number|integer|boolean|array|object",
+      "description": "参数说明，帮助 AI 正确填写",
+      "source": "ai|config",
+      "required": true
+    }
+  },
+  "output": {
+    "type": "object",
+    "description": "工具返回 data 的结构说明"
+  },
+  "permissions": ["file_read"],
+  "dependencies": [],
+  "retry_safe": false
+}
+```
+
+manifest 约束：
+- manifest_version 必须是整数 1
+- name 只能使用字母、数字和下划线，且不能以数字开头
+- script 必须是相对路径，通常使用 "tool.py"
+- permissions 只能从以下八项中选择：file_read、file_write、network、clipboard_read、clipboard_write、shell、python_subprocess、process_spawn
+- dependencies 必须固定输出为空列表 "dependencies": []
+- retry_safe 必须固定为 false 或省略；严格工具不能自行授权自动重试
+- parameters 必须是对象；参数 type 只能是 string、number、integer、boolean、array、object
+- output 必须是对象
+
+参数 source 说明：
+- ai：由 AI 根据对话上下文自动填写，会暴露给 AI
+- config：由用户在设置中配置（API Key、路径等敏感信息），不暴露给 AI
+
+### tool.py 协议
+
+```python
+import json
+import sys
+
+def main():
+    # 1. 从 stdin 读取参数（固定写法）
+    payload = json.loads(sys.stdin.read() or "{}")
+    params = payload.get("params", {})
+
+    # 2. 取出参数
+    value = params.get("param_name", "default")
+
+    # 3. 执行逻辑
+    # ...
+
+    # 4. 输出结果（必须是最后一行 JSON）
+    print(json.dumps({
+        "status": "success",
+        "data": {
+            "message": "结果描述"
+        }
+    }, ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()
+```
+
+关键约束：
+- stdout 最后一行必须是合法 JSON，格式为 {"status": "success"|"error", "data": {...}}
+- 错误时返回 {"status": "error", "data": {"message": "错误原因"}}
+- 超时限制 60 秒
+- 不要声明或安装第三方依赖
+- 敏感信息（API Key、路径、账号密码）一律用 source: config，不要硬编码
+
+## 输出要求
+
+1. 用 ```json 代码块输出完整的 manifest.json
+2. 用 ```python 代码块输出完整的 tool.py
+3. 不要输出其他解释性文字，直接给出两个代码块
+"""
+
+
+def _extract_blocks(text: str) -> tuple[str, str]:
+    """Extract manifest JSON and Python script from AI response.
+
+    Returns (manifest_str, script_str). Either may be empty if not found.
+    """
+    json_match = re.search(r"```json\s*([\s\S]*?)```", text)
+    py_match = re.search(r"```python\s*([\s\S]*?)```", text)
+    manifest = json_match.group(1).strip() if json_match else ""
+    script = py_match.group(1).strip() if py_match else ""
+    return manifest, script
+
+
+def stream_generate(
+    requirement: str,
+    model_override: Optional[ModelOverride] = None,
+    *,
+    cancel_token: CancellationToken | None = None,
+) -> Iterator[dict]:
+    """Stream tool generation from AI.
+
+    Yields the same event dicts as LLMGateway.chat_stream:
+      {"type": "text", "delta": str}
+      {"type": "done"}
+      {"type": "error", "message": str}
+    """
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"请生成一个工具：{requirement}\n\n"
+                "要求：\n"
+                "- 用 ```json 代码块输出 manifest.json\n"
+                "- 用 ```python 代码块输出 tool.py\n"
+                "- 不要输出其他内容"
+            ),
+        },
+    ]
+    gateway = LLMGateway(config_proxy=_ConfigProxy(model_override)) if model_override else LLMGateway()
+    try:
+        yield from gateway.chat_stream(messages, cancel_token=cancel_token)
+    finally:
+        gateway.close()
+
+
+def parse_result(full_text: str) -> tuple[str, str, str]:
+    """Parse the full AI response into (manifest_str, script_str, error).
+
+    Returns (manifest_str, script_str, error_msg).
+    error_msg is empty on success.
+    """
+    manifest_str, script_str = _extract_blocks(full_text)
+
+    if not manifest_str:
+        return "", script_str, "未找到 manifest.json 代码块，请重新生成"
+    if not script_str:
+        return manifest_str, "", "未找到 tool.py 代码块，请重新生成"
+
+    # Validate manifest JSON
+    try:
+        manifest = json.loads(manifest_str)
+    except json.JSONDecodeError as e:
+        return manifest_str, script_str, f"manifest.json 格式错误：{e}"
+
+    if not isinstance(manifest, dict):
+        return manifest_str, script_str, "manifest.json 必须是对象"
+
+    if "name" not in manifest:
+        return manifest_str, script_str, "manifest.json 缺少 name 字段"
+    if "description" not in manifest:
+        return manifest_str, script_str, "manifest.json 缺少 description 字段"
+
+    return manifest_str, script_str, ""

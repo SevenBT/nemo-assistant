@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.core.tool_build.models import ToolPermission
+from app.tooling.tool_build.models import ToolPermission
 from app.tools.script_adapter import ScriptToolAdapter
 
 

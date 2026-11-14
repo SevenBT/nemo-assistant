@@ -233,7 +233,7 @@ def _table_exists(self, table_name: str) -> bool:
 ## 相关资源
 
 - [设计文档](trace-naming-refactor.md)
-- [Schema V2 迁移脚本](../../app/core/trace_store.py#L450-L550)
+- [Schema V2 迁移脚本](../../app/observability/trace_store.py#L450-L550)
 - [测试用例](../../tests/test_runtime_observations.py)
 
 ## 致谢

@@ -6,7 +6,7 @@ from PyQt6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
 from PyQt6.QtGui import QColor, QImage, QPainter
 from PyQt6.QtWidgets import QApplication, QColorDialog, QFileDialog, QInputDialog, QMenu, QMessageBox, QPushButton
 
-from app.core.sticky_store import DEFAULT_STICKY_SETTINGS
+from app.storage.sticky_store import DEFAULT_STICKY_SETTINGS
 from app.i18n import t
 
 

@@ -27,15 +27,15 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import cfg, USER_TOOLS_DIR
+from app.config.config import cfg, USER_TOOLS_DIR
 from app.i18n import t
-from app.core.conversation_prompt_builder import ConversationPromptBuilder
-from app.core.llm_gateway import LLMGateway
-from app.core.note_manager import NoteManager
-from app.core.ocr_engine import get_shared_ocr_engine_service
-from app.core.scheduler import SchedulerManager
-from app.core.session_manager import SessionManager
-from app.core.trace_store import TraceStore
+from app.conversation.conversation_prompt_builder import ConversationPromptBuilder
+from app.llm.llm_gateway import LLMGateway
+from app.storage.note_manager import NoteManager
+from app.content.ocr_engine import get_shared_ocr_engine_service
+from app.desktop.scheduler import SchedulerManager
+from app.storage.session_manager import SessionManager
+from app.observability.trace_store import TraceStore
 from app.models.session import SOURCE_MANUAL
 from app.tools.context import ToolContext, ToolEvents
 from app.tools.loader import load_builtin_tools, load_user_script_tools
@@ -45,12 +45,12 @@ from app.ui.chat_widget import ChatWidget
 from app.ui.edge_snap import EdgeSnapManager
 from app.ui.input_widget import InputWidget
 from app.ui.notes_dialog import NotesPanel
-from app.core.hotkey_manager import HotkeyManager
-from app.core.hotkey_actions import GROUPS, get_hotkey_actions, read_hotkeys
+from app.desktop.hotkey_manager import HotkeyManager
+from app.desktop.hotkey_actions import GROUPS, get_hotkey_actions, read_hotkeys
 from app.ui.resize_filter import ResizeFilter
 from app.ui.screenshot_controller import ScreenshotController
 from app.ui.selection_controller import SelectionController
-from app.core.selection_monitor import SelectionMonitor
+from app.desktop.selection_monitor import SelectionMonitor
 from app.ui.toolbox_panel import ToolboxPanel
 from app.ui.session_panel import SessionPanel
 from app.ui.settings_window import SettingsWindow
@@ -121,7 +121,7 @@ class MainWindow(FluentWindow):
             parent=self,
         )
         self._sticky_note_controller.note_updated.connect(self._on_note_updated)
-        from app.core.sticky_reminders import StickyReminderService
+        from app.desktop.sticky_reminders import StickyReminderService
         self._sticky_reminders = StickyReminderService(self._notes, self._scheduler, self)
         self._sticky_note_controller.reminders = self._sticky_reminders
         self._sticky_reminders.changed.connect(self._sticky_note_controller._settings_changed)
@@ -204,7 +204,7 @@ class MainWindow(FluentWindow):
         workspace = Path(ws_str) if ws_str else Path.home() / "Documents"
 
         # 记忆管理器（与 NoteManager 共用同一个 DatabaseManager）
-        from app.core.memory_manager import MemoryManager
+        from app.storage.memory_manager import MemoryManager
         self._memory_mgr = MemoryManager(self._notes.db)
 
         ctx = ToolContext(
@@ -234,8 +234,8 @@ class MainWindow(FluentWindow):
 
     def _init_memory(self):
         """初始化记忆系统：Consolidator + Dream 定时器。"""
-        from app.core.consolidator import Consolidator
-        from app.core.dream import Dream
+        from app.conversation.consolidator import Consolidator
+        from app.conversation.dream import Dream
 
         # 获取当前模型名称用于上下文管理
         model = cfg.get(cfg.litellmDefaultModel) or "default"
@@ -309,7 +309,7 @@ class MainWindow(FluentWindow):
     def _build_window(self):
         sg = QApplication.primaryScreen().availableGeometry()
 
-        from app.core.config import CONFIG_DIR
+        from app.config.config import CONFIG_DIR
         if not (CONFIG_DIR / "app_config.json").exists():
             # 初次启动：按屏幕比例设定初始尺寸（宽 1/2，高 2/3）
             w = sg.width() // 2

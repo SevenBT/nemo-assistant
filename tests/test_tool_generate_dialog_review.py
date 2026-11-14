@@ -11,7 +11,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QDialog, QScrollArea, QWidget
 
 from app.i18n import t
-from app.core.tool_build import (
+from app.tooling.tool_build import (
     BuildReview,
     BuildStatus,
     InstallResult,

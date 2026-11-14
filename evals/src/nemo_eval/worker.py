@@ -9,7 +9,7 @@ from pathlib import Path
 
 class HeadlessImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split(".")[0] in {"PyQt6", "qfluentwidgets", "uiautomation", "keyring"} or fullname == "app.core.config":
+        if fullname.split(".")[0] in {"PyQt6", "qfluentwidgets", "uiautomation", "keyring"} or fullname == "app.config.config":
             raise ImportError(f"Desktop dependency forbidden in eval worker: {fullname}")
 
 
@@ -25,7 +25,7 @@ def main():
     from nemo_eval.adapters.nemo import execute
     from nemo_eval.artifacts import write_json
     with tempfile.TemporaryDirectory(prefix="nemo-eval-") as directory:
-        result = execute(payload["case"], Path(directory), payload["mode"], payload.get("config"))
+        result = execute(payload["case"], Path(directory), payload["mode"], payload.get("config"), payload.get("variant"))
         write_json(Path(sys.argv[2]), result)
 
 

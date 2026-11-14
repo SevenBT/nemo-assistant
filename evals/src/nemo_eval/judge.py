@@ -6,10 +6,16 @@ from pathlib import Path
 
 from jsonschema import validate
 
-from nemo_eval.artifacts import digest, write_json
+from nemo_eval.artifacts import digest, write_json, verify_run
 from nemo_eval.budget import Budget, cost_summary, validate_config
 from nemo_eval.redaction import sanitize
 from nemo_eval.checks import verdict
+
+TEMPLATE_VERSION = 2
+
+
+def profile_hash(profile):
+    return digest({"profile": profile, "template_version": TEMPLATE_VERSION})
 
 RESULT_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["status", "criteria", "reason"], "properties": {
     "status": {"enum": ["scored", "abstain"]}, "reason": {"type": "string"},
@@ -25,6 +31,7 @@ def request_for(case, execution, *, max_chars=60000, secrets=()):
     evidence = {"answer": execution.get("answer", "")}
     evidence.update({c["evidence_id"]: c for c in execution.get("tool_calls", [])})
     evidence.update({f"artifact:{p}": v for p, v in execution.get("artifacts", {}).items()})
+    evidence.update({f"step:{s['step']}": s for s in execution.get("steps", [])})
     payload = {"task": case["input"], "reference": case.get("reference"), "rubric": case.get("rubric", []),
                "expectations": case["expectations"], "evidence": evidence, "evidence_complete": execution.get("evidence_complete", False)}
     payload = sanitize(payload, secrets)
@@ -56,21 +63,20 @@ def judge(case, execution, client, *, secrets=()):
             raise ValueError("Judge verdict requires evidence")
     if not execution.get("evidence_complete") and result["status"] != "abstain":
         raise ValueError("Judge must abstain when execution evidence is incomplete")
-    return {**result, "request_hash": digest(payload), "template_version": 1}
+    return {**result, "request_hash": digest(payload), "template_version": TEMPLATE_VERSION}
 
 
 def assess_run(run_dir: Path, config):
     # This import is intentionally at the application integration boundary.
     from nemo_eval.adapters.nemo import make_live_gateway
-    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-    if not manifest.get("complete"):
-        raise ValueError("Cannot judge an incomplete run")
+    manifest = verify_run(run_dir)
     validate_config(config)
     budget = Budget(config)
     profile = config.get("judge")
     if not profile:
         raise ValueError("Independent judge profile is required")
-    secrets = tuple(os.environ.get(p.get("api_key_env", ""), "") for p in (config.get("target", {}), profile))
+    target = manifest.get("config", {}).get("target", {})
+    secrets = tuple(os.environ.get(p.get("api_key_env", ""), "") for p in (target, profile))
     records, responses = [], []
     class Logger:
         def write(self, record):
@@ -87,31 +93,53 @@ def assess_run(run_dir: Path, config):
         raw = "".join(parts)
         responses.append(sanitize(raw, secrets))
         return raw
-    assessment_dir = run_dir / "assessments" / uuid.uuid4().hex
+    assessment_id = uuid.uuid4().hex
+    assessment_dir = run_dir / "assessments" / assessment_id
     results = []
-    for case_id in manifest["selected"]:
-        directory = run_dir / "cases" / case_id / "1"
+    interrupted = False
+    plan = manifest.get("plan", [{"case_id": c, "repeat_id": 1} for c in manifest["selected"]])
+    for planned in plan:
+        case_id, repeat_id = planned["case_id"], planned["repeat_id"]
+        directory = run_dir / "cases" / case_id / str(repeat_id)
         case = json.loads((directory / "input.json").read_text(encoding="utf-8"))
         if not case.get("rubric"):
             continue
         execution = json.loads((directory / "execution.json").read_text(encoding="utf-8"))
         before = len(records)
         try:
-            judged = judge(case, execution, client, secrets=secrets)
+            if interrupted:
+                judged = {"status": "error", "error": "Judge interrupted"}
+            elif not execution.get("evidence_complete"):
+                judged = {"status": "abstain", "reason": "Incomplete execution evidence", "criteria": []}
+            else:
+                judged = judge(case, execution, client, secrets=secrets)
+        except KeyboardInterrupt:
+            # Persist already consumed calls and mark remaining assessments as errors.
+            judged = {"status": "error", "error": "Judge interrupted"}
+            interrupted = True
         except Exception as exc:
             judged = {"status": "error", "error": sanitize(str(exc), secrets)}
         try:
             request = request_for(case, execution, secrets=secrets)
         except ValueError as exc:
             request = {"error": str(exc)}
-        write_json(assessment_dir / case_id / "request.json", request)
-        write_json(assessment_dir / case_id / "result.json", judged)
-        write_json(assessment_dir / case_id / "llm_calls.json", records[before:])
-        write_json(assessment_dir / case_id / "raw_responses.json", responses)
+        evidence_dir = assessment_dir / case_id / str(repeat_id)
+        write_json(evidence_dir / "request.json", request)
+        write_json(evidence_dir / "result.json", judged)
+        write_json(evidence_dir / "llm_calls.json", records[before:])
+        write_json(evidence_dir / "raw_responses.json", responses)
         responses.clear()
         checks = json.loads((directory / "checks.json").read_text(encoding="utf-8"))
-        results.append({"case_id": case_id, "required": case.get("judge_required", False), "verdict": verdict(execution, checks, judge_required=case.get("judge_required", False), judge=judged), **judged})
-    target = manifest.get("config", {}).get("target", {})
+        results.append({"case_id": case_id, "repeat_id": repeat_id, "assessment_id": assessment_id,
+                        "interrupted": interrupted,
+                        "required": case.get("judge_required", False), "verdict": verdict(execution, checks, judge_required=case.get("judge_required", False), judge=judged), **judged})
     same_source = bool(target) and all(target.get(k, "") == profile.get(k, "") for k in ("model", "provider", "base_url"))
-    write_json(assessment_dir / "summary.json", {"profile": profile, "target_profile": target, "same_model_source": same_source, "template_version": 1, "budget_usage": {"model_calls": budget.calls, "output_reserved": budget.output_reserved}, "cost": cost_summary(records, profile), "results": results})
+    assessment_dir.mkdir(parents=True, exist_ok=True)
+    hashes = {p.relative_to(assessment_dir).as_posix(): digest(p.read_text(encoding="utf-8"))
+              for p in assessment_dir.rglob("*.json")}
+    write_json(assessment_dir / "summary.json", {"run_id": manifest["run_id"], "assessment_id": assessment_id,
+               "evidence_hash": digest(manifest.get("artifact_hashes", {})), "artifact_hashes": hashes,
+               "judge_hash": profile_hash(profile), "interrupted": interrupted,
+               "profile": profile, "target_profile": target, "same_model_source": same_source, "template_version": TEMPLATE_VERSION,
+               "budget_usage": {"model_calls": budget.calls, "output_reserved": budget.output_reserved}, "cost": cost_summary(records, expected_calls=budget.calls), "results": results})
     return results

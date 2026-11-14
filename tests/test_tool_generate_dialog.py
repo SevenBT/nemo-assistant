@@ -12,7 +12,7 @@ from PyQt6.QtGui import QCloseEvent, QGuiApplication
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox, QScrollArea, QWidget
 
-from app.core.tool_build import (
+from app.tooling.tool_build import (
     BuildReview,
     BuildStatus,
     InstallResult,

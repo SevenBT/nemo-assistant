@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core.tool_build import InstallResult, ToolBuildService, ToolPermission
+from app.tooling.tool_build import InstallResult, ToolBuildService, ToolPermission
 
 
 VALID_MANIFEST = json.dumps(
@@ -61,8 +61,8 @@ def manifest_with_permissions(permissions: list[str]) -> str:
 def build_environment(monkeypatch, tmp_path):
     builds = tmp_path / "builds"
     user_tools = tmp_path / "user_tools"
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", builds)
-    monkeypatch.setattr("app.core.tool_build.installer.USER_TOOLS_DIR", user_tools)
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", builds)
+    monkeypatch.setattr("app.tooling.tool_build.installer.USER_TOOLS_DIR", user_tools)
     return builds, user_tools
 
 
@@ -138,7 +138,7 @@ def test_install_passes_only_current_explicit_permissions(service, monkeypatch):
         )
         return InstallResult(True, "permission_tool", "")
 
-    monkeypatch.setattr("app.core.tool_build.service.install_verified_build", fake_install)
+    monkeypatch.setattr("app.tooling.tool_build.service.install_verified_build", fake_install)
 
     result = service.install(review.build_id, approved, overwrite=True)
 
@@ -175,7 +175,7 @@ def test_install_rejects_safe_source_change_after_review(service, monkeypatch):
     review = service.review(staged.build_id, frozenset())
     service.workspace_for(staged.build_id).script_path.write_text("print('B')", encoding="utf-8")
     monkeypatch.setattr(
-        "app.core.tool_build.service.install_verified_build",
+        "app.tooling.tool_build.service.install_verified_build",
         lambda *_args, **_kwargs: pytest.fail("changed source must not reach installer"),
     )
 
@@ -208,14 +208,14 @@ def test_review_handles_deleted_entrypoint_without_path_error(service):
 
 def test_review_rejects_snapshot_change_between_validation_and_read(service, monkeypatch):
     staged = service.stage("req", VALID_MANIFEST, "print('A')")
-    real_validate = __import__("app.core.tool_build.service", fromlist=["validate_workspace"]).validate_workspace
+    real_validate = __import__("app.tooling.tool_build.service", fromlist=["validate_workspace"]).validate_workspace
 
     def change_after_validate(workspace, *, approved_permissions):
         report = real_validate(workspace, approved_permissions=approved_permissions)
         workspace.script_path.write_text("print('B')", encoding="utf-8")
         return report
 
-    monkeypatch.setattr("app.core.tool_build.service.validate_workspace", change_after_validate)
+    monkeypatch.setattr("app.tooling.tool_build.service.validate_workspace", change_after_validate)
 
     with pytest.raises(ValueError, match="STALE_VALIDATION"):
         service.review(staged.build_id, frozenset())
@@ -224,7 +224,7 @@ def test_review_rejects_snapshot_change_between_validation_and_read(service, mon
 @pytest.mark.parametrize("build_id", ["", "../outside", "safe/tool", "a\\b", "."])
 def test_workspace_lookup_rejects_unsafe_build_ids_without_filesystem_access(service, build_id, monkeypatch):
     monkeypatch.setattr(
-        "app.core.tool_build.service._recover_workspace",
+        "app.tooling.tool_build.service._recover_workspace",
         lambda _build_id: pytest.fail("invalid identifiers must not access the filesystem"),
     )
 
@@ -238,7 +238,7 @@ def test_all_public_service_entrypoints_reject_invalid_build_id_first(
     service, build_id, monkeypatch
 ):
     monkeypatch.setattr(
-        "app.core.tool_build.service._recover_workspace",
+        "app.tooling.tool_build.service._recover_workspace",
         lambda _build_id: pytest.fail("invalid identifiers must not access the filesystem"),
     )
     service._review_baselines[(build_id, frozenset())] = object()
@@ -343,7 +343,7 @@ def test_stage_rejects_oversized_manifest_before_json_parse_or_workspace_write(
     builds, user_tools = build_environment
     oversized = "SENSITIVE_INPUT" + "x" * 1_100_000
     monkeypatch.setattr(
-        "app.core.tool_build.manifest.json.loads",
+        "app.tooling.tool_build.manifest.json.loads",
         lambda _text: pytest.fail("oversized manifest must not reach json.loads"),
     )
 

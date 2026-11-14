@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from PyQt6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, Qt
+from PyQt6.QtCore import QAbstractAnimation, QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
@@ -13,11 +13,26 @@ from app.ui.tool_card import ToolSummaryWidget
 _app = QApplication.instance() or QApplication([])
 
 
-class MessageBubbleStreamingRenderTest(unittest.TestCase):
+class _QtWidgetTestCase(unittest.TestCase):
+    def make_widget(self, widget_type, *args, **kwargs):
+        widget = widget_type(*args, **kwargs)
+        self.addCleanup(self._delete_widget, widget)
+        return widget
+
+    @staticmethod
+    def _delete_widget(widget):
+        # Keep Python wrappers alive until Qt removes child event filters.
+        # Cyclic GC must not choose the native widget destruction order.
+        widget.close()
+        widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+class MessageBubbleStreamingRenderTest(_QtWidgetTestCase):
     """流式去抖渲染：窗口内多次 chunk 只重渲染一次，终态立即落地。"""
 
     def _ai_bubble(self) -> MessageBubble:
-        return MessageBubble(Message(role=MessageRole.ASSISTANT, content=""))
+        return self.make_widget(MessageBubble, Message(role=MessageRole.ASSISTANT, content=""))
 
     def test_streaming_defers_render_and_coalesces(self):
         bubble = self._ai_bubble()
@@ -105,7 +120,7 @@ class MessageBubbleStreamingRenderTest(unittest.TestCase):
         self.assertIn("✓", detail_label.text())
 
     def test_tool_summary_keeps_duplicate_call_ids_on_separate_rows(self):
-        summary = ToolSummaryWidget()
+        summary = self.make_widget(ToolSummaryWidget)
         summary.add_tool("duplicate", "first")
         summary.add_tool("duplicate", "second")
 
@@ -129,7 +144,7 @@ class MessageBubbleStreamingRenderTest(unittest.TestCase):
         refresh_theme.assert_called_once_with()
 
 
-class ChatWidgetSessionLoadBatchingTest(unittest.TestCase):
+class ChatWidgetSessionLoadBatchingTest(_QtWidgetTestCase):
     """会话批量加载只在全部气泡就绪后统一完成派生 UI 工作。"""
 
     @staticmethod
@@ -142,8 +157,7 @@ class ChatWidgetSessionLoadBatchingTest(unittest.TestCase):
         ]
 
     def test_load_session_refreshes_action_targets_once(self):
-        chat = ChatWidget()
-        self.addCleanup(chat.deleteLater)
+        chat = self.make_widget(ChatWidget)
 
         with patch.object(
             chat,
@@ -155,8 +169,7 @@ class ChatWidgetSessionLoadBatchingTest(unittest.TestCase):
         refresh_action_targets.assert_called_once_with()
 
     def test_load_session_queues_only_final_scroll_and_anchor_rebuild(self):
-        chat = ChatWidget()
-        self.addCleanup(chat.deleteLater)
+        chat = self.make_widget(ChatWidget)
         scheduled = []
 
         with patch(
@@ -171,8 +184,7 @@ class ChatWidgetSessionLoadBatchingTest(unittest.TestCase):
         )
 
     def test_add_message_keeps_realtime_refresh_and_scheduling(self):
-        chat = ChatWidget()
-        self.addCleanup(chat.deleteLater)
+        chat = self.make_widget(ChatWidget)
         scheduled = []
         message = Message(role=MessageRole.USER, content="live question")
 
@@ -197,11 +209,11 @@ class ChatWidgetSessionLoadBatchingTest(unittest.TestCase):
         )
 
 
-class ChatWidgetAutoFollowTest(unittest.TestCase):
+class ChatWidgetAutoFollowTest(_QtWidgetTestCase):
     """用户主动指定滚动位置后，流式自动跟随应让出控制权。"""
 
     def test_custom_scrollbar_handle_press_pauses_auto_follow(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         custom_bar = chat._scroll.delegate.vScrollBar
         custom_bar.setRange(0, 100)
         custom_bar.resize(12, 200)
@@ -222,7 +234,7 @@ class ChatWidgetAutoFollowTest(unittest.TestCase):
         )
 
     def test_custom_scrollbar_arrow_click_pauses_auto_follow(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         custom_bar = chat._scroll.delegate.vScrollBar
         native_bar = chat._scroll.verticalScrollBar()
         native_bar.setRange(0, 100)
@@ -239,7 +251,7 @@ class ChatWidgetAutoFollowTest(unittest.TestCase):
         self.assertFalse(chat._auto_follow_stream)
 
     def test_scrollbar_release_before_up_animation_keeps_auto_follow_paused(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         custom_bar = chat._scroll.delegate.vScrollBar
         native_bar = chat._scroll.verticalScrollBar()
         native_bar.setRange(0, 100)
@@ -264,7 +276,7 @@ class ChatWidgetAutoFollowTest(unittest.TestCase):
         self.assertFalse(chat._auto_follow_stream)
 
     def test_anchor_jump_pauses_auto_follow(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         bubble = chat.add_message(
             Message(role=MessageRole.USER, content="earlier question")
         )
@@ -274,7 +286,7 @@ class ChatWidgetAutoFollowTest(unittest.TestCase):
         self.assertFalse(chat._auto_follow_stream)
 
     def test_rendered_bubble_requests_controlled_scroll(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         with patch.object(chat, "scroll_bottom") as scroll_bottom:
             bubble = chat.add_message(
                 Message(role=MessageRole.ASSISTANT, content="answer")
@@ -284,7 +296,7 @@ class ChatWidgetAutoFollowTest(unittest.TestCase):
         scroll_bottom.assert_called_once_with()
 
     def test_wheel_event_pauses_auto_follow(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         bar = chat._scroll.verticalScrollBar()
         bar.setRange(0, 100)
         bar.setValue(50)
@@ -304,7 +316,7 @@ class ChatWidgetAutoFollowTest(unittest.TestCase):
         self.assertFalse(chat._auto_follow_stream)
 
     def test_wheel_without_scroll_range_keeps_auto_follow(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         event = QWheelEvent(
             QPointF(5, 5),
             QPointF(5, 5),
@@ -321,7 +333,7 @@ class ChatWidgetAutoFollowTest(unittest.TestCase):
         self.assertTrue(chat._auto_follow_stream)
 
     def test_wheel_down_at_bottom_keeps_auto_follow(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         bar = chat._scroll.verticalScrollBar()
         bar.setRange(0, 100)
         bar.setValue(100)
@@ -341,7 +353,7 @@ class ChatWidgetAutoFollowTest(unittest.TestCase):
         self.assertTrue(chat._auto_follow_stream)
 
     def test_returning_to_bottom_restores_auto_follow(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         chat._auto_follow_stream = False
         bar = chat._scroll.verticalScrollBar()
         bar.setRange(0, 100)
@@ -352,7 +364,7 @@ class ChatWidgetAutoFollowTest(unittest.TestCase):
         self.assertTrue(chat._auto_follow_stream)
 
     def test_pending_auto_scroll_does_not_override_user_position(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         bar = chat._scroll.verticalScrollBar()
         bar.setRange(0, 100)
         bar.setValue(20)
@@ -364,7 +376,7 @@ class ChatWidgetAutoFollowTest(unittest.TestCase):
         self.assertEqual(bar.value(), 20)
 
     def test_scroll_bottom_stops_conflicting_smooth_animation(self):
-        chat = ChatWidget()
+        chat = self.make_widget(ChatWidget)
         native_bar = chat._scroll.verticalScrollBar()
         custom_bar = chat._scroll.delegate.vScrollBar
         native_bar.setRange(0, 100)

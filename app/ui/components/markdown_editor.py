@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.ui.components.markdown_highlighter import MarkdownHighlighter
-from app.core.wiki_links import parse_wiki_links
+from app.content.wiki_links import parse_wiki_links
 from app.i18n import t
 
 

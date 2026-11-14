@@ -2,8 +2,8 @@
 
 from PyQt6.QtWidgets import QVBoxLayout, QScrollArea, QWidget
 
-from app.core.config import cfg
-from app.core.hotkey_actions import get_hotkey_actions, read_hotkeys, write_hotkeys
+from app.config.config import cfg
+from app.desktop.hotkey_actions import get_hotkey_actions, read_hotkeys, write_hotkeys
 from app.ui.hotkey_settings_widget import HotkeySettingsWidget
 
 

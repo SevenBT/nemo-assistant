@@ -4,7 +4,7 @@
 
 **Goal:** 先把现有工坊的快速生成从“模型输出直接写入正式工具目录”改造成“暂存、确定性验证、用户确认、原子安装”的可复用治理纵切，为后续接入 Claude Code/Codex 建立可靠边界。
 
-**Architecture:** 在 `app/core/tool_build/` 建立与 UI 无关的工具构建领域层，负责不可变协议对象、临时工作区、manifest 验证、权限/依赖检查、报告和原子安装。现有快速生成只负责调用该服务并展示结果；`ToolRegistry`/`ScriptToolAdapter` 继续负责运行时加载，但新安装必须通过严格协议，历史 manifest 继续兼容加载并标记为 legacy。第一阶段不启动外部编码 Agent，不实现通用 exec、PTY 或 OS 级沙箱。
+**Architecture:** 在 `app/tooling/tool_build/` 建立与 UI 无关的工具构建领域层，负责不可变协议对象、临时工作区、manifest 验证、权限/依赖检查、报告和原子安装。现有快速生成只负责调用该服务并展示结果；`ToolRegistry`/`ScriptToolAdapter` 继续负责运行时加载，但新安装必须通过严格协议，历史 manifest 继续兼容加载并标记为 legacy。第一阶段不启动外部编码 Agent，不实现通用 exec、PTY 或 OS 级沙箱。
 
 **Tech Stack:** Python 3.12、PyQt6/qfluentwidgets、pytest、现有 `ToolRegistry`/`ScriptToolAdapter`/`ToolGenerateDialog`、`pathlib`、`ast`、SHA-256 文件摘要；不新增第三方依赖，第一阶段不自动安装生成工具的依赖。
 
@@ -26,19 +26,19 @@
 
 ### 新建文件
 
-- `app/core/tool_build/__init__.py`：只导出领域层公共类型和 `ToolBuildService`。
-- `app/core/tool_build/models.py`：`ToolPermission`、`IssueSeverity`、`ToolManifest`、`ValidationIssue`、`ValidationReport`、`BuildReview`、`InstallResult` 等不可变 DTO。
-- `app/core/tool_build/manifest.py`：严格 manifest v1 解析、旧 manifest 兼容解析、参数定义转换和入口/权限/依赖字段校验。
-- `app/core/tool_build/workspace.py`：创建 build ID、创建工作区、写入输入和源码、读取源码、计算相对文件摘要、清理工作区。
-- `app/core/tool_build/validator.py`：路径边界、JSON/manifest、Python AST、权限、依赖、入口和文件白名单检查。
-- `app/core/tool_build/installer.py`：最终重新验证、同名冲突判断、同卷临时目录复制、备份旧版本、原子替换和失败回滚。
-- `app/core/tool_build/service.py`：编排暂存、重新验证、用户批准输入和安装；UI 只依赖这个服务。
+- `app/tooling/tool_build/__init__.py`：只导出领域层公共类型和 `ToolBuildService`。
+- `app/tooling/tool_build/models.py`：`ToolPermission`、`IssueSeverity`、`ToolManifest`、`ValidationIssue`、`ValidationReport`、`BuildReview`、`InstallResult` 等不可变 DTO。
+- `app/tooling/tool_build/manifest.py`：严格 manifest v1 解析、旧 manifest 兼容解析、参数定义转换和入口/权限/依赖字段校验。
+- `app/tooling/tool_build/workspace.py`：创建 build ID、创建工作区、写入输入和源码、读取源码、计算相对文件摘要、清理工作区。
+- `app/tooling/tool_build/validator.py`：路径边界、JSON/manifest、Python AST、权限、依赖、入口和文件白名单检查。
+- `app/tooling/tool_build/installer.py`：最终重新验证、同名冲突判断、同卷临时目录复制、备份旧版本、原子替换和失败回滚。
+- `app/tooling/tool_build/service.py`：编排暂存、重新验证、用户批准输入和安装；UI 只依赖这个服务。
 - `app/ui/tool_build_review_dialog.py`：显示验证报告、声明/检测权限、依赖和阻断问题，收集安装确认。
 
 ### 修改文件
 
-- `app/core/config.py:46-58, 357-365`：增加 `TOOL_BUILDS_DIR` 并确保目录存在。
-- `app/core/tool_generator.py:77-152, 195-219`：要求模型输出严格 manifest v1 的权限/依赖字段；保留文本解析职责，不在此处写正式目录。
+- `app/config/config.py:46-58, 357-365`：增加 `TOOL_BUILDS_DIR` 并确保目录存在。
+- `app/tooling/tool_generator.py:77-152, 195-219`：要求模型输出严格 manifest v1 的权限/依赖字段；保留文本解析职责，不在此处写正式目录。
 - `app/tools/script_adapter.py:40-80, 239-324`：接入兼容 manifest 解析结果，暴露 `permissions`、`is_legacy_manifest` 和有限依赖状态；不改变旧工具加载行为。
 - `app/tools/loader.py:118-160`：拒绝用户工具与内置工具同名的静默覆盖，并保留 legacy 标记。
 - `app/tools/registry.py:226-247`：统一拒绝 `enabled=False` 工具执行，覆盖聊天、调度和手动测试入口。
@@ -65,8 +65,8 @@
 ## Task 1: 建立工具构建领域模型
 
 **Files:**
-- Create: `app/core/tool_build/__init__.py`
-- Create: `app/core/tool_build/models.py`
+- Create: `app/tooling/tool_build/__init__.py`
+- Create: `app/tooling/tool_build/models.py`
 - Test: `tests/test_tool_build_models.py`
 
 **Interfaces:**
@@ -79,7 +79,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from app.core.tool_build.models import (
+from app.tooling.tool_build.models import (
     BuildStatus,
     IssueSeverity,
     ToolPermission,
@@ -119,7 +119,7 @@ def test_validation_report_is_installable_only_without_blocking_issue():
 - [ ] **Step 2: 运行测试确认失败**
 
 Run: `uv run pytest -q tests/test_tool_build_models.py`
-Expected: FAIL because `app.core.tool_build` and its DTOs do not exist.
+Expected: FAIL because `app.tooling.tool_build` and its DTOs do not exist.
 
 - [ ] **Step 3: 实现最小领域模型**
 
@@ -149,8 +149,8 @@ Expected: PASS；若仓库检查暴露既有问题，只记录，不修改无关
 ## Task 2: 实现严格 manifest v1 和 legacy 兼容解析
 
 **Files:**
-- Create: `app/core/tool_build/manifest.py`
-- Modify: `app/core/tool_generator.py:77-152, 195-219`
+- Create: `app/tooling/tool_build/manifest.py`
+- Modify: `app/tooling/tool_generator.py:77-152, 195-219`
 - Test: `tests/test_tool_build_manifest.py`
 
 **Interfaces:**
@@ -164,7 +164,7 @@ import json
 
 import pytest
 
-from app.core.tool_build.manifest import parse_manifest_text
+from app.tooling.tool_build.manifest import parse_manifest_text
 
 
 def valid_manifest(**overrides):
@@ -244,8 +244,8 @@ Expected: PASS；若测试文件不存在，新增最小的 `parse_result()` 回
 ## Task 3: 创建隔离的构建工作区和摘要机制
 
 **Files:**
-- Modify: `app/core/config.py:46-58, 357-365`
-- Create: `app/core/tool_build/workspace.py`
+- Modify: `app/config/config.py:46-58, 357-365`
+- Create: `app/tooling/tool_build/workspace.py`
 - Test: `tests/test_tool_build_workspace.py`
 
 **Interfaces:**
@@ -259,11 +259,11 @@ from pathlib import Path
 
 import pytest
 
-from app.core.tool_build.workspace import BuildWorkspace
+from app.tooling.tool_build.workspace import BuildWorkspace
 
 
 def test_workspace_writes_only_under_tool_builds(tmp_path, monkeypatch):
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
     workspace = BuildWorkspace.create("make a formatter", '{"name":"x"}', "print(1)")
 
     assert workspace.source_dir.parent.parent == tmp_path / "builds"
@@ -273,13 +273,13 @@ def test_workspace_writes_only_under_tool_builds(tmp_path, monkeypatch):
 
 
 def test_script_path_cannot_escape_source(tmp_path, monkeypatch):
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
     with pytest.raises(ValueError):
         BuildWorkspace.create("req", '{"name":"x","script":"../outside.py"}', "print(1)")
 
 
 def test_file_hashes_use_relative_paths_and_change_after_edit(tmp_path, monkeypatch):
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
     workspace = BuildWorkspace.create("req", '{"name":"x","script":"tool.py"}', "print(1)")
     first = workspace.file_hashes()
     workspace.script_path.write_text("print(2)", encoding="utf-8")
@@ -320,7 +320,7 @@ Expected: PASS。
 ## Task 4: 实现确定性验证器
 
 **Files:**
-- Create: `app/core/tool_build/validator.py`
+- Create: `app/tooling/tool_build/validator.py`
 - Test: `tests/test_tool_build_validator.py`
 
 **Interfaces:**
@@ -332,13 +332,13 @@ Expected: PASS。
 ```python
 import json
 
-from app.core.tool_build.models import IssueSeverity, ToolPermission
-from app.core.tool_build.validator import validate_workspace
-from app.core.tool_build.workspace import BuildWorkspace
+from app.tooling.tool_build.models import IssueSeverity, ToolPermission
+from app.tooling.tool_build.validator import validate_workspace
+from app.tooling.tool_build.workspace import BuildWorkspace
 
 
 def make_workspace(monkeypatch, tmp_path, manifest=None, script="print('ok')"):
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
     manifest = manifest or {
         "manifest_version": 1,
         "name": "safe_tool",
@@ -420,7 +420,7 @@ Expected: PASS；发现现有路径工具缺陷时，只在本任务范围内补
 ## Task 5: 实现原子安装和旧版本保护
 
 **Files:**
-- Create: `app/core/tool_build/installer.py`
+- Create: `app/tooling/tool_build/installer.py`
 - Test: `tests/test_tool_build_installer.py`
 
 **Interfaces:**
@@ -434,15 +434,15 @@ import json
 
 import pytest
 
-from app.core.tool_build.installer import install_verified_build
-from app.core.tool_build.validator import validate_workspace
-from app.core.tool_build.workspace import BuildWorkspace
+from app.tooling.tool_build.installer import install_verified_build
+from app.tooling.tool_build.validator import validate_workspace
+from app.tooling.tool_build.workspace import BuildWorkspace
 
 
 def test_install_copies_only_verified_source(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
     target = tmp_path / "user_tools"
-    monkeypatch.setattr("app.core.tool_build.installer.USER_TOOLS_DIR", target)
+    monkeypatch.setattr("app.tooling.tool_build.installer.USER_TOOLS_DIR", target)
     workspace = BuildWorkspace.create("req", json.dumps({"manifest_version": 1, "name": "x", "description": "x", "script": "tool.py", "parameters": {}, "output": {"type": "object"}, "permissions": [], "dependencies": []}), "print('{}')")
     report = validate_workspace(workspace, approved_permissions=frozenset())
 
@@ -456,11 +456,11 @@ def test_install_copies_only_verified_source(monkeypatch, tmp_path):
 
 
 def test_same_name_requires_explicit_overwrite(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
     target = tmp_path / "user_tools"
     target.mkdir()
     (target / "x").mkdir()
-    monkeypatch.setattr("app.core.tool_build.installer.USER_TOOLS_DIR", target)
+    monkeypatch.setattr("app.tooling.tool_build.installer.USER_TOOLS_DIR", target)
     workspace = BuildWorkspace.create("req", '{"manifest_version":1,"name":"x","description":"x","script":"tool.py","parameters":{},"output":{},"permissions":[],"dependencies":[]}', "print('{}')")
     report = validate_workspace(workspace, approved_permissions=frozenset())
 
@@ -505,7 +505,7 @@ Expected: PASS；旧版本仍存在且新版本目录没有半成品。
 ## Task 6: 接入 ToolBuildService 和 legacy 加载边界
 
 **Files:**
-- Create: `app/core/tool_build/service.py`
+- Create: `app/tooling/tool_build/service.py`
 - Modify: `app/tools/script_adapter.py:40-80, 239-324`
 - Modify: `app/tools/loader.py:118-160`
 - Test: `tests/test_tool_build_service.py`
@@ -540,8 +540,8 @@ class ToolBuildService:
 def test_stage_never_writes_user_tools(monkeypatch, tmp_path):
     builds = tmp_path / "builds"
     user_tools = tmp_path / "user_tools"
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", builds)
-    monkeypatch.setattr("app.core.tool_build.installer.USER_TOOLS_DIR", user_tools)
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", builds)
+    monkeypatch.setattr("app.tooling.tool_build.installer.USER_TOOLS_DIR", user_tools)
     service = ToolBuildService()
 
     review = service.stage("make a safe tool", VALID_MANIFEST, "print('{}')")

@@ -20,7 +20,7 @@ except ImportError:
 
 from app.i18n import t
 from app.ui.style import set_text_role
-from app.core.hotkey_actions import GROUPS, MODIFIERS, normalize_combo, scopes_overlap
+from app.desktop.hotkey_actions import GROUPS, MODIFIERS, normalize_combo, scopes_overlap
 
 # 录制只接收当前应用的 Qt 键盘事件；超时自动取消。
 _CAPTURE_TIMEOUT_MS = 8000

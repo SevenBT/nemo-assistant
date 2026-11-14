@@ -50,8 +50,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.core.ocr_engine import OcrEngineService
-from app.core.hotkey_actions import get_hotkey_actions, normalize_combo, read_hotkeys
+from app.content.ocr_engine import OcrEngineService
+from app.desktop.hotkey_actions import get_hotkey_actions, normalize_combo, read_hotkeys
 from app.i18n import t
 from app.ui import style
 from app.ui.screenshot_annotations import ScreenshotAnnotation, ScreenshotTool

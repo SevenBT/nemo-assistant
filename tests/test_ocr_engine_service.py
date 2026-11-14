@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.file_parser import FileParser
-from app.core.ocr_engine import OcrEngineService
+from app.content.file_parser import FileParser
+from app.content.ocr_engine import OcrEngineService
 from app.ui.screenshot_overlay import ScreenshotOverlay
 
 

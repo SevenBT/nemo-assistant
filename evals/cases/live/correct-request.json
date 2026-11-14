@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "id": "correct-request",
+  "revision": 1,
+  "status": "reviewed",
+  "category": "multi-turn",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "记住下面的要求，先不要创建文件：输出文件叫 result.txt，内容为旧要求。"
+      },
+      {
+        "id": "step-2",
+        "user": "更正刚才的内容要求：现在创建 result.txt，内容为新要求，不要包含旧要求，也不要添加其他内容。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {},
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "save_file",
+          "step": "step-2"
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "result.txt",
+        "check": "text_equals",
+        "expected": "新要求"
+      }
+    ]
+  },
+  "limits": {
+    "deadline_seconds": 90,
+    "max_iterations_per_step": 6
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

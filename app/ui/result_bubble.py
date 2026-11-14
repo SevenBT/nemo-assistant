@@ -28,8 +28,8 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import TransparentToolButton, FluentIcon
 
-from app.core.config import cfg
-from app.core.llm_gateway import CancellationToken, LLMGateway
+from app.config.config import cfg
+from app.llm.llm_gateway import CancellationToken, LLMGateway
 from app.i18n import t
 from app.ui import style
 from app.ui.global_click_watcher import GlobalClickWatcher
@@ -538,7 +538,7 @@ class ResultBubble(NonActivatingPopup):
         self._content.setPlaceholderText("")
         if self._mode == "rewrite":
             # 改写完成：剥离常见前缀/代码块包裹后回填进编辑区，启用回填按钮。
-            from app.core.selection_inject import strip_ai_preamble
+            from app.desktop.selection_inject import strip_ai_preamble
             cleaned = strip_ai_preamble(self._full_text)
             if cleaned and cleaned != self._full_text:
                 self._full_text = cleaned

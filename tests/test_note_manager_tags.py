@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.core.db_manager import DatabaseManager
-from app.core.note_manager import NoteManager
+from app.storage.db_manager import DatabaseManager
+from app.storage.note_manager import NoteManager
 
 
 class BatchTagsTest(unittest.TestCase):

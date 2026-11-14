@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from app.core.tool_build import workspace as workspace_module
-from app.core.tool_build.workspace import BuildWorkspace, SourceTraversalLimitExceeded
+from app.tooling.tool_build import workspace as workspace_module
+from app.tooling.tool_build.workspace import BuildWorkspace, SourceTraversalLimitExceeded
 
 
 @pytest.fixture
 def builds_dir(tmp_path, monkeypatch):
     path = tmp_path / "builds"
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", path)
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", path)
     return path
 
 
@@ -375,10 +375,10 @@ def test_read_source_rejects_binary_file_without_link_permissions(builds_dir):
 
 
 def test_windows_reparse_check_fails_closed_when_attribute_lookup_fails(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
-    monkeypatch.setattr("app.core.tool_build.workspace.os.name", "nt")
+    monkeypatch.setattr("app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds")
+    monkeypatch.setattr("app.tooling.tool_build.workspace.os.name", "nt")
     monkeypatch.setattr(
-        "app.core.tool_build.workspace._get_windows_file_attributes",
+        "app.tooling.tool_build.workspace._get_windows_file_attributes",
         lambda _path: (_ for _ in ()).throw(OSError("attribute lookup failed")),
     )
 

@@ -6,8 +6,8 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextCursor
 
-from app.core.db_manager import DatabaseManager
-from app.core.note_manager import NoteManager
+from app.storage.db_manager import DatabaseManager
+from app.storage.note_manager import NoteManager
 from app.ui.notes_dialog import NotesPanel, _ROLE_DATE, _ROLE_ID
 from app.ui.sticky_note_controller import StickyNoteController
 
@@ -107,7 +107,7 @@ def test_real_edit_updates_time_and_undo_to_original_does_not(notebook, kind):
 
 
 def test_legacy_timestamp_trigger_is_removed_and_layout_operations_preserve_time(tmp_path, monkeypatch):
-    import app.core.note_manager as module
+    import app.storage.note_manager as module
     db = DatabaseManager(tmp_path / "legacy.db")
     notes = NoteManager(db)
     note = notes.create("title", "body")

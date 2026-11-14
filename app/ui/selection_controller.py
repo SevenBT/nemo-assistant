@@ -22,12 +22,12 @@ from PyQt6.QtCore import QObject, QPoint, Qt
 from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QLabel, QPlainTextEdit, QVBoxLayout
 
-from app.core.selection_capture import capture_selection
-from app.core import selection_uia
-from app.core.selection_inject import (
+from app.desktop.selection_capture import capture_selection
+from app.desktop import selection_uia
+from app.desktop.selection_inject import (
     foreground_window, replace_selection, restore_foreground_window, selection_unchanged,
 )
-from app.core.config import cfg
+from app.config.config import cfg
 from app.i18n import t
 from app.ui.result_bubble import ResultBubble
 from app.ui.text_action_popup import TextActionPopup

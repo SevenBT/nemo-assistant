@@ -63,7 +63,7 @@
 
 整个系统由五块拼成，下面每块都讲清「**原来 → 现在 → 代码在哪**」。
 
-### 地基 0：统一 Trace 存储（`app/core/trace_store.py`）
+### 地基 0：统一 Trace 存储（`app/observability/trace_store.py`）
 
 这是所有东西的落脚点。
 
@@ -90,7 +90,7 @@
 
 > `security_events` 和 `eval_samples` 是第 4 步新增的两张表，前 4 张是地基阶段建的。
 
-### 地基 1：Hook 扩展点（`app/core/agent_hooks.py`）
+### 地基 1：Hook 扩展点（`app/agent/agent_hooks.py`）
 
 让安全/评测能「零侵入」挂上去的机制层。
 
@@ -109,7 +109,7 @@ nanobot 的 `before_execute_tools` 只能读、要中止只能抛异常（硬失
 
 **组合与异常隔离**：`CompositeHook` 把多个 hook 串起来，裁决「最严格者胜」（任一 hook 拒绝即拒绝）；非安全 hook 异常被吞掉只 log，安全 hook（`reraise=True`）异常透传。
 
-### 地基 2：Token 用量落库（`app/core/llm_gateway.py`）
+### 地基 2：Token 用量落库（`app/llm/llm_gateway.py`）
 
 - **原来**：token 用量根本没采集，更没落库。
 - **现在**：流式响应里抓 usage，落到 `llm_calls`，turn 结束时 SUM 汇总到 `turns`。
@@ -146,7 +146,7 @@ subprocess.run(
 
 **验证过的关键点**：往主进程注入假密钥 `OPENAI_API_KEY`，子进程读到的是 `None` —— 后门确认封死。
 
-### 地基 4：安全审计 + 评测 Hook（`app/core/audit_hooks.py`）
+### 地基 4：安全审计 + 评测 Hook（`app/agent/audit_hooks.py`）
 
 把前面的机制（Hook）变成实际策略。这是「策略层」，和 `agent_hooks.py`（机制层）分开。
 
@@ -265,11 +265,11 @@ AgentLoop 结束                            ⑧ record_state_trace() + finish_tu
 
 | 文件 | 角色 |
 |---|---|
-| `app/core/trace_store.py` | 统一存储（6 表 + 写入/查询/回放/限容/脱敏）|
-| `app/core/agent_hooks.py` | Hook 机制层（基类、裁决、组合器、软拒绝）|
-| `app/core/audit_hooks.py` | Hook 策略层（SecurityAuditHook、EvalHook）|
+| `app/observability/trace_store.py` | 统一存储（6 表 + 写入/查询/回放/限容/脱敏）|
+| `app/agent/agent_hooks.py` | Hook 机制层（基类、裁决、组合器、软拒绝）|
+| `app/agent/audit_hooks.py` | Hook 策略层（SecurityAuditHook、EvalHook）|
 | `app/core/agent_loop.py` | 状态机 + trace 写入 + hook 触发 |
-| `app/core/llm_gateway.py` | LLM 网关 + token 采集 + trace_sink |
+| `app/llm/llm_gateway.py` | LLM 网关 + token 采集 + trace_sink |
 | `app/tools/run_python.py` | 子进程隔离执行（后门封死）|
 | `app/tools/registry.py` | `HIGH_RISK_TOOLS` 定义、错误分类 |
 | `app/ui/settings_pages/trace_page.py` | 运行记录回放 UI |

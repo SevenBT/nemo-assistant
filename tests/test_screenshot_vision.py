@@ -20,8 +20,8 @@ _app = QApplication.instance() or QApplication(sys.argv)
 
 from app.ui.screenshot_controller import ScreenshotController
 from app.ui.screenshot_overlay import ScreenshotOverlay
-from app.core.config import SCREENSHOTS_DIR
-from app.core.ocr_engine import OcrEngineService
+from app.config.config import SCREENSHOTS_DIR
+from app.content.ocr_engine import OcrEngineService
 
 
 def _make_pixmap() -> QPixmap:

@@ -39,7 +39,7 @@ jobs:
       - name: Run tests
         run: uv run pytest -q
 
-  eval-offline:
+  eval-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -54,16 +54,14 @@ jobs:
         run: uv run --project evals --frozen python evals/check_boundaries.py
       - name: Test evaluator and production offline scenarios
         run: |
-          uv run --project evals --frozen pytest evals/tests -q
-          uv run --project evals --frozen nemo-eval validate --suite core
-          uv run --project evals --frozen nemo-eval run --suite core --out artifacts/eval/ci-core
-      - name: Upload synthetic evaluation report
+          uv run --project evals --frozen pytest evals/tests -q --junitxml=artifacts/eval/tests/junit.xml
+          uv run --project evals --frozen nemo-eval validate --suite offline-core
+          uv run --project evals --frozen nemo-eval validate --suite live-release
+          uv run --project evals --frozen nemo-eval validate --suite live-challenge
+      - name: Upload evaluator test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: offline-evaluation
-          path: |
-            artifacts/eval/ci-core/summary.json
-            artifacts/eval/ci-core/junit.xml
-            artifacts/eval/ci-core/report.md
+          name: evaluator-tests
+          path: artifacts/eval/tests/junit.xml
           retention-days: 14

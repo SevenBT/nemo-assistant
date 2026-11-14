@@ -4,8 +4,8 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextDocument
 
-from app.core.db_manager import DatabaseManager
-from app.core.note_manager import NoteManager
+from app.storage.db_manager import DatabaseManager
+from app.storage.note_manager import NoteManager
 from app.i18n import current_language, init_language, t
 from app.ui.notes_dialog import NotesPanel
 from app.ui.sticky_note_controller import StickyNoteController

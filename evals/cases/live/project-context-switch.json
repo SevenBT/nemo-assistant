@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "id": "project-context-switch",
+  "revision": 1,
+  "status": "reviewed",
+  "title": "切换项目后恢复正确上下文",
+  "category": "multi-turn",
+  "priority": "normal",
+  "input": {
+    "mode": "scenario",
+    "steps": [
+      {
+        "id": "step-1",
+        "user": "读取 alpha.json，记住灯塔项目，不做修改，也不保存文件。"
+      },
+      {
+        "id": "step-2",
+        "user": "换个话题，读取 beta.json，说明星河项目目前有什么风险，只读不保存。"
+      },
+      {
+        "id": "step-3",
+        "user": "回到灯塔：另存 alpha-final.json，只把日期改成 2026-11-27，追加风险“评审延期”。不要混入星河的负责人、日期或风险，保留源文件。"
+      }
+    ]
+  },
+  "fixtures": {
+    "tool_profile": "workspace-files",
+    "workspace_files": {
+      "alpha.json": "{\"project\":\"灯塔\",\"owner\":\"林澈\",\"release_date\":\"2026-11-20\",\"risks\":[\"接口限流\"]}\n",
+      "beta.json": "{\"project\":\"星河\",\"owner\":\"方宁\",\"release_date\":\"2026-12-03\",\"risks\":[\"文档缺失\",\"测试排队\"]}\n"
+    },
+    "clock": "2026-11-12T09:00:00+08:00"
+  },
+  "expectations": {
+    "tools": {
+      "required": [
+        {
+          "name": "read_file",
+          "step": "step-1"
+        },
+        {
+          "name": "read_file",
+          "step": "step-2"
+        },
+        {
+          "name": "save_file",
+          "step": "step-1",
+          "outcome": "attempted",
+          "min_calls": 0,
+          "max_calls": 0
+        },
+        {
+          "name": "save_file",
+          "step": "step-2",
+          "outcome": "attempted",
+          "min_calls": 0,
+          "max_calls": 0
+        },
+        {
+          "name": "save_file",
+          "step": "step-3"
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "alpha.json",
+        "check": "text_equals",
+        "expected": "{\"project\":\"灯塔\",\"owner\":\"林澈\",\"release_date\":\"2026-11-20\",\"risks\":[\"接口限流\"]}\n"
+      },
+      {
+        "path": "beta.json",
+        "check": "text_equals",
+        "expected": "{\"project\":\"星河\",\"owner\":\"方宁\",\"release_date\":\"2026-12-03\",\"risks\":[\"文档缺失\",\"测试排队\"]}\n"
+      },
+      {
+        "path": "alpha-final.json",
+        "check": "json_schema",
+        "schema": {
+          "const": {
+            "project": "灯塔",
+            "owner": "林澈",
+            "release_date": "2026-11-27",
+            "risks": [
+              "接口限流",
+              "评审延期"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "limits": {
+    "deadline_seconds": 180,
+    "max_iterations_per_step": 8
+  },
+  "provenance": {
+    "source": "maintainer_authored"
+  }
+}

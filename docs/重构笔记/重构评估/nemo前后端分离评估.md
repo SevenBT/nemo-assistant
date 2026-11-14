@@ -67,7 +67,7 @@ main.py
 | --- | -------- | ------ |
 | 5 | **LLMGateway 被多处直接引用** | UI 组件（result_bubble, consolidator）也直接调用 LLMGateway，不仅是 AgentLoop |
 | 6 | **ToolRegistry 全局共享** | AgentLoop 和 UI（toolbox_panel, tool_editor）共享同一个 registry 实例 |
-| 7 | **cfg 全局配置** | `app.core.config.cfg` 被所有层直接 import |
+| 7 | **cfg 全局配置** | `app.config.config.cfg` 被所有层直接 import |
 | 8 | **SessionManager 与 ChatSessionController 紧耦合** | controller 直接操作 session CRUD |
 
 ### 🟢 天然解耦（无需改动）
@@ -133,7 +133,7 @@ main.py
 ### Step 1：定义 Agent 回调接口（替换 Qt Signals）
 
 ```python
-# app/core/agent_interface.py — 新增文件
+# app/agent/agent_interface.py — 新增文件
 
 from dataclasses import dataclass, field
 from typing import Callable, Any, Protocol

@@ -312,7 +312,7 @@ class AgentCallbacks:
 
 - **向前兼容**：`ChatSessionController` 中所有 `worker.text_chunk.connect(...)` 逻辑不变
 - **线程模型隔离**：Qt 要求 UI 更新在主线程，Agent 在后台线程；`AgentThread(QThread)` 天然处理此约束
-- **最小改动**：Controller 仅改 import 路径（`from app.core.agent_thread import AgentThread`），其余零改动
+- **最小改动**：Controller 仅改 import 路径（`from app.desktop.agent_thread import AgentThread`），其余零改动
 
 ### 5.3 为什么 `turn_context.py` 独立而非合并到 `agent.py`？
 

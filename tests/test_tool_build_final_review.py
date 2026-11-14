@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from app.core.tool_build import ToolBuildService, ToolPermission
-from app.core.tool_build.manifest import parse_manifest_text
-from app.core.tool_build.validator import validate_workspace
-from app.core.tool_build.workspace import BuildWorkspace
+from app.tooling.tool_build import ToolBuildService, ToolPermission
+from app.tooling.tool_build.manifest import parse_manifest_text
+from app.tooling.tool_build.validator import validate_workspace
+from app.tooling.tool_build.workspace import BuildWorkspace
 from app.tools.registry import ToolErrorType, ToolRegistry
 from app.tools.script_adapter import ScriptToolAdapter
 
@@ -43,7 +43,7 @@ def _workspace(
     **overrides: object,
 ) -> BuildWorkspace:
     monkeypatch.setattr(
-        "app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds"
+        "app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds"
     )
     return BuildWorkspace.create("req", _manifest(permissions, **overrides), script)
 
@@ -188,10 +188,10 @@ def test_reserved_builtin_name_is_rejected_before_install(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        "app.core.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds"
+        "app.tooling.tool_build.workspace.TOOL_BUILDS_DIR", tmp_path / "builds"
     )
     monkeypatch.setattr(
-        "app.core.tool_build.installer.USER_TOOLS_DIR", tmp_path / "user_tools"
+        "app.tooling.tool_build.installer.USER_TOOLS_DIR", tmp_path / "user_tools"
     )
     service = ToolBuildService()
     staged = service.stage("req", _manifest([], name="exec"), "print('hi')")

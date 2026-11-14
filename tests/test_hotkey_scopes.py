@@ -7,13 +7,13 @@ from PyQt6.QtCore import QObject, QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QWidget
 
-from app.core.hotkey_actions import (
+from app.desktop.hotkey_actions import (
     DEFAULT_HOTKEYS, LEGACY_ITEMS, get_hotkey_actions, normalize_combo,
     read_hotkeys, write_hotkeys,
 )
-from app.core.selection_actions_config import default_selection_actions
-from app.core.selection_uia import SelectionStatus
-import app.core.hotkey_manager as manager_module
+from app.desktop.selection_actions_config import default_selection_actions
+from app.desktop.selection_uia import SelectionStatus
+import app.desktop.hotkey_manager as manager_module
 import app.ui.selection_controller as selection_module
 import app.ui.screenshot_overlay as screenshot_module
 import app.ui.screenshot_controller as capture_module

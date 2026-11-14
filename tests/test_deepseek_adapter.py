@@ -11,10 +11,10 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from app.core.cancellation import CancellationToken
-from app.core.providers.adapter import HTTPProviderAdapter
-from app.core.llm_gateway import GatewayLogger, LLMGateway, LLMRequest, RetryPolicy
-from app.core.runtime_config import GatewayConfig
+from app.llm.cancellation import CancellationToken
+from app.llm.providers.adapter import HTTPProviderAdapter
+from app.llm.llm_gateway import GatewayLogger, LLMGateway, LLMRequest, RetryPolicy
+from app.llm.runtime_config import GatewayConfig
 
 
 class WireStream(httpx.AsyncByteStream):
@@ -259,7 +259,7 @@ def test_provider_sse_errors_preserve_usage_without_inventing_charges(transport)
 
 
 def test_routes_resolve_to_explicit_wire_protocols():
-    from app.core.runtime_config import provider_api_type
+    from app.llm.runtime_config import provider_api_type
     assert provider_api_type('anthropic') == 'anthropic_messages'
     assert provider_api_type('openai', 'responses') == 'responses'
     for provider in ('deepseek', 'openai', 'gemini', '', 'custom'):
@@ -288,15 +288,23 @@ def test_clean_process_chat_and_consult_work_when_sdk_imports_are_forbidden():
         import builtins, json, sys
         original_import = builtins.__import__
         def guarded_import(name, *args, **kwargs):
-            if name.split('.')[0] in ('litellm', 'openai', 'anthropic', 'PyQt6', 'keyring'):
+            if name.split('.')[0] in ('litellm', 'openai', 'anthropic', 'PyQt6', 'qfluentwidgets', 'uiautomation', 'keyring') or name == 'app.config.config':
                 raise AssertionError('Forbidden dependency: ' + name)
             return original_import(name, *args, **kwargs)
         builtins.__import__ = guarded_import
         import httpx
-        from app.core.providers.adapter import HTTPProviderAdapter
-        from app.core.providers import adapter as adapter_module
-        from app.core import llm_gateway
-        from app.core.runtime_config import GatewayConfig
+        from app.agent.agent import Agent
+        from app.agent.agent_context import AgentContext
+        from app.agent.agent_interface import AgentCallbacks
+        from app.conversation.conversation_prompt_builder import ConversationPromptBuilder
+        from app.conversation.consolidator import Consolidator
+        from app.conversation.dream import Dream
+        from app.observability.trace_store import TraceStore
+        from app.observability.diagnostics import build_diagnostic
+        from app.llm.providers.adapter import HTTPProviderAdapter
+        from app.llm.providers import adapter as adapter_module
+        from app.llm import llm_gateway
+        from app.llm.runtime_config import GatewayConfig
         from app.tools.multi_model_consult import MultiModelConsultTool
         def handle(request):
             payload = {'choices': [{'delta': {'content': 'ok'}, 'finish_reason': 'stop'}]}
@@ -312,7 +320,8 @@ def test_clean_process_chat_and_consult_work_when_sdk_imports_are_forbidden():
         result = MultiModelConsultTool(model='test', provider='deepseek', api_key='dummy').execute(
             {'query': 'design', 'perspectives': ['architect']})
         assert result['status'] == 'success' and 'ok' in result['data']['result']
-        assert not any(n.split('.')[0] in ('litellm', 'openai', 'anthropic', 'PyQt6', 'keyring') for n in sys.modules)
+        assert not any(n.split('.')[0] in ('litellm', 'openai', 'anthropic', 'PyQt6', 'qfluentwidgets', 'uiautomation', 'keyring') for n in sys.modules)
+        assert 'app.config.config' not in sys.modules
     ''')
     result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stdout + result.stderr

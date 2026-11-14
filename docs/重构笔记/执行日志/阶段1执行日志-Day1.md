@@ -96,7 +96,7 @@
   - 支持 cached_tokens 计算（Anthropic prompt caching）
 
 **修改文件**：
-- `app/core/trace_store.py`
+- `app/observability/trace_store.py`
   - 新增 `llm_calls.cost_usd` 列（REAL 类型）
   - `record_llm_call()` 自动调用 `calculate_cost_from_usage()` 并写入
   - 数据库迁移：`_migrate()` 自动补列（兼容旧库）
@@ -221,7 +221,7 @@ rg -i "122817|@2022latter|@2023|3602015019200888350|司冬波" \
 **耗时**：约 4 小时
 
 **新增文件**：
-- `app/core/context_manager.py`（270 行）
+- `app/conversation/context_manager.py`（270 行）
   - 模型到 encoding 映射（cl100k_base / o200k_base）
   - 模型到上下文窗口映射（8k-200k 动态配置）
   - `ContextManager` 类：精确 token 计数 + 动态窗口管理
@@ -230,7 +230,7 @@ rg -i "122817|@2022latter|@2023|3602015019200888350|司冬波" \
   - 50% 压缩目标（target_ratio=0.5）
 
 **修改文件**：
-- `app/core/consolidator.py`
+- `app/conversation/consolidator.py`
   - 删除旧的字符估算函数（57 行）：`_estimate_tokens()`, `_message_token_text()`, `_estimate_messages_tokens()`
   - 改用 `ContextManager` 进行所有 token 计数
   - `__init__` 新增 `model` 参数（从 litellm config 读取）

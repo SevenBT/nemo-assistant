@@ -17,7 +17,7 @@ from app.tools.schema import Str, tool_params
 from app.i18n import t
 
 if TYPE_CHECKING:
-    from app.core.note_manager import NoteManager
+    from app.storage.note_manager import NoteManager
     from app.tools.context import ToolContext
 
 

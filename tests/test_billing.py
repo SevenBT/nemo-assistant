@@ -1,6 +1,6 @@
 import pytest
 
-from app.core.billing import billing_url_for, normalize_provider_cost, validate_billing_url
+from app.llm.billing import billing_url_for, normalize_provider_cost, validate_billing_url
 
 
 @pytest.mark.parametrize("value", [None, {}, {"amount": True, "currency": "USD"},

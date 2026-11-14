@@ -920,7 +920,7 @@ def get_current_theme() -> Dict[str, Any]:
     规避 style ←→ config 的循环依赖。
     """
     try:
-        from app.core.config import cfg
+        from app.config.config import cfg
 
         return get_theme(cfg.get(cfg.theme))
     except Exception:

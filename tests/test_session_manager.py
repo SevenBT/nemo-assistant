@@ -4,8 +4,8 @@ import threading
 import unittest
 from unittest import mock
 
-from app.core import session_manager as sm_mod
-from app.core.session_manager import SessionManager
+from app.storage import session_manager as sm_mod
+from app.storage.session_manager import SessionManager
 from app.models.message import Message
 
 

@@ -14,7 +14,7 @@ from app.tools.schema import Int, Str, tool_params
 from app.i18n import t
 
 if TYPE_CHECKING:
-    from app.core.memory_manager import MemoryManager
+    from app.storage.memory_manager import MemoryManager
     from app.tools.context import ToolContext
 
 

@@ -8,9 +8,9 @@ from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QApplication, QDialog, QWidget
 from qfluentwidgets import FluentIcon
 
-from app.core.config import cfg
-from app.core.config_migrate import _migrate_selection_actions
-from app.core.selection_actions_config import (
+from app.config.config import cfg
+from app.config.config_migrate import _migrate_selection_actions
+from app.desktop.selection_actions_config import (
     BUILTIN_IDS, DEFAULT_ORDER, default_selection_actions, normalize_selection_actions,
 )
 from app.i18n import t

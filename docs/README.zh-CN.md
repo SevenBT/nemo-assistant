@@ -180,7 +180,7 @@ run.bat
 
 ## 项目结构
 
-Nemo Assistant 采用清晰分层：桌面工具拥有独立实现，AI 层通过统一工具协议接入。
+Nemo Assistant 按职责组织应用代码：桌面工具拥有独立实现，Agent 通过统一工具协议接入。
 
 ```text
 main.py                  入口：依赖检查 → 崩溃日志 → 启动 Qt
@@ -193,14 +193,15 @@ main.py                  入口：依赖检查 → 崩溃日志 → 启动 Qt
 │   ├── text_actions         解释 / 翻译 / 润色 / 写回选区
 │   └── components/          可复用组件（消息气泡、Markdown 编辑器等）
 │
-├── app/core/            核心业务层
-│   ├── llm_gateway          统一 LLM 网关（共用 HTTP / 协议适配 / 限流 / 重试 / 流式）
-│   ├── agent_loop           Agent 状态机（prepare → stream → execute → feedback → finalize）
-│   ├── note_manager         笔记 / 便签 / 待办存储（SQLite）
-│   ├── memory_manager       长期记忆
-│   ├── consolidator / dream 会话压缩与后台记忆整合
-│   ├── scheduler            定时任务（APScheduler）
-│   └── session_manager      多会话管理
+├── app/agent/           Agent 执行、回调、Hook、状态与检查点
+├── app/conversation/    提示词、上下文预算、会话压缩与记忆整合
+├── app/llm/             模型网关、服务商协议、计费与取消机制
+├── app/config/          应用配置、配置迁移与运行路径
+├── app/desktop/         Qt 适配、划词、剪贴板、热键与定时任务
+├── app/content/         文件解析、OCR 与 Markdown Wiki 链接
+├── app/storage/         笔记、记忆、会话的 SQLite / JSON 存储
+├── app/observability/   运行记录与本地诊断导出
+├── app/tooling/         工具生成、构建验证、安装与依赖管理
 │
 ├── app/tools/           工具系统
 │   ├── registry             注册 / 发现 / 执行 / 错误分类与重试

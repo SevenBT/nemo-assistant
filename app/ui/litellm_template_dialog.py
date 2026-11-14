@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app.core.config import MODEL_TEMPLATES, cfg
+from app.config.config import MODEL_TEMPLATES, cfg
 from app.i18n import t
 
 

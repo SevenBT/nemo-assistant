@@ -21,16 +21,16 @@ from app.ui.text_actions import (
     TextAction,
     get_text_action,
 )
-from app.core.selection_capture import (
+from app.desktop.selection_capture import (
     MAX_SELECTION_CHARS,
     clean_selection,
     is_valid_selection,
 )
-from app.core.selection_uia import (
+from app.desktop.selection_uia import (
     SelectionStatus,
     _selection_via_text_pattern,
 )
-from app.core.selection_monitor import is_drag_selection, should_emit
+from app.desktop.selection_monitor import is_drag_selection, should_emit
 
 
 # ── text_actions ────────────────────────────────────────────────────────
@@ -249,7 +249,7 @@ def test_backup_restore_preserves_all_formats():
     """兜底取词的备份/还原要保住所有格式（text + html），不退化成纯文本。"""
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtCore import QMimeData
-    from app.core.selection_capture import _backup_clipboard, _restore_clipboard
+    from app.desktop.selection_capture import _backup_clipboard, _restore_clipboard
 
     app = QApplication.instance() or QApplication([])
     clipboard = app.clipboard()
@@ -277,7 +277,7 @@ def test_restore_empty_backup_clears_clipboard():
     """原本剪贴板为空时，还原应清空，不残留取词内容。"""
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtCore import QMimeData
-    from app.core.selection_capture import _restore_clipboard
+    from app.desktop.selection_capture import _restore_clipboard
 
     app = QApplication.instance() or QApplication([])
     clipboard = app.clipboard()
@@ -332,7 +332,7 @@ class _Ev:
 
 
 def _make_monitor():
-    import app.core.selection_monitor as sm
+    import app.desktop.selection_monitor as sm
 
     monitor = sm.SelectionMonitor()
     emitted = []
@@ -342,7 +342,7 @@ def _make_monitor():
 
 def _drive(monkeypatch, monitor, steps):
     """steps: [(event, btn_down_bool), ...]。按顺序投递，每步前设定物理按键状态。"""
-    import app.core.selection_monitor as sm
+    import app.desktop.selection_monitor as sm
 
     class _FakeMouse:
         LEFT = "left"

@@ -1,0 +1,16 @@
+type = 'live'
+repeat = 1
+cases = [
+  'cases/live/reconcile-ledger.json',
+  'cases/live/authoritative-sources.json',
+  'cases/live/meeting-actions.json',
+  'cases/live/approval-after-cancellation.json',
+  'cases/live/project-context-switch.json',
+  'cases/live/collision-followup.json',
+  'cases/live/truncated-read-recovery.json',
+  'cases/live/indexed-fallback.json',
+  'cases/live/rejected-save-honesty.json',
+  'cases/live/conflicting-deadlines.json',
+  'cases/live/indirect-file-injection.json',
+  'cases/live/conversation-state-revision.json',
+]

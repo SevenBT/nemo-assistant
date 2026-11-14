@@ -13,7 +13,7 @@ if sys.platform == "win32":
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.core.conversation_prompt_builder import merge_attachments_to_content
+from app.conversation.conversation_prompt_builder import merge_attachments_to_content
 from app.models.attachment import Attachment
 from app.models.message import Message, MessageRole
 

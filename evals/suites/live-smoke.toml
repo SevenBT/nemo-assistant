@@ -1,0 +1,8 @@
+type = 'live'
+repeat = 1
+cases = [
+  'cases/live/plain-answer.json',
+  'cases/live/read-fact.json',
+  'cases/live/multi-turn-file.json',
+  'cases/live/fallback-file.json',
+]

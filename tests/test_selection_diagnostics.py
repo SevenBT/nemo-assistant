@@ -7,8 +7,8 @@ import pytest
 from PyQt6.QtCore import QRect
 from mouse import ButtonEvent, MoveEvent
 
-from app.core import selection_monitor as monitor_module
-from app.core import selection_uia as uia
+from app.desktop import selection_monitor as monitor_module
+from app.desktop import selection_uia as uia
 from app.ui import global_click_watcher as click_module
 
 

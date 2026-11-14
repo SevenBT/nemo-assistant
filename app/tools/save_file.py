@@ -32,7 +32,7 @@ class SaveFileTool(BuiltinTool):
     @classmethod
     def create(cls, ctx: "ToolContext") -> "SaveFileTool":
         """从配置中读取用户设置的文件保存目录。"""
-        from app.core.config import cfg
+        from app.config.config import cfg
         return cls(save_dir=cfg.get(cfg.saveDir))
 
     @property

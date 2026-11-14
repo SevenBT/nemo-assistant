@@ -40,7 +40,7 @@ from app.ui import style
 from app.i18n import t
 from app.ui.components.sticky_editor import StickyEditor
 from app.ui.sticky_note_features import StickyNoteFeatures
-from app.core.sticky_store import DEFAULT_STICKY_SETTINGS
+from app.storage.sticky_store import DEFAULT_STICKY_SETTINGS
 
 logger = logging.getLogger(__name__)
 

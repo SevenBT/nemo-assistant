@@ -60,11 +60,22 @@ def validate(case: dict, mode: str = "offline", *, allow_draft=False):
     def fields(value, allowed, label):
         if not isinstance(value, dict) or set(value) - set(allowed.split()):
             raise ValueError(f"Unsupported {label} fields")
-    fields(case, "schema_version id revision status title suites input fixtures expectations limits capabilities reference rubric judge_required provenance observed_tools completion_note context_complete warnings", "case")
+    fields(case, "schema_version id revision status title suites input fixtures expectations limits capabilities reference rubric judge_required provenance observed_tools completion_note context_complete warnings category priority", "case")
     fields(case["input"], "mode messages steps", "input")
     fields(case["fixtures"], "tool_profile workspace_files model_script system_prompt memory clock blocked_tools", "fixtures")
     fields(case["expectations"], "tools artifacts answer execution_statuses", "expectations")
     fields(case.get("limits", {}), "deadline_seconds max_iterations_per_step", "limits")
+    if mode not in {"offline", "live"}:
+        raise ValueError("Unknown evaluation mode")
+    if case.get("priority", "normal") not in {"normal", "critical"}:
+        raise ValueError("Unknown case priority")
+    if "category" in case and (not isinstance(case["category"], str) or not case["category"]):
+        raise ValueError("category must be a nonempty string")
+    if mode == "live":
+        if case["input"]["mode"] != "scenario":
+            raise ValueError("Live quality tasks require scenario input")
+        if {"model_script", "system_prompt"} & set(case["fixtures"]):
+            raise ValueError("Live fixtures forbid model_script and system_prompt; use a variant")
     if not isinstance(case.get("judge_required", False), bool):
         raise ValueError("judge_required must be boolean")
     rubric = case.get("rubric", [])
@@ -177,6 +188,10 @@ def validate(case: dict, mode: str = "offline", *, allow_draft=False):
 
 
 def load_suite(path: Path, suite: str, mode="offline") -> list[dict]:
+    if suite == "core" and (path / "offline").is_dir():
+        if mode != "offline":
+            raise ValueError("core is offline-only; use a live suite")
+        path = path / "offline"
     cases = []
     for file in sorted(path.glob("*.json")):
         if file.name.endswith(".archive.json"):

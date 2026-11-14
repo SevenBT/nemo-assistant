@@ -13,8 +13,8 @@ from qfluentwidgets import (
     SettingCardGroup, StrongBodyLabel, SwitchSettingCard, TextEdit, ToggleToolButton, ToolButton,
 )
 
-from app.core.config import cfg
-from app.core.selection_actions_config import BUILTIN_IDS, PRESET_IDS, normalize_selection_actions
+from app.config.config import cfg
+from app.desktop.selection_actions_config import BUILTIN_IDS, PRESET_IDS, normalize_selection_actions
 from app.i18n import t
 from app.ui.selection_icons import SELECTION_ICONS, selection_icon
 from app.ui.text_actions import (

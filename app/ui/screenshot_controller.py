@@ -7,8 +7,8 @@ from PyQt6.QtCore import QObject, QPoint, QTimer, QBuffer, QIODevice, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtWidgets import QApplication, QFileDialog, QWidget
 
-from app.core.config import SCREENSHOTS_DIR
-from app.core.ocr_engine import OcrEngineService
+from app.config.config import SCREENSHOTS_DIR
+from app.content.ocr_engine import OcrEngineService
 from app.i18n import t
 from app.models.attachment import Attachment
 from app.ui.pin_window import PinWindow

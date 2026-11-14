@@ -115,10 +115,10 @@ _setup_crash_log()
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
-from app.core.config import cfg
-from app.core.note_manager import NoteManager
-from app.core.scheduler import SchedulerManager
-from app.core.session_manager import SessionManager
+from app.config.config import cfg
+from app.storage.note_manager import NoteManager
+from app.desktop.scheduler import SchedulerManager
+from app.storage.session_manager import SessionManager
 from app.ui.main_window import MainWindow
 from app.ui.style import apply_theme
 
@@ -148,7 +148,7 @@ def main():
     from app.i18n import init_language
     init_language(cfg.get(cfg.language))
 
-    from app.core.config import ASSETS_DIR
+    from app.config.config import ASSETS_DIR
     icon_path = ASSETS_DIR / "app_icon.png"
     icon = QIcon(str(icon_path))
     app.setWindowIcon(icon)

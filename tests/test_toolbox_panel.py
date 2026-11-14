@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core.tool_build import ToolPermission
+from app.tooling.tool_build import ToolPermission
 from app.tools.script_adapter import ScriptToolAdapter
 from app.tools.registry import ToolRegistry
 from app.ui.toolbox_panel import _DetailPane, ToolboxPanel
@@ -73,7 +73,7 @@ def test_detail_pane_uses_public_dependency_status_not_adapter_private_manager()
 def test_generated_tool_saved_persists_enabled_state_and_refreshes_immutably(
     qtbot, tmp_path: Path, monkeypatch
 ):
-    from app.core.config import cfg
+    from app.config.config import cfg
 
     generated = _script_tool(tmp_path, legacy=False)
     generated.enabled = False
