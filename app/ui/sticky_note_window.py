@@ -8,7 +8,7 @@ Features:
 - Editable title and content in-place
 - Auto-saves changes back to NoteManager on close / focus-out
 - Right-click context menu: close / pin-on-top toggle
-- Double-click title bar to close
+- Double-click title bar to rename
 
 Follows the frameless window conventions from CLAUDE.md.
 """
@@ -38,13 +38,16 @@ from PyQt6.QtWidgets import (
 
 from app.ui import style
 from app.i18n import t
+from app.ui.components.sticky_editor import StickyEditor
+from app.ui.sticky_note_features import StickyNoteFeatures
+from app.storage.sticky_store import DEFAULT_STICKY_SETTINGS
 
 logger = logging.getLogger(__name__)
 
 _RESIZE_BORDER = 6
 _MIN_W = 180
 _MIN_H = 120
-_TITLE_H = 32
+_TITLE_H = 40
 
 # Per-note tints cycle on creation. Two palettes — soft pastels for light
 # themes, desaturated deep tints for dark themes — so the sticky-note variety
@@ -70,7 +73,7 @@ _color_index = 0
 
 def _note_palette() -> list[str]:
     """根据当前主题深浅返回对应的便签纸色板。"""
-    dark = style.get_current_theme()["mode"] == style.Theme.DARK
+    dark = style._current_dark_mode
     return _NOTE_COLORS_DARK if dark else _NOTE_COLORS_LIGHT
 
 
@@ -116,10 +119,10 @@ class _TitleBar(QWidget):
         self.setFixedHeight(_TITLE_H)
         self.setCursor(Qt.CursorShape.SizeAllCursor)
 
-        ink, ink_secondary, ink_muted = _ink_colors(color)
+        _, ink_secondary, _ = _ink_colors(color)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 6, 0)
+        layout.setContentsMargins(10, 0, 8, 0)
         layout.setSpacing(4)
 
         self._label = QLabel(t("sticky.label"))
@@ -130,23 +133,41 @@ class _TitleBar(QWidget):
         self._label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
+        self._label.setMinimumWidth(0)
         layout.addWidget(self._label)
 
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(20, 20)
-        close_btn.setCursor(Qt.CursorShape.ArrowCursor)
-        hover_bg = (
-            "rgba(255,255,255,0.18)"
-            if QColor(color).lightness() < 128
-            else "rgba(0,0,0,0.15)"
-        )
-        close_btn.setStyleSheet(
-            f"QPushButton {{ background: transparent; color: {ink_muted};"
-            "border: none; border-radius: 10px; font-size: 12px; padding: 0; }"
-            f"QPushButton:hover {{ background: {hover_bg}; color: {ink}; }}"
-        )
-        close_btn.clicked.connect(self.close_requested)
+        for text, key, callback in (
+            ("+", "sticky.new", lambda: self.window().new_requested.emit("empty")),
+            ("…", "sticky.more", lambda: self.window().show_note_menu(self.mapToGlobal(self.rect().bottomRight()))),
+        ):
+            button = QPushButton(text)
+            button.setFixedSize(32, 28)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setToolTip(t(key))
+            button.clicked.connect(callback)
+            layout.addWidget(button)
+
+        close_btn = QPushButton("×")
+        close_btn.setFixedSize(32, 28)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setToolTip(t("sticky.menu.hide"))
+        close_btn.clicked.connect(self.hide_requested)
         layout.addWidget(close_btn)
+        self.refresh_colors(color)
+
+    def refresh_colors(self, color):
+        self._color = color
+        ink, secondary, _ = _ink_colors(color)
+        dark = QColor(color).lightness() < 128
+        hover = "rgba(255,255,255,0.14)" if dark else "rgba(0,0,0,0.09)"
+        pressed = "rgba(255,255,255,0.23)" if dark else "rgba(0,0,0,0.16)"
+        self._label.setStyleSheet(f"color:{secondary};background:transparent;border:none;font-size:11px;font-weight:600")
+        for button in self.findChildren(QPushButton):
+            button.setStyleSheet(
+                f"QPushButton{{color:{ink};background:transparent;border:none;border-radius:5px;padding:0;font-size:20px}}"
+                f"QPushButton:hover{{background:{hover}}}QPushButton:pressed{{background:{pressed}}}"
+            )
+        self.update()
 
     def set_title(self, title: str):
         short = title[:18] + "…" if len(title) > 18 else title
@@ -181,27 +202,7 @@ class _TitleBar(QWidget):
             self._press_pos = event.globalPosition().toPoint()
 
     def _show_title_menu(self, global_pos: QPoint):
-        win: StickyNoteWindow = self.window()
-        is_top = bool(win.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
-
-        menu = QMenu(self)
-        top_act = menu.addAction(t("sticky.menu.unpin") if is_top else t("sticky.menu.pin"))
-        hide_act = menu.addAction(t("sticky.menu.hide"))
-        menu.addSeparator()
-        copy_act = menu.addAction(t("sticky.menu.copyContent"))
-        menu.addSeparator()
-        del_act = menu.addAction(t("sticky.menu.delete"))
-
-        action = menu.exec(global_pos)
-        if action == top_act:
-            self.toggle_top_requested.emit()
-        elif action == hide_act:
-            self.hide_requested.emit()
-        elif action == copy_act:
-            text = win._content_edit.toPlainText()
-            QApplication.clipboard().setText(text)
-        elif action == del_act:
-            self.delete_requested.emit()
+        self.window().show_note_menu(global_pos)
 
     def mouseMoveEvent(self, event):
         if event.buttons() & Qt.MouseButton.LeftButton:
@@ -210,6 +211,7 @@ class _TitleBar(QWidget):
                     event.globalPosition().toPoint() - self._press_pos
                 ).manhattanLength()
                 if delta > 4:
+                    self.window()._edge_restore()
                     self._drag_started = True
                     self.window().windowHandle().startSystemMove()
 
@@ -218,7 +220,7 @@ class _TitleBar(QWidget):
             self.double_clicked.emit()
 
 
-class StickyNoteWindow(QWidget):
+class StickyNoteWindow(StickyNoteFeatures, QWidget):
     """A frameless, always-on-top sticky note window with editable content."""
 
     closed = pyqtSignal()
@@ -226,12 +228,26 @@ class StickyNoteWindow(QWidget):
     content_changed = pyqtSignal(int, str, str)
     # Signal emitted when user requests deletion from title bar menu
     delete_requested = pyqtSignal(int)
+    new_requested = pyqtSignal(str)
+    duplicate_requested = pyqtSignal(int)
+    manager_requested = pyqtSignal()
+    reminder_requested = pyqtSignal(int)
+    settings_changed = pyqtSignal(int)
 
     def __init__(self, note_id: int, title: str, content: str,
                  note_mgr=None, parent=None):
         super().__init__(parent)
         self._note_id = note_id
         self._note_mgr = note_mgr
+        self._settings = (note_mgr.get_sticky_settings(note_id) if note_mgr else dict(DEFAULT_STICKY_SETTINGS))
+        self._title = title
+        self._dirty = False
+        self._last_content = content
+        self._edge_geometry = None
+        self._edge_side = None
+        self._edge_mutating = False
+        self._menu_open = False
+        self._applying_settings = False
         self._color = _next_color()
 
         # Resize state
@@ -251,12 +267,20 @@ class StickyNoteWindow(QWidget):
         self._save_timer.setInterval(1500)
         self._save_timer.timeout.connect(self._flush)
         self._content_edit.textChanged.connect(self._save_timer.start)
+        self._content_edit.textChanged.connect(self._mark_dirty)
 
         # Position save timer (500ms debounce for move events)
         self._pos_timer = QTimer(self)
         self._pos_timer.setSingleShot(True)
         self._pos_timer.setInterval(500)
         self._pos_timer.timeout.connect(self._save_position)
+        self._edge_timer = QTimer(self)
+        self._edge_timer.setSingleShot(True)
+        self._edge_timer.setInterval(700)
+        self._edge_timer.timeout.connect(self._edge_hide)
+        self._apply_settings()
+        self._content_edit.document().setModified(False)
+        self._saved_editor_content = self._content_edit.toHtml()
 
     # ── Window setup ───────────────────────────────────────────────────
 
@@ -268,7 +292,7 @@ class StickyNoteWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.resize(240, 200)
+        self.resize(self._settings["width"], self._settings["height"])
         self.setMinimumSize(_MIN_W, _MIN_H)
 
         # Center on screen
@@ -292,15 +316,15 @@ class StickyNoteWindow(QWidget):
         # Title bar
         self._title_bar = _TitleBar(self._color, self._container)
         self._title_bar.set_title(title)
-        self._title_bar.close_requested.connect(self.close)
-        self._title_bar.double_clicked.connect(self.close)
-        self._title_bar.hide_requested.connect(self.hide)
+        self._title_bar.close_requested.connect(self.hide_note)
+        self._title_bar.double_clicked.connect(self.rename_note)
+        self._title_bar.hide_requested.connect(self.hide_note)
         self._title_bar.toggle_top_requested.connect(self._toggle_always_on_top)
         self._title_bar.delete_requested.connect(self._on_delete_requested)
         container_layout.addWidget(self._title_bar)
 
         # Content editor
-        self._content_edit = QTextEdit(self._container)
+        self._content_edit = StickyEditor(self._container)
         self._content_edit.setFrameShape(QTextEdit.Shape.NoFrame)
         ink = _ink_colors(self._color)[0]
         self._content_edit.setStyleSheet(
@@ -309,47 +333,92 @@ class StickyNoteWindow(QWidget):
         )
         self._content_edit.setPlaceholderText(t("sticky.placeholder"))
         # Sticky notes store HTML (supports text + images)
-        if content and "<" in content:
-            self._content_edit.setHtml(content)
-        else:
-            self._content_edit.setPlainText(content)
+        self._content_edit.load_content(content)
         # Enable context menu
         self._content_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._content_edit.customContextMenuRequested.connect(self._show_context_menu)
         container_layout.addWidget(self._content_edit, 1)
+        self._reminder_label = QPushButton(self._container)
+        self._reminder_label.setFlat(True)
+        self._reminder_label.clicked.connect(lambda: self.reminder_requested.emit(self._note_id))
+        self._reminder_label.hide()
+        container_layout.addWidget(self._reminder_label)
 
         outer.addWidget(self._container)
 
     # ── Save ───────────────────────────────────────────────────────────
 
+    def _mark_dirty(self):
+        self._dirty = True
+
     def _flush(self):
+        self._save_timer.stop()
         if not self._note_mgr or not self._note_id:
             return
-        content = self._content_edit.toHtml()
+        if not self._dirty:
+            return True
         note = self._note_mgr.get(self._note_id)
         if note:
-            self._note_mgr.update(self._note_id, note.title, content)
+            # Stickies use rich text; regular notes keep their Markdown source
+            # as plain text, just like the app's Markdown editor.
+            content = (
+                self._content_edit.toHtml()
+                if note.note_type == "sticky"
+                else self._content_edit.toPlainText()
+            )
+            if content == note.content or self._content_edit.toHtml() == self._saved_editor_content:
+                self._dirty = False
+                self._content_edit.document().setModified(False)
+                return True
+            try:
+                self._note_mgr.update(self._note_id, note.title, content,
+                                      priority=note.priority, due_date=note.due_date, recurrence=note.recurrence)
+            except Exception:
+                logger.exception("Could not save sticky %s", self._note_id)
+                self._title_bar._label.setText(t("sticky.saveFailed"))
+                return False
+            self._last_content = content
+            self._saved_editor_content = self._content_edit.toHtml()
+            self._dirty = False
+            self._content_edit.document().setModified(False)
+            self._title = note.title
             self._title_bar.set_title(note.title)
             self.content_changed.emit(self._note_id, note.title, content)
+        return True
 
     def _save_position(self):
         """保存浮窗位置到数据库。"""
         if not self._note_mgr or not self._note_id:
             return
         try:
-            pos = self.pos()
+            geo = self._edge_geometry or self.geometry()
+            pos = geo.topLeft()
             self._note_mgr.update_pin_position(self._note_id, pos.x(), pos.y())
+            changes = {"width": geo.width(), "visible": self.isVisible()}
+            if not self._settings["collapsed"]:
+                changes["height"] = geo.height()
+            self._settings = self._note_mgr.set_sticky_settings(self._note_id, **changes)
         except Exception:
             logger.exception("Failed to save sticky note position for note %s", self._note_id)
 
     def update_content(self, title: str, content: str):
         """外部调用：更新浮窗内容（用于同步笔记面板的编辑）。"""
-        self._content_edit.blockSignals(True)
-        if content and "<" in content:
-            self._content_edit.setHtml(content)
-        else:
-            self._content_edit.setPlainText(content)
-        self._content_edit.blockSignals(False)
+        if self._dirty:
+            return
+        if content != self._last_content:
+            cursor = self._content_edit.textCursor().position()
+            scroll = self._content_edit.verticalScrollBar().value()
+            self._content_edit.blockSignals(True)
+            self._content_edit.load_content(content)
+            caret = self._content_edit.textCursor()
+            caret.setPosition(min(cursor, self._content_edit.document().characterCount() - 1))
+            self._content_edit.setTextCursor(caret)
+            self._content_edit.verticalScrollBar().setValue(scroll)
+            self._content_edit.document().setModified(False)
+            self._content_edit.blockSignals(False)
+            self._last_content = content
+            self._saved_editor_content = self._content_edit.toHtml()
+        self._title = title
         self._title_bar.set_title(title)
 
     def _toggle_always_on_top(self):
@@ -360,67 +429,16 @@ class StickyNoteWindow(QWidget):
         else:
             self.setWindowFlags(flags | Qt.WindowType.WindowStaysOnTopHint)
         self.show()  # setWindowFlags hides the window, must re-show
+        self._set_pref("top", bool(self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
 
     def _on_delete_requested(self):
         """用户从标题栏菜单请求删除便签。"""
+        if self._flush() is False:
+            return
         if self._note_mgr and self._note_id:
             self._note_mgr.delete(self._note_id)
         self.delete_requested.emit(self._note_id)
-        self.close()
-
-    def _show_context_menu(self, pos):
-        """显示右键菜单。"""
-        menu = QMenu(self)
-
-        # Text editing operations
-        undo_action = menu.addAction(t("edit.undo"))
-        undo_action.setEnabled(self._content_edit.document().isUndoAvailable())
-
-        redo_action = menu.addAction(t("edit.redo"))
-        redo_action.setEnabled(self._content_edit.document().isRedoAvailable())
-
-        menu.addSeparator()
-
-        has_selection = self._content_edit.textCursor().hasSelection()
-
-        cut_action = menu.addAction(t("edit.cut"))
-        cut_action.setEnabled(has_selection)
-
-        copy_action = menu.addAction(t("edit.copy"))
-        copy_action.setEnabled(has_selection)
-
-        paste_action = menu.addAction(t("edit.paste"))
-        paste_action.setEnabled(self._content_edit.canPaste())
-
-        menu.addSeparator()
-
-        select_all_action = menu.addAction(t("edit.selectAll"))
-        select_all_action.setEnabled(not self._content_edit.document().isEmpty())
-
-        menu.addSeparator()
-
-        # Window operations
-        close_action = menu.addAction(t("sticky.menu.close"))
-
-        global_pos = self._content_edit.mapToGlobal(pos)
-        action = menu.exec(global_pos)
-
-        # Handle text editing actions
-        if action == undo_action:
-            self._content_edit.undo()
-        elif action == redo_action:
-            self._content_edit.redo()
-        elif action == cut_action:
-            self._content_edit.cut()
-        elif action == copy_action:
-            self._content_edit.copy()
-        elif action == paste_action:
-            self._content_edit.paste()
-        elif action == select_all_action:
-            self._content_edit.selectAll()
-        # Handle window actions
-        elif action == close_action:
-            self.close()
+        self.dispose()
 
     # ── Resize (QApplication event filter) ─────────────────────────────
 
@@ -494,6 +512,9 @@ class StickyNoteWindow(QWidget):
         self.setGeometry(nx, ny, nw, nh)
 
     def eventFilter(self, obj, event):
+        if not self.isVisible():
+            self._clear_resize_cursor()
+            return False
         etype = event.type()
 
         # 过滤器装在 QApplication 上会收到所有顶层窗口的鼠标事件。本窗口被
@@ -503,6 +524,9 @@ class StickyNoteWindow(QWidget):
             QEvent.Type.MouseButtonPress,
             QEvent.Type.MouseButtonRelease,
         ):
+            if isinstance(obj, QPushButton) and self._title_bar.isAncestorOf(obj) and not self._resize_active:
+                self._clear_resize_cursor()
+                return False
             gpos = event.globalPosition().toPoint()
             top = QApplication.topLevelAt(gpos)
             if top is not None and top is not self and not self._resize_active:
@@ -563,14 +587,20 @@ class StickyNoteWindow(QWidget):
     def moveEvent(self, event):
         """窗口移动时触发位置保存（防抖）。"""
         super().moveEvent(event)
-        if hasattr(self, '_pos_timer'):
+        if hasattr(self, '_pos_timer') and not self._edge_mutating and not self._applying_settings:
             self._pos_timer.start()
+            self._edge_timer.start()
 
     # ── Cleanup ────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        if not getattr(self, "_disposing", False):
+            event.ignore()
+            self.hide_note()
+            return
         self._save_timer.stop()
         self._pos_timer.stop()
+        self._edge_timer.stop()
         self._flush()
         self._save_position()
         self._clear_resize_cursor()

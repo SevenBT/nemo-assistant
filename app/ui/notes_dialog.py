@@ -22,6 +22,7 @@ from qfluentwidgets import (
     Action,
     BodyLabel,
     CaptionLabel,
+    ComboBox,
     FluentIcon,
     LineEdit,
     ListItemDelegate,
@@ -41,6 +42,7 @@ from app.models.note import Folder
 from app.ui.components.markdown_editor import MarkdownEditor
 from app.ui.components.markdown_preview import MarkdownPreview
 from app.ui.components.context_menu import ContextMenu
+from app.ui.components.sticky_editor import StickyEditor
 
 logger = logging.getLogger(__name__)
 
@@ -295,6 +297,7 @@ class NotesPanel(QWidget):
         super().__init__(parent)
         self._mgr = note_mgr
         self._current_note_id: int | None = None
+        self._editor_dirty = False
         self._pin_windows: list = []
         self._current_search_keyword: str = ""
         self._current_folder_id: int | None = None  # used only for new-note placement
@@ -302,6 +305,7 @@ class NotesPanel(QWidget):
         self._saved_list_width: int | None = None
         self._preview_mode = False
         self._current_tab = _TAB_NOTE  # list filter: note | sticky
+        self._sticky_controller = None
         self._build()
         self._load()
 
@@ -354,6 +358,13 @@ class NotesPanel(QWidget):
         self._new_btn.clicked.connect(lambda: self._on_new(self._current_tab))
         header_row.addWidget(self._new_btn)
         list_panel_layout.addLayout(header_row)
+
+        self._sticky_filter = ComboBox()
+        for key in ("all", "visible", "hidden", "reminders", "tasks"):
+            self._sticky_filter.addItem(t("sticky.filter." + key), userData=key)
+        self._sticky_filter.currentIndexChanged.connect(lambda: self.refresh())
+        self._sticky_filter.hide()
+        list_panel_layout.addWidget(self._sticky_filter)
 
         self._list = _NoteList()
         self._list.setObjectName("noteList")
@@ -424,7 +435,7 @@ class NotesPanel(QWidget):
         right_layout.addWidget(self._md_preview, 1)
 
         # Rich text editor (for sticky type — HTML with images)
-        self._sticky_edit = TextEdit()
+        self._sticky_edit = StickyEditor()
         self._sticky_edit.setObjectName("noteStickyEdit")
         self._sticky_edit.setPlaceholderText(t("notes.sticky.placeholder"))
         self._sticky_edit.setFont(_editor_font)
@@ -471,9 +482,12 @@ class NotesPanel(QWidget):
         self._title_edit.textChanged.connect(lambda _: self._auto_save_timer.start())
         self._md_editor.textChanged.connect(self._auto_save_timer.start)
         self._sticky_edit.textChanged.connect(self._auto_save_timer.start)
+        for signal in (self._title_edit.textChanged, self._md_editor.textChanged, self._sticky_edit.textChanged):
+            signal.connect(self._mark_editor_dirty)
 
         self._title_edit.editingFinished.connect(self._flush_current)
         self._md_editor.installEventFilter(self)
+        self._title_edit.installEventFilter(self)
         self._sticky_edit.installEventFilter(self)
         self._sticky_edit.viewport().installEventFilter(self)
 
@@ -510,6 +524,9 @@ class NotesPanel(QWidget):
 
     # ------------------------------------------------------------------ load
     def _load(self):
+        if self._editor_dirty and self._flush_current() is False:
+            return
+        self._sticky_filter.setVisible(self._current_tab == _TAB_STICKY)
         # Refresh the delegate's cached theme colors once per reload (cheap),
         # so a theme switch is picked up without per-paint theme lookups.
         self._delegate.refresh_theme()
@@ -605,6 +622,8 @@ class NotesPanel(QWidget):
 
     def _add_note_item(self, note, indent: bool):
         """Add a note QListWidgetItem to self._list."""
+        if note.note_type == "sticky" and not self._matches_sticky_filter(note):
+            return
         date_str = datetime.fromisoformat(note.updated_at).strftime("%m-%d %H:%M")
         item = QListWidgetItem()
         item.setData(_ROLE_ID, note.id)
@@ -615,6 +634,8 @@ class NotesPanel(QWidget):
         item.setData(_ROLE_COLOR, _note_color(note.id))
         item.setData(_ROLE_INDENT, indent)
         item.setToolTip(note.title)
+        if note.note_type == "sticky":
+            self._set_sticky_item_metadata(item, note)
         # Notes are draggable (default ItemIsDragEnabled) but NOT drop targets:
         # clearing ItemIsDropEnabled stops Qt from treating "drop ONTO this note"
         # as nesting — between-row insertion (the reorder we want) still works via
@@ -622,6 +643,82 @@ class NotesPanel(QWidget):
         # position after the move (see _on_rows_moved).
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
         self._list.addItem(item)
+
+    def _matches_sticky_filter(self, note):
+        key = self._sticky_filter.currentData()
+        if key == "all" or self._current_tab != _TAB_STICKY:
+            return True
+        settings = self._mgr.get_sticky_settings(note.id)
+        visible = note.is_pinned and settings["visible"]
+        if key == "visible":
+            return visible
+        if key == "hidden":
+            return not visible
+        if key == "reminders":
+            return self._mgr.get_sticky_reminder(note.id) is not None
+        editor = StickyEditor()
+        editor.load_content(note.content)
+        done, total = editor.task_counts()
+        editor.deleteLater()
+        return done < total
+
+    def _set_sticky_item_metadata(self, item, note):
+        from app.ui.sticky_note_window import _note_palette
+        settings = self._mgr.get_sticky_settings(note.id)
+        names = ("yellow", "green", "blue", "pink", "purple", "peach")
+        key = settings["color"]
+        palette = _note_palette()
+        color = palette[names.index(key)] if key in names else palette[note.id % len(palette)] if key == "auto" else key
+        if QColor(color).isValid():
+            item.setData(_ROLE_COLOR, color)
+        editor = StickyEditor()
+        editor.load_content(note.content)
+        done, total = editor.task_counts()
+        editor.deleteLater()
+        date_str = datetime.fromisoformat(note.updated_at).strftime("%m-%d %H:%M")
+        parts = [note.title, date_str]
+        if total:
+            parts.append(t("sticky.tasks.progress", done=done, total=total))
+        reminder = self._mgr.get_sticky_reminder(note.id)
+        if reminder:
+            parts.append(t("sticky.reminder.next", time=datetime.fromisoformat(reminder["next_at"]).astimezone().strftime("%m-%d %H:%M")) if reminder["enabled"] else t("sticky.reminder.paused"))
+        item.setData(_ROLE_DATE, date_str)
+        item.setToolTip("\n".join(parts))
+
+    def _refresh_sticky_metadata(self):
+        remove = []
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if item.data(_ROLE_KIND) == "note":
+                note = self._mgr.get(item.data(_ROLE_ID))
+                if note and note.note_type == "sticky":
+                    if not self._editor_dirty and not self._matches_sticky_filter(note):
+                        remove.append(i)
+                        continue
+                    self._set_sticky_item_metadata(item, note)
+        for index in reversed(remove):
+            self._list.takeItem(index)
+        self._list.viewport().update()
+
+    def _bulk_sticky(self, operation, color=None):
+        self._flush_current()
+        ids = [item.data(_ROLE_ID) for item in self._list.selectedItems() if item.data(_ROLE_KIND) == "note"]
+        for note_id in ids:
+            note = self._mgr.get(note_id)
+            if not note or note.note_type != "sticky":
+                continue
+            if operation == "color":
+                self._mgr.set_sticky_settings(note.id, color=color)
+                if self._sticky_controller and note.id in self._sticky_controller._by_id:
+                    win = self._sticky_controller._by_id[note.id]
+                    win._settings = self._mgr.get_sticky_settings(note.id)
+                    win._apply_settings()
+            elif self._sticky_controller:
+                if operation == "show":
+                    self._sticky_controller.show_note(note.id)
+                else:
+                    self._sticky_controller.hide_note(note.id)
+        self.refresh()
 
     def _on_new_folder(self):
         from PyQt6.QtWidgets import QInputDialog
@@ -679,10 +776,13 @@ class NotesPanel(QWidget):
         note = self._mgr.get(note_id)
         if not note:
             return
+        self._editor_dirty = False
 
         self._title_edit.blockSignals(True)
         self._title_edit.setText(note.title)
         self._title_edit.blockSignals(False)
+        locked = note.note_type == "sticky" and self._mgr.get_sticky_settings(note.id)["locked"]
+        self._title_edit.setReadOnly(locked)
 
         if note.note_type == "sticky":
             self._md_editor.hide()
@@ -698,7 +798,11 @@ class NotesPanel(QWidget):
                     abs_path = NOTES_IMAGES_DIR.parent / rel_path
                     return f'<img src="{abs_path}"'
                 content = re.sub(r'<img src="(images/[^"]+)"', replace_path, content)
-            self._sticky_edit.setHtml(content)
+            self._sticky_edit.load_content(content)
+            self._apply_sticky_text_color()
+            self._last_sticky_content = note.content
+            self._sticky_edit.document().setModified(False)
+            self._sticky_edit.setReadOnly(self._mgr.get_sticky_settings(note.id)["locked"])
             self._sticky_edit.blockSignals(False)
         elif note.note_type == "todo":
             # Legacy todo notes — show as plain text in markdown editor, read-only feel
@@ -726,6 +830,10 @@ class NotesPanel(QWidget):
             else:
                 self._md_preview.hide()
                 self._md_editor.show()
+
+        self._saved_editor_state = (note.id, self._title_edit.text().strip() or t("notes.untitled"),
+                                    self._editor_content(note.note_type))
+        self._editor_dirty = False
 
     # ------------------------------------------------------------------ item clicked (folder toggle)
     def _on_item_clicked(self, item: QListWidgetItem):
@@ -805,6 +913,15 @@ class NotesPanel(QWidget):
 
     # ------------------------------------------------------------------ normal actions
     def _on_new(self, note_type: str = "note"):
+        if note_type == "sticky" and self._sticky_controller:
+            self._flush_current()
+            window = self._sticky_controller.create_note()
+            self._current_note_id = window._note_id
+            self._current_tab = _TAB_STICKY
+            self._sticky_filter.setCurrentIndex(0)
+            self._pivot.setCurrentItem(_TAB_STICKY)
+            self._load()
+            return window
         self._flush_current()
         if note_type == "sticky":
             note = self._mgr.create(title=t("notes.defaultSticky"), content="", note_type="sticky")
@@ -823,6 +940,7 @@ class NotesPanel(QWidget):
         self._title_edit.setFocus()
 
     def _on_delete(self):
+        self._flush_current()
         selected = self._list.selectedItems()
         if not selected:
             return
@@ -836,9 +954,14 @@ class NotesPanel(QWidget):
         deleted_current = False
         for item in selected:
             note_id = item.data(Qt.ItemDataRole.UserRole)
+            window = self._sticky_controller._by_id.get(note_id) if self._sticky_controller else None
+            if window and window._flush() is False:
+                return
             if note_id == self._current_note_id:
                 deleted_current = True
             self._mgr.delete(note_id)
+            if self._sticky_controller:
+                self._sticky_controller.remove_window(note_id)
 
         if deleted_current:
             self._current_note_id = None
@@ -856,28 +979,41 @@ class NotesPanel(QWidget):
         if obj is self._editor_widget and event.type() == QEvent.Type.Resize:
             self._update_editor_margins(event.size().width())
         if event.type() == QEvent.Type.FocusOut:
-            if obj is self._md_editor or obj is self._sticky_edit:
+            if obj in (self._md_editor, self._sticky_edit, self._title_edit):
                 self._auto_save_timer.stop()
                 self._flush_current()
         if event.type() == QEvent.Type.FocusIn:
+            if obj in (self._sticky_edit, self._title_edit) and self._sticky_controller and self._current_note_id:
+                self._sticky_controller.prepare_library_edit(self._current_note_id)
             if obj is self._sticky_edit or obj is self._sticky_edit.viewport():
                 self._apply_sticky_text_color()
         return super().eventFilter(obj, event)
 
     def _apply_sticky_text_color(self):
-        """Force sticky editor text color to follow theme."""
+        """Use a theme default without applying rich formatting to the selection."""
         try:
             from app.ui.style import get_text_color
             color = get_text_color()
         except Exception:
             color = "#000000"
-        from PyQt6.QtGui import QColor, QTextCharFormat
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(color))
-        self._sticky_edit.setCurrentCharFormat(fmt)
-        self._sticky_edit.setTextColor(QColor(color))
+        self._sticky_edit.setStyleSheet(f"QTextEdit{{color:{color};background:transparent;border:0}}")
+        self._sticky_edit.apply_text_color(color)
+
+    def _mark_editor_dirty(self, *_):
+        self._editor_dirty = True
+
+    def _editor_content(self, note_type):
+        if note_type != "sticky":
+            return self._md_editor.toPlainText()
+        content = self._sticky_edit.toHtml()
+        if str(NOTES_IMAGES_DIR) in content:
+            content = content.replace(str(NOTES_IMAGES_DIR) + "/", "images/")
+            content = content.replace(str(NOTES_IMAGES_DIR.parent) + "/images/", "images/")
+        return content
 
     def _flush_current(self):
+        if not self._editor_dirty:
+            return
         if not self._current_note_id:
             return
         current_note = self._mgr.get(self._current_note_id)
@@ -886,17 +1022,29 @@ class NotesPanel(QWidget):
 
         title = self._title_edit.text().strip() or t("notes.untitled")
 
-        if current_note.note_type == "sticky":
-            content = self._sticky_edit.toHtml()
-            if str(NOTES_IMAGES_DIR) in content:
-                content = content.replace(str(NOTES_IMAGES_DIR) + "/", "images/")
-                content = content.replace(str(NOTES_IMAGES_DIR.parent) + "/images/", "images/")
-        else:
-            content = self._md_editor.toPlainText()
+        content = self._editor_content(current_note.note_type)
 
-        note = self._mgr.update(self._current_note_id, title, content)
+        if ((title == current_note.title and content == current_note.content)
+                or (self._current_note_id, title, content) == getattr(self, "_saved_editor_state", None)):
+            self._auto_save_timer.stop()
+            self._editor_dirty = False
+            return True
+
+        try:
+            note = self._mgr.update(self._current_note_id, title, content, priority=current_note.priority,
+                                    due_date=current_note.due_date, recurrence=current_note.recurrence)
+        except Exception:
+            logger.exception("Could not save note %s", self._current_note_id)
+            self._status_label.setText(t("sticky.saveFailed"))
+            return False
+        self._auto_save_timer.stop()
+        self._sticky_edit.document().setModified(False)
+        self._editor_dirty = False
 
         if note:
+            self._saved_editor_state = (note.id, title, content)
+            if note.note_type == "sticky":
+                self._last_sticky_content = content
             self._status_label.setText(t("notes.status.saved"))
             self._status_timer.start()
             self.note_updated.emit(self._current_note_id, title, content)
@@ -916,6 +1064,7 @@ class NotesPanel(QWidget):
                 break
 
     def _clear_editor(self):
+        self._editor_dirty = False
         self._title_edit.blockSignals(True)
         self._md_editor.blockSignals(True)
         self._sticky_edit.blockSignals(True)
@@ -972,13 +1121,24 @@ class NotesPanel(QWidget):
 
             # Only sticky notes can be pinned to screen
             if note and note.note_type == "sticky":
-                if note.is_pinned:
-                    menu.addAction(Action(FluentIcon.UNPIN, t("notes.menu.unpin"),
+                if note.is_pinned and self._mgr.get_sticky_settings(note.id)["visible"]:
+                    menu.addAction(Action(FluentIcon.UNPIN, t("sticky.menu.hide"),
                                           triggered=lambda: self._unpin_note(note_id)))
                 else:
                     menu.addAction(Action(FluentIcon.PIN, t("notes.menu.pinToScreen"),
                                           triggered=lambda: self._pin_note_to_screen(note_id)))
                 menu.addSeparator()
+                if self._sticky_controller:
+                    menu.addAction(Action(FluentIcon.EDIT, t("sticky.manageReminder"),
+                                          triggered=lambda: self._sticky_controller.edit_reminder(note_id)))
+                    menu.addAction(Action(FluentIcon.PIN, t("sticky.bulk.show"),
+                                          triggered=lambda: self._bulk_sticky("show")))
+                    menu.addAction(Action(FluentIcon.UNPIN, t("sticky.bulk.hide"),
+                                          triggered=lambda: self._bulk_sticky("hide")))
+                    colors = RoundMenu(t("sticky.bulk.color"), menu)
+                    for key in ("yellow", "green", "blue", "pink", "purple", "peach"):
+                        colors.addAction(Action(t("sticky.color." + key), triggered=lambda checked=False, k=key: self._bulk_sticky("color", k)))
+                    menu.addMenu(colors)
 
             menu.addAction(Action(FluentIcon.COPY, t("notes.menu.copyContent"),
                                   triggered=lambda: self._copy_note_content(note_id)))
@@ -1019,17 +1179,24 @@ class NotesPanel(QWidget):
         menu.exec(global_pos)
 
     def _copy_note_content(self, note_id: int):
+        self._flush_current()
         note = self._mgr.get(note_id)
         if not note:
             return
         if note.note_type == "sticky":
-            text = _html_to_plain(note.content)
+            editor = StickyEditor()
+            editor.load_content(note.content)
+            text = editor.plain_text()
+            editor.deleteLater()
         else:
             text = note.content
         QGuiApplication.clipboard().setText(text)
         self._show_status(t("notes.status.copied"))
 
     def _duplicate_note(self, note_id: int):
+        if self._sticky_controller:
+            self._flush_current()
+            return self._sticky_controller.duplicate(note_id)
         note = self._mgr.get(note_id)
         if not note:
             return
@@ -1040,6 +1207,7 @@ class NotesPanel(QWidget):
         self._show_status(t("notes.status.duplicated"))
 
     def _export_note_txt(self, note_id: int):
+        self._flush_current()
         note = self._mgr.get(note_id)
         if not note:
             return
@@ -1050,7 +1218,10 @@ class NotesPanel(QWidget):
         if not path:
             return
         if note.note_type == "sticky":
-            body = _html_to_plain(note.content)
+            editor = StickyEditor()
+            editor.load_content(note.content)
+            body = editor.plain_text()
+            editor.deleteLater()
         else:
             body = note.content
         try:
@@ -1080,11 +1251,17 @@ class NotesPanel(QWidget):
     def _on_delete_by_id(self, note_id: int):
         if not self._confirm(t("notes.delete.title"), t("notes.delete.msgOne")):
             return
+        self._flush_current()
         self._auto_save_timer.stop()
+        window = self._sticky_controller._by_id.get(note_id) if self._sticky_controller else None
+        if window and window._flush() is False:
+            return
         if note_id == self._current_note_id:
             self._current_note_id = None
             self._clear_editor()
         self._mgr.delete(note_id)
+        if self._sticky_controller:
+            self._sticky_controller.remove_window(note_id)
         self._load()
 
     def _show_status(self, msg: str):
@@ -1092,58 +1269,9 @@ class NotesPanel(QWidget):
         self._status_timer.start()
 
     def _show_sticky_context_menu(self, pos):
-        """Reliable Cut/Copy/Paste/SelectAll menu for the sticky editor.
-
-        Mirrors the sticky-note window's menu: build a plain QMenu, exec it, and
-        act on the returned QAction. This avoids qfluentwidgets' TextEditMenu,
-        whose selection-restore is a no-op so Cut/Copy/Paste silently fail.
-        """
-        edit = self._sticky_edit
-        menu = QMenu(self)
-        # Match the markdown editor's themed menu so it has clear contrast
-        # (a bare QMenu inherits low-contrast defaults under FluentWindow).
-        try:
-            from app.ui.style import get_text_color, _current_dark_mode
-            text_color = get_text_color()
-            bg_color = "#2D2D2D" if _current_dark_mode else "#FFFFFF"
-            hover_bg = "#3D3D3D" if _current_dark_mode else "#F3F4F6"
-        except Exception:
-            text_color, bg_color, hover_bg = "#000000", "#FFFFFF", "#F3F4F6"
-        menu.setStyleSheet(
-            f"QMenu {{ color: {text_color}; background: {bg_color}; border: 1px solid rgba(128,128,128,0.3); }}"
-            f"QMenu::item:selected {{ background: {hover_bg}; }}"
-        )
-
-        undo_act = menu.addAction(t("edit.undo"))
-        undo_act.setEnabled(edit.document().isUndoAvailable())
-        redo_act = menu.addAction(t("edit.redo"))
-        redo_act.setEnabled(edit.document().isRedoAvailable())
-        menu.addSeparator()
-
-        has_selection = edit.textCursor().hasSelection()
-        cut_act = menu.addAction(t("edit.cut"))
-        cut_act.setEnabled(has_selection)
-        copy_act = menu.addAction(t("edit.copy"))
-        copy_act.setEnabled(has_selection)
-        paste_act = menu.addAction(t("edit.paste"))
-        paste_act.setEnabled(edit.canPaste())
-        menu.addSeparator()
-        select_all_act = menu.addAction(t("edit.selectAll"))
-        select_all_act.setEnabled(not edit.document().isEmpty())
-
-        action = menu.exec(edit.mapToGlobal(pos))
-        if action == undo_act:
-            edit.undo()
-        elif action == redo_act:
-            edit.redo()
-        elif action == cut_act:
-            edit.cut()
-        elif action == copy_act:
-            edit.copy()
-        elif action == paste_act:
-            edit.paste()
-        elif action == select_all_act:
-            edit.selectAll()
+        menu = self._sticky_edit.create_edit_menu()
+        menu.exec(self._sticky_edit.mapToGlobal(pos))
+        menu.deleteLater()
 
     def _move_to_folder(self, note_id, folder_id):
         self._flush_current()
@@ -1198,6 +1326,8 @@ class NotesPanel(QWidget):
         self._show_status(t("notes.status.moved"))
 
     def _pin_note_to_screen(self, note_id: int):
+        if self._sticky_controller:
+            return self._sticky_controller.show_note(note_id)
         from app.ui.sticky_note_window import StickyNoteWindow
         note = self._mgr.get(note_id)
         if not note:
@@ -1224,6 +1354,9 @@ class NotesPanel(QWidget):
         win.content_changed.connect(self.note_updated)
 
     def _unpin_note(self, note_id: int):
+        if self._sticky_controller:
+            self._sticky_controller.hide_note(note_id)
+            return
         try:
             self._mgr.unpin_note(note_id)
         except Exception:
@@ -1277,6 +1410,13 @@ class NotesPanel(QWidget):
         self._on_search(keyword)
 
     def refresh(self):
+        # Reloading the selected note replaces its editor contents. Save any
+        # pending edits first when another surface creates or deletes a note.
+        if self._auto_save_timer.isActive():
+            self._auto_save_timer.stop()
+            self._flush_current()
+        if self._sticky_controller:
+            self._sticky_controller.reconcile()
         self._load()
 
     def refresh_theme(self):
@@ -1288,23 +1428,17 @@ class NotesPanel(QWidget):
         """
         self._delegate.refresh_theme()
         self._list.viewport().update()
-        if self._current_tab == _TAB_STICKY and self._current_note_id:
-            self._apply_sticky_text_color()
+        self._apply_sticky_text_color()
 
     def refresh_note(self, note_id: int):
         if self._current_note_id == note_id:
-            editor_has_focus = (
-                self._title_edit.hasFocus()
-                or self._md_editor.hasFocus()
-                or self._sticky_edit.hasFocus()
-            )
-            if not editor_has_focus:
+            if not self._editor_dirty:
                 note = self._mgr.get(note_id)
                 if note:
                     self._title_edit.blockSignals(True)
                     self._title_edit.setText(note.title)
                     self._title_edit.blockSignals(False)
-                    if note.note_type == "sticky":
+                    if note.note_type == "sticky" and note.content != getattr(self, "_last_sticky_content", None):
                         self._sticky_edit.blockSignals(True)
                         content = note.content
                         if "images/" in content:
@@ -1313,9 +1447,17 @@ class NotesPanel(QWidget):
                                 abs_path = NOTES_IMAGES_DIR.parent / rel_path
                                 return f'<img src="{abs_path}"'
                             content = re.sub(r'<img src="(images/[^"]+)"', replace_path, content)
-                        self._sticky_edit.setHtml(content)
+                        cursor = self._sticky_edit.textCursor().position()
+                        scroll = self._sticky_edit.verticalScrollBar().value()
+                        self._sticky_edit.load_content(content)
+                        self._last_sticky_content = note.content
+                        caret = self._sticky_edit.textCursor()
+                        caret.setPosition(min(cursor, self._sticky_edit.document().characterCount() - 1))
+                        self._sticky_edit.setTextCursor(caret)
+                        self._sticky_edit.verticalScrollBar().setValue(scroll)
+                        self._sticky_edit.document().setModified(False)
                         self._sticky_edit.blockSignals(False)
-                    else:
+                    elif note.note_type != "sticky":
                         # 仅当内容确有变化时才重置编辑器，且保留光标/滚动位置。
                         # setPlainText 会把光标弹回开头（pos 0）——若无脑调用，
                         # 划词翻译回填等链路触发的 refresh 会让正在编辑的光标乱跳。
@@ -1341,6 +1483,10 @@ class NotesPanel(QWidget):
                             scrollbar.setValue(saved_scroll)
                             self._md_editor.blockSignals(False)
 
+                    self._saved_editor_state = (note.id, self._title_edit.text().strip() or t("notes.untitled"),
+                                                self._editor_content(note.note_type))
+
         note = self._mgr.get(note_id)
         if note:
             self._update_note_item_text(note_id, note.title, note.updated_at)
+            self._refresh_sticky_metadata()

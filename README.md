@@ -83,6 +83,8 @@ Screenshot support is built into the floating-window workflow rather than delega
 - **Notebook**: supports Markdown, folders, tags, keyword search, `[[wiki links]]`, and syntax highlighting.
 - **AI collaboration**: chat can read and create notes, and important information can be saved as long-term memory.
 
+Stickies support mixed checklists and images, local one-time/daily/weekly reminders, per-note appearance, collapse/lock/edge hiding, templates, and TXT/PNG export. Hidden notes remain in the notebook. See the [sticky-note guide](docs/zh/sticky-notes.md).
+
 <p align="center">
   <img src="assets/screenshots/notes-and-stickies.png" alt="Notes and stickies" width="860">
 </p>
@@ -152,8 +154,11 @@ Web search tools can use DuckDuckGo without an API key. Bing, Tavily, Brave, and
 | `Ctrl+Alt+A` | Screenshot + OCR |
 | `Ctrl+Alt+N` | Create desktop sticky note |
 | `Ctrl+Alt+Space` | Show / hide main window |
+| `Ctrl+Alt+E` | Show selection actions when text is selected |
 
-Shortcuts can be changed in **Settings → Hotkeys**. The selection action bar appears automatically after text is selected.
+**Settings → Hotkeys** groups shortcuts into Selection, Capture, Notes, Chat, and System, with search, clear binding, and group reset. Built-in actions have default shortcuts; existing custom bindings and cleared bindings are preserved. Custom selection actions can also have their own shortcuts.
+
+Selection shortcuts require a confirmed current text selection. Screenshot operations such as OCR, pinning, copying, and sending to AI work only on a selected region in capture mode; `Ctrl+Alt+A` remains the global entrance. Global shortcuts can be paused and resumed from the tray, and the configured pause/resume shortcut remains available while paused. See the [shortcut guide](docs/zh/shortcuts.md) for details.
 
 ---
 

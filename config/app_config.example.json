@@ -70,6 +70,7 @@
     "ThemeMode": "Light"
   },
   "Hotkeys": {
+    "Bindings": {},
     "NewNote": "ctrl+alt+n",
     "QuickAsk": "ctrl+alt+q",
     "Screenshot": "ctrl+alt+a",

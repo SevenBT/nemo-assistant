@@ -133,13 +133,7 @@ _ACCOUNT_SEARCH_KEY = "web_search_api_key"
 # ── Hotkey defaults (single source of truth) ──────────────────────────
 # config 项默认值、迁移、HotkeyManager、设置页都从这里取默认组合键，
 # 避免默认值散落多处产生分歧。键为 action id，值为 keyboard 组合串。
-DEFAULT_HOTKEYS: dict[str, str] = {
-    "screenshot": "ctrl+alt+a",
-    "new_note": "ctrl+alt+n",
-    "toggle_window": "ctrl+alt+space",
-    "quick_ask": "ctrl+alt+q",
-    "selection": "ctrl+alt+e",
-}
+from app.desktop.hotkey_actions import DEFAULT_HOTKEYS
 
 
 # ── AppConfig declaration ─────────────────────────────────────────────
@@ -238,6 +232,7 @@ class AppConfig(QConfig):
     hotkeySelection = ConfigItem(
         "Hotkeys", "Selection", DEFAULT_HOTKEYS["selection"]
     )
+    hotkeyBindings = ConfigItem("Hotkeys", "Bindings", {})
 
     # -- Selection (划词即行动) --
     selectionFloatEnabled = ConfigItem(

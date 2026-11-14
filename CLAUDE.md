@@ -10,8 +10,10 @@ This file is for AI coding agents working in this repository. Public contributor
 ## Git
 
 - Keep commits focused. Split unrelated changes into separate commits.
-- Start each new task from the latest main on a dedicated branch.
-- Keep one independent task per branch. Merge it before starting the next task.
+- Before editing, run `git branch --show-current` and `git status --short` to check the starting branch and existing changes.
+- Unless the user explicitly asks for a new branch, work on the branch that was checked out when the task started, provided it is not `main` or `master`. A new independent task does not require creating a branch, switching to main, or merging the current branch first.
+- Never edit or commit task code directly on `main` or `master`. If the task starts on a main branch, first create a `codex/<task-name>` working branch from the latest available main. Follow an explicit user request for a specific working branch or a new branch, while keeping task code off main branches.
+- Preserve existing user changes and their staging state when switching branches or moving task changes off main. Never discard unrelated work with a blanket reset, clean, or overwrite.
 - Choose your own merge strategy: use a regular merge or rebase merge to preserve the full commit history from the branch. Squash is not required.
 
 ## Development

@@ -278,7 +278,7 @@ class ResultBubble(NonActivatingPopup):
             }}
             #bubbleFooter TransparentToolButton:hover {{
                 background: {theme["accent_subtle"]};
-                color: {theme["accent"]};
+                color: {style.theme_text_color('accent', theme)};
             }}
         """
         self.setStyleSheet(qss)

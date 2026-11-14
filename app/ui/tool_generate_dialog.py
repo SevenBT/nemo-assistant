@@ -30,6 +30,7 @@ from app.tooling.tool_build import (
 )
 from app.tooling.tool_generator import ModelOverride, build_model_options, parse_result
 from app.i18n import t
+from app.ui.style import set_text_role
 from app.tools.registry import ToolRegistry
 from app.ui.tool_build_review_dialog import ToolBuildReviewPanel
 from app.ui.tool_build_workers import (
@@ -282,7 +283,7 @@ class ToolGenerateDialog(QDialog):
         self._toggle_code_btn.setEnabled(False)
         self._regen_btn.setEnabled(False)
         self._gen_btn.setEnabled(False)
-        self._set_status("tooldlg.gen.status_generating", "#9CA3AF")
+        self._set_status("tooldlg.gen.status_generating", "secondary")
         self._tabs.setCurrentIndex(2)
 
     def _is_current_worker(self, worker: _GenerateWorker, token: int) -> bool:
@@ -358,7 +359,7 @@ class ToolGenerateDialog(QDialog):
         self._regen_btn.setEnabled(True)
         manifest_text, script_text, error = parse_result(full_text)
         if error:
-            self._set_status_text(t("tooldlg.gen.status_parse_error", error=error), "#F87171")
+            self._set_status_text(t("tooldlg.gen.status_parse_error", error=error), "error")
             return
         self._set_generated_sources(manifest_text, script_text)
         try:
@@ -368,7 +369,7 @@ class ToolGenerateDialog(QDialog):
             pass
         self._toggle_code_btn.setEnabled(True)
         self._tabs.setCurrentIndex(0)
-        self._set_status("tooldlg.gen.status_validating", "#9CA3AF")
+        self._set_status("tooldlg.gen.status_validating", "secondary")
         # Auto-stage and validate: the user no longer clicks a review step.
         self._on_save()
 
@@ -389,7 +390,7 @@ class ToolGenerateDialog(QDialog):
     def _on_error(self, message: str) -> None:
         self._gen_btn.setEnabled(True)
         self._regen_btn.setEnabled(True)
-        self._set_status_text(t("tooldlg.gen.status_generation_error", error=message), "#F87171")
+        self._set_status_text(t("tooldlg.gen.status_generation_error", error=message), "error")
 
     def _on_save(self) -> None:
         if self._pending_result is not None or self._active_build_worker is not None:
@@ -445,9 +446,9 @@ class ToolGenerateDialog(QDialog):
         self._review_panel.set_review(review, approved_permissions)
         self._save_btn.setEnabled(True)
         if review.report.is_installable:
-            self._set_status("tooldlg.gen.status_ready", "#34D399")
+            self._set_status("tooldlg.gen.status_ready", "success")
         else:
-            self._set_status("tooldlg.gen.status_has_issues", "#F87171")
+            self._set_status("tooldlg.gen.status_has_issues", "error")
         self._set_end_to_end_focus_chain()
 
     def _review_current_build(self) -> None:
@@ -668,7 +669,7 @@ class ToolGenerateDialog(QDialog):
             self._review_panel.mark_requires_review(reason, clear_report=False)
         else:
             self._review_panel.mark_install_failed(reason)
-        self._set_status_text(reason, "#F87171")
+        self._set_status_text(reason, "error")
 
     def _reason_for_install_result(self, reason: str) -> str:
         key = _KNOWN_INSTALL_REASON_KEYS.get(reason)
@@ -696,17 +697,18 @@ class ToolGenerateDialog(QDialog):
         self._review_panel.mark_requires_review(
             self._reason_for_install_result(reason), clear_report=False
         )
-        self._set_status_text(self._reason_for_install_result(reason), "#F87171")
+        self._set_status_text(self._reason_for_install_result(reason), "error")
 
     def _warn(self, key: str) -> None:
         QMessageBox.warning(self, t("tooldlg.gen.err_title"), t(key))
 
-    def _set_status(self, key: str, color: str) -> None:
-        self._set_status_text(t(key), color)
+    def _set_status(self, key: str, role: str) -> None:
+        self._set_status_text(t(key), role)
 
-    def _set_status_text(self, text: str, color: str) -> None:
+    def _set_status_text(self, text: str, role: str) -> None:
         self._status_label.setText(text)
-        self._status_label.setStyleSheet(f"font-size: 11px; color: {color};")
+        self._status_label.setStyleSheet("font-size: 11px;")
+        set_text_role(self._status_label, role)
 
     @pyqtSlot()
     def _request_reject(self) -> None:

@@ -11,7 +11,6 @@ from PyQt6.QtGui import (
     QColor,
     QKeySequence,
     QPalette,
-    QTextCharFormat,
     QTextCursor,
     QTextDocument,
     QTextFormat,
@@ -132,21 +131,15 @@ class MarkdownEditor(QPlainTextEdit):
 
     # ------------------------------------------------------------------ text color (FluentWindow fix)
     def _apply_text_color(self):
-        """Force text color to follow theme (FluentWindow overrides palette).
-
-        QPlainTextEdit 没有 setTextColor（那是 QTextEdit 的方法），用
-        setCurrentCharFormat 设置新输入的前景色，再 mergeCurrentCharFormat
-        让颜色应用到当前光标位置，确保不被 FluentWindow 内部样式覆盖。
-        """
+        """Refresh display colors without editing document character formats."""
         try:
             from app.ui.style import get_text_color
             color = get_text_color()
         except Exception:
             color = "#000000"
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(color))
-        self.setCurrentCharFormat(fmt)
-        self.mergeCurrentCharFormat(fmt)
+        palette = self.palette()
+        palette.setColor(QPalette.ColorRole.Text, QColor(color))
+        self.setPalette(palette)
         self._highlighter.set_default_text_color(color)
 
     def focusInEvent(self, event):
@@ -399,17 +392,8 @@ class MarkdownEditor(QPlainTextEdit):
 
         menu = QMenu(self)
         menu.setObjectName("markdownContextMenu")
-        try:
-            from app.ui.style import get_text_color, _current_dark_mode
-            text_color = get_text_color()
-            bg_color = "#2D2D2D" if _current_dark_mode else "#FFFFFF"
-            hover_bg = "#3D3D3D" if _current_dark_mode else "#F3F4F6"
-        except Exception:
-            text_color, bg_color, hover_bg = "#000000", "#FFFFFF", "#F3F4F6"
-        menu.setStyleSheet(
-            f"QMenu {{ color: {text_color}; background: {bg_color}; border: 1px solid rgba(128,128,128,0.3); }}"
-            f"QMenu::item:selected {{ background: {hover_bg}; }}"
-        )
+        from app.ui.style import get_current_theme, menu_stylesheet
+        menu.setStyleSheet(menu_stylesheet(get_current_theme()))
 
         menu.addAction(t("md.menu.insertLink")).triggered.connect(self._insert_link)
         menu.addSeparator()

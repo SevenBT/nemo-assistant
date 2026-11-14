@@ -12,7 +12,7 @@ from typing import Any, Dict
 from PyQt6.QtCore import QEvent, QObject
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import QApplication, QDialog
-from qfluentwidgets import Theme, setTheme, setThemeColor
+from qfluentwidgets import PrimaryPushButton, Theme, setCustomStyleSheet, setTheme, setThemeColor
 
 # ── Theme definitions ────────────────────────────────────────────────
 # Each theme contains identity fields + full palette.
@@ -771,10 +771,12 @@ _current_surface: str = "#2A2724"
 _current_bg: str = "#221F1C"
 
 
-class _DarkTitleBarFilter(QObject):
-    """事件过滤器：对新显示的 QDialog 设置 DWM 深色标题栏。"""
+class _ThemeWidgetFilter(QObject):
+    """Apply theme details to newly shown dialogs and Fluent primary buttons."""
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Show and isinstance(obj, PrimaryPushButton):
+            _style_primary_button(obj, get_theme(_current_theme_name))
         if (
             event.type() == QEvent.Type.Show
             and isinstance(obj, QDialog)
@@ -793,7 +795,8 @@ class _DarkTitleBarFilter(QObject):
         return False
 
 
-_filter_instance: _DarkTitleBarFilter | None = None
+_filter_instance: _ThemeWidgetFilter | None = None
+_current_theme_name = DEFAULT_THEME
 
 
 # ── 公开 API ────────────────────────────────────────────────────────
@@ -805,8 +808,9 @@ def apply_theme(
     editor_font_size: int = 15,
 ) -> str:
     """应用 Fluent 主题并返回应用特有元素的自定义 QSS。"""
-    global _current_dark_mode, _filter_instance, _current_text_color, _current_accent, _current_surface, _current_bg
+    global _current_dark_mode, _filter_instance, _current_text_color, _current_accent, _current_surface, _current_bg, _current_theme_name
     theme = THEMES.get(theme_name, THEMES[DEFAULT_THEME])
+    _current_theme_name = theme_name
     dark = theme["mode"] == Theme.DARK
     _current_dark_mode = dark
     _current_text_color = theme["text"]
@@ -819,8 +823,12 @@ def apply_theme(
     # 安装事件过滤器，处理后续弹出的对话框
     app = QApplication.instance()
     if app is not None and _filter_instance is None:
-        _filter_instance = _DarkTitleBarFilter(app)
+        _filter_instance = _ThemeWidgetFilter(app)
         app.installEventFilter(_filter_instance)
+    if app is not None:
+        for widget in app.allWidgets():
+            if isinstance(widget, PrimaryPushButton):
+                _style_primary_button(widget, theme)
     # 对所有已存在的顶层窗口应用深色标题栏
     _apply_dark_titlebar_to_all(dark)
     return _build_custom_qss(theme, content_font_size, editor_font_size)
@@ -878,6 +886,11 @@ def _apply_palette(theme: dict) -> None:
     palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(theme["text_secondary"]))
     palette.setColor(QPalette.ColorRole.Button, QColor(theme["surface_raised"]))
     palette.setColor(QPalette.ColorRole.ButtonText, QColor(theme["text"]))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(theme["accent_light"]))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(theme["text"]))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(theme["surface_raised"]))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(theme["text"]))
+    palette.setColor(QPalette.ColorRole.Link, QColor(theme_text_color("accent", theme)))
     app.setPalette(palette)
 
 
@@ -954,13 +967,13 @@ def get_accent_button_bg() -> str:
 def get_accent_button_bg_hover() -> str:
     """按钮 hover 态：比常态往 accent 拉回一点（更鲜明）。"""
     t = max(0.0, _resolve_btn_blend() - 0.12)
-    return _blend(_current_accent, _current_surface, t)
+    return readable_color(_blend(_current_accent, _current_surface, t), get_accent_text_color())
 
 
 def get_accent_button_bg_pressed() -> str:
     """按钮 pressed 态：比常态往 surface 多混一点（更暗沉）。"""
     t = min(1.0, _resolve_btn_blend() + 0.12)
-    return _blend(_current_accent, _current_surface, t)
+    return readable_color(_blend(_current_accent, _current_surface, t), get_accent_text_color())
 
 
 def get_accent_text_color() -> str:
@@ -970,10 +983,72 @@ def get_accent_text_color() -> str:
     浅色强调色（如 Everforest 的 #A7C080）白色对比度过低，发送箭头糊成一片。
     按钮实际底色是 get_accent_button_bg()（混淡后），据此择优黑/白前景。
     """
-    bg_lum = _relative_luminance(QColor(get_accent_button_bg()))
+    return contrasting_text(get_accent_button_bg())
+
+
+def contrasting_text(background: str) -> str:
+    """Choose readable near-black/white text for an opaque button background."""
+    bg_lum = _relative_luminance(QColor(background))
     white_ratio = _contrast_ratio(bg_lum, 1.0)
     dark_ratio = _contrast_ratio(bg_lum, _relative_luminance(QColor("#1A1A1A")))
+    if max(white_ratio, dark_ratio) < 4.5:
+        return "#000000"
     return "#1A1A1A" if dark_ratio > white_ratio else "#FFFFFF"
+
+
+def readable_color(foreground: str, background: str, minimum: float = 4.5) -> str:
+    """Keep a color's hue where possible, adjusting brightness for text contrast."""
+    bg_lum = _relative_luminance(QColor(background))
+    target = contrasting_text(background)
+    for step in range(101):
+        candidate = _blend(foreground, target, step / 100)
+        if _contrast_ratio(_relative_luminance(QColor(candidate)), bg_lum) >= minimum:
+            return candidate
+    return target
+
+
+def theme_text_color(role: str, theme: dict | None = None, *, background: str | None = None) -> str:
+    theme = theme or get_current_theme()
+    return readable_color(theme[role], background or theme["surface_solid"])
+
+
+def set_text_role(widget, role: str) -> None:
+    """Bind a native label to theme QSS, including later theme changes."""
+    widget.setProperty("themeTextRole", role)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
+
+
+def menu_stylesheet(theme: dict, selector: str = "QMenu") -> str:
+    """An opaque native menu with paired normal, selected and disabled colors."""
+    ink = theme_text_color("text", theme)
+    selected_ink = theme_text_color("text", theme, background=theme["surface_raised"])
+    return f"""
+{selector} {{ background: {theme['surface_solid']}; color: {ink};
+    border: 1px solid {theme['border_solid']}; border-radius: 6px; padding: 4px; }}
+{selector}::item {{ padding: 7px 28px 7px 14px; border-radius: 4px; }}
+{selector}::item:selected {{ background: {theme['surface_raised']}; color: {selected_ink}; }}
+{selector}::item:disabled {{ color: {theme_text_color('text_secondary', theme)}; }}
+{selector}::separator {{ height: 1px; background: {theme['border_solid']}; margin: 4px 8px; }}
+"""
+
+
+def _style_primary_button(button: PrimaryPushButton, theme: dict) -> None:
+    # Fluent buttons own their stylesheets; a parent QSS cannot fix their ink.
+    # Actual primary push buttons in Nemo use text; the send icon has its own
+    # paired color handling in InputWidget.
+    bg = theme["accent"]
+    hover = _blend(bg, theme["surface_solid"], 0.12)
+    pressed = _blend(bg, theme["surface_solid"], 0.24)
+    qss = f"""
+PrimaryPushButton {{ background: {bg}; color: {contrasting_text(bg)}; border: none; }}
+PrimaryPushButton:hover {{ background: {hover}; color: {contrasting_text(hover)}; }}
+PrimaryPushButton:pressed {{ background: {pressed}; color: {contrasting_text(pressed)}; }}
+PrimaryPushButton:disabled {{ background: {theme['surface_raised']};
+    color: {theme_text_color('text_secondary', theme, background=theme['surface_raised'])}; }}
+"""
+    setCustomStyleSheet(button, qss, qss)
 
 
 def _blend(fg: str, bg: str, t: float) -> str:
@@ -1032,12 +1107,19 @@ def _build_custom_qss(theme: dict, content_font_size: int = 15, editor_font_size
 
     user_bg = theme["user_bubble"]
 
-    accent_text = "#FFFFFF"
-    dialog_btn_text = "#FFFFFF" if dark else "#FFFFFF"
+    accent_ink = theme_text_color("accent", theme)
+    dialog_btn_text = contrasting_text(accent)
 
     code_size = max(content_font_size - 2, 10)
 
     return f"""
+{menu_stylesheet(theme)}
+QToolTip {{ background: {theme['surface_raised']}; color: {theme['text']};
+    border: 1px solid {theme['border_solid']}; padding: 5px; }}
+QLabel[themeTextRole="secondary"] {{ color: {theme_text_color('text_secondary', theme)}; }}
+QLabel[themeTextRole="success"] {{ color: {theme_text_color('success', theme)}; }}
+QLabel[themeTextRole="error"] {{ color: {theme_text_color('error', theme)}; }}
+QLabel[themeTextRole="warning"] {{ color: {theme_text_color('warning', theme)}; }}
 /* ═══════════════════════════════════════════════════════════════════
    Primary Tab Canvas
    ═══════════════════════════════════════════════════════════════════ */
@@ -1081,11 +1163,11 @@ def _build_custom_qss(theme: dict, content_font_size: int = 15, editor_font_size
 
 /* SegmentedWidget selected item text color */
 SegmentedWidget > QWidget[selected="true"] {{
-    color: {accent};
+    color: {accent_ink};
 }}
 SegmentedToolWidget > QToolButton:checked,
 SegmentedWidget > QWidget:checked {{
-    color: {accent};
+    color: {accent_ink};
 }}
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1095,7 +1177,7 @@ SegmentedWidget > QWidget:checked {{
     border-right: 1px solid {theme["border"]};
 }}
 #panelTitle {{
-    font-size: 13px; font-weight: 700; color: {accent};
+    font-size: 13px; font-weight: 700; color: {accent_ink};
     text-transform: uppercase; letter-spacing: 2px;
     padding: 2px 0;
     background: transparent;
@@ -1228,7 +1310,7 @@ QSplitter::handle:hover {{ background: {accent}; }}
    Tool Status
    ═══════════════════════════════════════════════════════════════════ */
 #toolStatus {{
-    color: {accent}; font-size: 11px; font-weight: 500;
+    color: {accent_ink}; font-size: 11px; font-weight: 500;
     padding: 3px 14px; background: transparent;
 }}
 
@@ -1417,7 +1499,7 @@ QDialog QTabBar::tab {{
     border-bottom: 2px solid transparent;
 }}
 QDialog QTabBar::tab:selected {{
-    color: {accent};
+    color: {accent_ink};
     border-bottom: 2px solid {accent};
     font-weight: 600;
 }}
@@ -1437,10 +1519,11 @@ QDialog QPushButton {{
 QDialog QPushButton:hover {{
     background: {accent_subtle};
     border-color: {accent};
-    color: {accent};
+    color: {accent_ink};
 }}
 QDialog QPushButton:pressed {{
     background: {accent_light};
+    color: {theme_text_color('text', theme, background=accent_light)};
 }}
 QDialog QDialogButtonBox QPushButton {{
     min-width: 80px;
@@ -1450,7 +1533,17 @@ QDialog QDialogButtonBox QPushButton {{
     font-weight: 600;
 }}
 QDialog QDialogButtonBox QPushButton:hover {{
-    background: {accent}dd;
+    background: {accent};
+    color: {dialog_btn_text};
+    border: 1px solid {theme['text_secondary']};
+}}
+QDialog QDialogButtonBox QPushButton:pressed {{
+    background: {accent_light};
+    color: {theme_text_color('text', theme, background=accent_light)};
+}}
+QDialog QPushButton:disabled {{
+    background: {theme['surface_raised']};
+    color: {theme_text_color('text_secondary', theme, background=theme['surface_raised'])};
 }}
 QDialog QCheckBox {{ spacing: 8px; }}
 QDialog QCheckBox::indicator {{
@@ -1492,7 +1585,7 @@ QDialog QGroupBox::title {{
     subcontrol-origin: margin;
     left: 12px;
     padding: 0 6px;
-    color: {accent};
+    color: {accent_ink};
 }}
 
 /* ═══════════════════════════════════════════════════════════════════

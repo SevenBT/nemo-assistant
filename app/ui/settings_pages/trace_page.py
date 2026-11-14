@@ -33,6 +33,7 @@ from qfluentwidgets import (
 )
 
 from app.i18n import t
+from app.ui.style import contrasting_text
 from app.llm.billing import normalize_provider_cost, validate_billing_url
 
 # 状态 → (i18n key, 语义色)。语义色固定不随主题，对齐 InfoBadge 内部用色。
@@ -341,6 +342,7 @@ class _OverviewCard(SimpleCardWidget):
         # 重建徽章以套用语义色。
         self._badge.setText(label)
         self._badge.setCustomBackgroundColor(QColor(color), QColor(color))
+        self._badge.setStyleSheet(f"color: {contrasting_text(color)};")
 
         sid = trace.get("session_id") or "—"
         self._title.setText(t("settings.trace.session", sid=sid))

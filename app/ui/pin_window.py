@@ -227,6 +227,8 @@ class PinWindow(QWidget):
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
+        from app.ui.style import get_current_theme, menu_stylesheet
+        menu.setStyleSheet(menu_stylesheet(get_current_theme()))
         menu.addAction(t("pin.copy"), self._copy_to_clipboard)
         menu.addAction(t("pin.saveAs"), self._save_as)
         menu.addSeparator()

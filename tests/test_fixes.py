@@ -41,49 +41,28 @@ def test_note_creation():
         assert note.title == "新笔记", f"新笔记标题不正确，实际: '{note.title}'"
 
 
-def test_sticky_note_menu():
-    """浮窗右键菜单源码应包含完整的文本编辑动作。"""
-    # 源文件在项目根的 app/ui 下（此前误用 tests/app 相对路径导致找不到文件）
-    sticky_file = _PROJECT_ROOT / "app" / "ui" / "sticky_note_window.py"
-    content = sticky_file.read_text(encoding="utf-8")
-
-    # Check for required menu items (now via i18n keys instead of literals)
-    required_items = [
-        "edit.undo",
-        "edit.redo",
-        "edit.cut",
-        "edit.copy",
-        "edit.paste",
-        "edit.selectAll",
-    ]
-
-    # Check for required methods
-    required_methods = [
-        "undo()",
-        "redo()",
-        "cut()",
-        "copy()",
-        "paste()",
-        "selectAll()",
-    ]
-
-    # Check for state checks
-    required_checks = [
-        "isUndoAvailable()",
-        "isRedoAvailable()",
-        "hasSelection()",
-        "canPaste()",
-        "isEmpty()",
-    ]
-
-    for item in required_items:
-        assert item in content, f"缺少菜单项: {item}"
-
-    for method in required_methods:
-        assert method in content, f"缺少方法调用: {method}"
-
-    for check in required_checks:
-        assert check in content, f"缺少状态检查: {check}"
+def test_sticky_note_menu(qtbot):
+    from app.ui.components.sticky_editor import StickyEditor
+    from app.i18n import t
+    editor = StickyEditor()
+    qtbot.addWidget(editor)
+    editor.setPlainText("selected text")
+    editor.selectAll()
+    menu = editor.standard_edit_menu()
+    actions = {action.text(): action for action in menu.actions() if not action.isSeparator()}
+    assert all(t("edit." + key) in actions for key in ("undo", "redo", "cut", "copy", "paste", "selectAll"))
+    assert actions[t("edit.copy")].isEnabled()
+    assert actions[t("edit.cut")].isEnabled()
+    actions[t("edit.cut")].trigger()
+    assert editor.toPlainText() == ""
+    editor.undo()
+    assert editor.toPlainText() == "selected text"
+    editor.setReadOnly(True)
+    locked = editor.standard_edit_menu()
+    cut = next(action for action in locked.actions() if action.text() == t("edit.cut"))
+    assert not cut.isEnabled()
+    menu.deleteLater()
+    locked.deleteLater()
 
 
 if __name__ == "__main__":

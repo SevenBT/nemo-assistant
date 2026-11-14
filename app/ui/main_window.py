@@ -46,6 +46,7 @@ from app.ui.edge_snap import EdgeSnapManager
 from app.ui.input_widget import InputWidget
 from app.ui.notes_dialog import NotesPanel
 from app.desktop.hotkey_manager import HotkeyManager
+from app.desktop.hotkey_actions import GROUPS, get_hotkey_actions, read_hotkeys
 from app.ui.resize_filter import ResizeFilter
 from app.ui.screenshot_controller import ScreenshotController
 from app.ui.selection_controller import SelectionController
@@ -120,6 +121,13 @@ class MainWindow(FluentWindow):
             parent=self,
         )
         self._sticky_note_controller.note_updated.connect(self._on_note_updated)
+        from app.desktop.sticky_reminders import StickyReminderService
+        self._sticky_reminders = StickyReminderService(self._notes, self._scheduler, self)
+        self._sticky_note_controller.reminders = self._sticky_reminders
+        self._sticky_reminders.changed.connect(self._sticky_note_controller._settings_changed)
+        self._sticky_reminder_cards = []
+        self._sticky_reminders.due.connect(self._show_sticky_reminders)
+        QTimer.singleShot(0, self._sticky_reminders.start)
         self._init_tools()
         self._init_memory()
         self._prompt_builder = ConversationPromptBuilder(
@@ -469,26 +477,137 @@ class MainWindow(FluentWindow):
         self._tray.settings_requested.connect(self._open_settings)
         self._tray.screenshot_requested.connect(self._start_screenshot)
         self._tray.quit_requested.connect(self._on_quit)
+        self._tray.stickies_requested.connect(self._sticky_note_controller.open_manager)
         self._scheduler.set_result_callback(self._on_scheduler_result)
 
     # ──────────────────────────────────────────── 快捷键
     def _setup_hotkeys(self):
         self._hotkey_mgr = HotkeyManager(self)
-        self._hotkey_mgr.screenshot_triggered.connect(self._start_screenshot)
-        self._hotkey_mgr.new_note_triggered.connect(self._new_note_via_hotkey)
-        self._hotkey_mgr.toggle_window_triggered.connect(self._toggle_window_visibility)
-        self._hotkey_mgr.quick_ask_triggered.connect(self._quick_ask)
-        self._hotkey_mgr.selection_triggered.connect(
-            self._selection_controller.trigger_at_cursor
-        )
+        self._hotkey_mgr.action_triggered.connect(self._on_hotkey_action)
+        self._screenshot_controller.capture_state_changed.connect(self._on_capture_state_changed)
+        self._tray.pause_hotkeys_requested.connect(self._toggle_hotkeys_paused)
+        self._tray.shortcuts_requested.connect(self._show_shortcuts)
+        self._hotkey_mgr.paused_changed.connect(self._tray.set_hotkeys_paused)
+        cfg.selectionActions.valueChanged.connect(self._hotkey_mgr.reload)
         self._hotkey_mgr.start()
 
         # 划词浮标：鼠标拖选后在光标附近弹出动作条（可在设置中开关）
         self._selection_monitor = SelectionMonitor(self)
         self._selection_monitor.selection_gesture.connect(
-            self._selection_controller.trigger_at
+            self._on_selection_gesture
         )
         self._selection_monitor.set_enabled(cfg.get(cfg.selectionFloatEnabled))
+
+    def _on_capture_state_changed(self, active: bool):
+        if active:
+            self._hotkey_mgr.suspend("screenshot")
+            self._selection_controller._popup.hide()
+        else:
+            self._hotkey_mgr.resume("screenshot")
+
+    def _on_selection_gesture(self, x: int, y: int, text: str):
+        if not self._screenshot_controller.active:
+            self._selection_controller.trigger_at(x, y, text)
+
+    def _on_hotkey_action(self, action: str):
+        if self._screenshot_controller.active:
+            return
+        if action == "selection":
+            self._selection_controller.trigger_at_cursor()
+            return
+        if action.startswith("selection:"):
+            self._selection_controller.trigger_shortcut(action.split(":", 1)[1])
+            return
+        handlers = {
+            "screenshot": self._start_screenshot,
+            "new_note": self._new_note_via_hotkey,
+            "toggle_window": self._toggle_window_visibility,
+            "quick_ask": self._quick_ask,
+            "notes:new": self._new_markdown_note,
+            "notes:open": self._open_notes,
+            "notes:toggle": self._sticky_note_controller.toggle_visibility,
+            "chat:new": self._new_chat_via_hotkey,
+            "chat:copy": self._copy_last_reply,
+            "system:settings": self._open_settings,
+            "system:top": self._toggle_main_top,
+            "system:pause": self._toggle_hotkeys_paused,
+            "system:overview": self._show_shortcuts,
+            "system:selection_float": self._toggle_selection_float,
+        }
+        handler = handlers.get(action)
+        if handler:
+            handler()
+
+    def _toggle_hotkeys_paused(self):
+        self._hotkey_mgr.set_paused(not self._hotkey_mgr.paused)
+
+    def _toggle_selection_float(self):
+        enabled = not cfg.get(cfg.selectionFloatEnabled)
+        cfg.set(cfg.selectionFloatEnabled, enabled)
+        cfg.save()
+        self._selection_monitor.set_enabled(enabled)
+        if not enabled:
+            self._selection_controller._popup.hide()
+
+    def _open_notes(self):
+        self._show_window()
+        self._switch_view(1)
+        self._notes_panel.refresh()
+
+    def _new_markdown_note(self):
+        self._open_notes()
+        self._notes_panel._on_new("note")
+
+    def _new_chat_via_hotkey(self):
+        self._show_window()
+        self._switch_view(0)
+        self._chat_session_controller.new_session()
+        self._input.focus()
+
+    def _copy_last_reply(self):
+        sid = self._chat_session_controller.current_session_id
+        session = self._sessions.get(sid) if sid else None
+        live = self._chat_session_controller._session_live.get(sid, {}).get("ai_msg")
+        if session:
+            for message in reversed(session.messages):
+                if message is not live and message.role == "assistant" and message.content:
+                    self._chat_session_controller.copy_reply(message)
+                    break
+
+    def _toggle_main_top(self):
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,
+                           not bool(self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
+        self._show_window()
+
+    def _show_shortcuts(self):
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QTreeWidget, QTreeWidgetItem
+        from app.ui.hotkey_settings_widget import _fmt
+        dialog = QDialog(self)
+        dialog.setWindowTitle(t("hotkeys.action.overview"))
+        dialog.resize(640, 480)
+        layout = QVBoxLayout(dialog)
+        tree = QTreeWidget()
+        tree.setHeaderLabels([t("hotkeys.actionColumn"), t("hotkeys.keyColumn")])
+        bindings = read_hotkeys()
+        for group in GROUPS:
+            parent = QTreeWidgetItem(tree, [t(f"hotkeys.group.{group}")])
+            for action in get_hotkey_actions():
+                if action.group == group and bindings.get(action.id):
+                    QTreeWidgetItem(parent, [action.label or t(action.label_key),
+                        _fmt(bindings[action.id])])
+        tree.expandAll()
+        tree.resizeColumnToContents(0)
+        tree.resizeColumnToContents(1)
+        layout.addWidget(tree)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        self._hotkey_mgr.suspend("overview")
+        try:
+            dialog.exec()
+        finally:
+            self._hotkey_mgr.resume("overview")
+            dialog.deleteLater()
 
     def _new_note_via_hotkey(self):
         self._sticky_note_controller.create_from_hotkey()
@@ -507,10 +626,8 @@ class MainWindow(FluentWindow):
             self.activateWindow()
 
     def _quick_ask(self):
-        if not self.isVisible():
-            self.show()
-        self.raise_()
-        self.activateWindow()
+        self._show_window()
+        self._switch_view(0)
         self._input.focus()
 
     def _restore_pinned_notes(self):
@@ -626,6 +743,9 @@ class MainWindow(FluentWindow):
         # 笔记列表 delegate 缓存了主题色，需显式刷新，否则切换深浅后
         # 列表/便签文字色不变，必须点一下文件夹才更新。
         self._notes_panel.refresh_theme()
+        for window in self._sticky_note_controller._windows:
+            window._save_position()
+            window._apply_settings()
         # 发送按钮图标色按 accent 亮度重算（浅色强调色下白箭头看不清）。
         self._input.refresh_theme()
         self._chat.refresh_theme()
@@ -805,11 +925,23 @@ class MainWindow(FluentWindow):
     def cleanup(self):
         """停止所有后台 worker，在应用退出前调用。"""
         self._hotkey_mgr.stop()
+        self._notes_panel._flush_current()
+        self._sticky_reminders.stop()
+        self._sticky_note_controller.shutdown()
         if hasattr(self, "_selection_monitor"):
             self._selection_monitor.stop()
         self._chat_session_controller.cleanup()
         self._llm_gateway.close()
         self._selection_controller.cleanup()
+
+    def _show_sticky_reminders(self, note_ids):
+        from app.ui.sticky_reminders import StickyReminderCard
+        card = StickyReminderCard(self._sticky_reminders, self._sticky_note_controller, note_ids, self)
+        self._sticky_reminder_cards.append(card)
+        card.finished.connect(lambda _: self._sticky_reminder_cards.remove(card) if card in self._sticky_reminder_cards else None)
+        card.show()
+        screen = QApplication.primaryScreen().availableGeometry()
+        card.move(screen.right() - card.width() - 20, screen.bottom() - card.height() - 20)
 
     def _on_quit(self):
         # 仅当窗口可见时保存布局（否则 closeEvent 已保存）
