@@ -32,8 +32,10 @@
 
 - FluentWindow 可能在控件构造完成后重新应用内部样式。
 - QTextEdit 的前景色有时需要在焦点变化时重新加固。
-- QPlainTextEdit 不支持 `setTextColor`；改用当前字符格式合并（current character format merging）。
+- QPlainTextEdit 不支持 `setTextColor`；使用 Text 调色板和语法高亮器。获焦时修改字符格式可能触发 `textChanged`，导致笔记修改时间误更新。
 - 主题感知的高亮应使用半透明叠加，而不是单一固定颜色。
+- 普通、悬停、按下、禁用状态都要成对设置前景和背景。彩色文字使用 `theme_text_color`，实色按钮使用 `contrasting_text`；适合装饰的强调色未必适合直接显示文字。
+- 截图工具栏和 AI 菜单使用同一套固定深色配色，OCR 跟随应用主题。原生菜单使用 `menu_stylesheet`，原生状态标签使用 `set_text_role`，使后续主题切换也能更新颜色。
 
 ## 嵌入式对话框
 

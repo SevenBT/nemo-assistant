@@ -23,6 +23,7 @@ from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QLabel, QPlainTextEdit, QVBoxLayout
 
 from app.core.selection_capture import capture_selection
+from app.core import selection_uia
 from app.core.selection_inject import (
     foreground_window, replace_selection, restore_foreground_window, selection_unchanged,
 )
@@ -92,16 +93,36 @@ class SelectionController(QObject):
     # ── 触发入口 ────────────────────────────────────────────────────────
 
     def trigger_at_cursor(self):
-        """热键路径：在当前鼠标位置弹出动作条。
+        """Only show the hotkey popup after confirming a current text selection."""
+        self.trigger_shortcut()
 
-        热键无 UIA 预取（无关联的拖选手势），预取文字置空，点击时走 Ctrl+C。
+    def trigger_shortcut(self, key: str | None = None) -> bool:
+        """Shortcut actions require fresh, read-only selection evidence.
+
+        Never use a previous popup's cached text or a speculative Ctrl+C here:
+        editors can copy the whole current line even when nothing is selected.
+        The mouse popup keeps its existing explicit clipboard fallback.
         """
+        self._captured = ""
+        source = foreground_window()
+        if not source:
+            return False
+        try:
+            status, text = selection_uia.query_selection_at_cursor()
+        except Exception:
+            return False
+        if (status is not selection_uia.SelectionStatus.HAS_TEXT or not text.strip()
+                or source != foreground_window()):
+            return False
         pos = QCursor.pos()
-        logger.debug(
-            "[SelectionTiming] stage=hotkey_received t=%.6f anchor_logical=(%d,%d)",
-            time.perf_counter(), pos.x(), pos.y(),
-        )
-        self._trigger(pos.x(), pos.y(), captured="")
+        self._captured = text
+        self._popup_x, self._popup_y = pos.x(), pos.y()
+        if key is None:
+            self._trigger(pos.x(), pos.y(), captured=text)
+        else:
+            self._popup.hide()
+            self._on_action_bubble(key)
+        return True
 
     def trigger_at(self, x: int, y: int, text: str = ""):
         """浮标路径：拖选松开后在指定屏幕坐标弹出动作条。

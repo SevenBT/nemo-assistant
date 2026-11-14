@@ -32,8 +32,10 @@ These notes capture implementation trade-offs that are useful for contributors. 
 
 - FluentWindow may reapply internal styles after widgets are constructed.
 - QTextEdit foreground colors sometimes need reinforcement when focus changes.
-- QPlainTextEdit does not support `setTextColor`; use current character format merging instead.
+- QPlainTextEdit does not support `setTextColor`; use its Text palette and syntax highlighter. Changing character formats on focus can emit `textChanged` and incorrectly update note timestamps.
 - Theme-aware highlights should use translucent overlays rather than one fixed color.
+- Pair foreground and background colors for normal, hover, pressed and disabled states. Use `theme_text_color` for colored text and `contrasting_text` for filled buttons; an accent suitable for decoration may be unreadable as text.
+- Screenshot capture chrome and its AI menu share a fixed dark palette. OCR follows the application theme. Native menus use `menu_stylesheet`, and native status labels use `set_text_role` to follow later theme changes.
 
 ## Embedded Dialogs
 

@@ -28,7 +28,7 @@ class SessionSettingsDialog(QDialog):
 
         # 标题
         title = QLabel(t("sessionsettings.session_label", title=self._session.title))
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #d8dee9;")
+        title.setStyleSheet("font-size: 14px; font-weight: bold;")
         layout.addWidget(title)
 
         layout.addWidget(QLabel("System Prompt:"))

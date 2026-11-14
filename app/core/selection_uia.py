@@ -132,6 +132,24 @@ def query_selection(*, point: tuple[int, int] | None = None) -> tuple[SelectionS
         return _query_selection(point=point)
 
 
+def query_selection_at_cursor() -> tuple[SelectionStatus, str]:
+    """Use the current physical mouse position for the existing UIA fallback.
+
+    Browser/Electron focus can belong to an outer pane. Physical coordinates
+    avoid guessing Qt's mixed-DPI desktop mapping when finding the text control.
+    """
+    point = None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        position = wintypes.POINT()
+        if ctypes.windll.user32.GetPhysicalCursorPos(ctypes.byref(position)):
+            point = (position.x, position.y)
+    except (AttributeError, OSError):
+        pass
+    return query_selection(point=point)
+
+
 def _query_selection(*, point=None):
     query_id = f"text-{time.perf_counter_ns():x}"
     try:

@@ -51,6 +51,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.ocr_engine import OcrEngineService
+from app.core.hotkey_actions import get_hotkey_actions, normalize_combo, read_hotkeys
 from app.i18n import t
 from app.ui import style
 from app.ui.screenshot_annotations import ScreenshotAnnotation, ScreenshotTool
@@ -73,6 +74,7 @@ RESIZE_MARGIN = 8  # pixels from edge that trigger resize cursor
 def _toolbar_style(theme: dict) -> str:
     """根据主题构造工具栏 / OCR 面板 QSS。"""
     return f"""
+    {style.menu_stylesheet(_SNIP_CHROME, 'QMenu#snipAiMenu')}
     #snipToolbar, #ocrPanel {{
         background: {theme["surface_solid"]};
         border-radius: 8px;
@@ -98,6 +100,7 @@ def _toolbar_style(theme: dict) -> str:
     }}
     #snipToolbar QPushButton {{
         padding: 4px 8px;
+        color: #F5F7FA;
     }}
     #snipToolbar QToolButton, #snipProperties QToolButton {{
         background: transparent;
@@ -126,27 +129,37 @@ def _toolbar_style(theme: dict) -> str:
     }}
     #snipToolbar QLineEdit, #snipToolbar QSpinBox,
     #snipProperties QLineEdit, #snipProperties QSpinBox {{
-        color: {theme["text"]};
-        background: {theme["surface_raised"]};
-        border: 1px solid {theme["border_solid"]};
+        color: #F5F7FA;
+        background: #292D33;
+        border: 1px solid #515761;
         border-radius: 4px;
         padding: 3px 6px;
     }}
     #snipToolbar QPushButton:hover, #ocrPanel QPushButton:hover {{
         background: {theme["accent_subtle"]};
-        color: {theme["accent"]};
+        color: {style.theme_text_color('accent', theme)};
+    }}
+    #snipToolbar QPushButton:hover {{
+        background: #30363E;
+        color: #F5F7FA;
     }}
     #snipToolbar QPushButton#snipCloseBtn:hover, #ocrPanel QPushButton#snipCloseBtn:hover {{
         background: {theme["error"]};
-        color: #FFFFFF;
+        color: {style.contrasting_text(theme['error'])};
     }}
     #ocrPanel QPushButton#ocrConfirmBtn {{
         background: {theme["accent"]};
-        color: #FFFFFF;
+        color: {style.contrasting_text(theme['accent'])};
         padding: 6px 18px;
     }}
     #ocrPanel QPushButton#ocrConfirmBtn:hover {{
-        background: {theme["accent"]}dd;
+        background: {theme["accent"]};
+        color: {style.contrasting_text(theme['accent'])};
+        border: 1px solid {theme['text_secondary']};
+    }}
+    #ocrPanel QPushButton#ocrConfirmBtn:pressed {{
+        background: {theme["accent_light"]};
+        color: {style.theme_text_color('text', theme, background=theme['accent_light'])};
     }}
     #ocrPanel QPushButton#ocrCloseBtn {{
         background: transparent;
@@ -155,9 +168,17 @@ def _toolbar_style(theme: dict) -> str:
     }}
     #ocrPanel QPushButton#ocrCloseBtn:hover {{
         background: {theme["accent_subtle"]};
-        color: {theme["accent"]};
+        color: {style.theme_text_color('accent', theme)};
     }}
 """
+
+
+# Capture chrome stays dark over arbitrary desktop pixels. Its menus and icons
+# must use the same palette, independently of the application's light theme.
+_SNIP_CHROME = {
+    "surface_solid": "#121417", "surface_raised": "#30363E",
+    "text": "#F5F7FA", "text_secondary": "#B8BEC8", "border_solid": "#515761",
+}
 
 
 # ── OCR layout reconstruction ──────────────────────────────────────────
@@ -280,6 +301,7 @@ class ScreenshotOverlay(QWidget):
     """
 
     captured = pyqtSignal(QPixmap, str, str, QPoint)  # (pixmap, action, ocr_text, capture_pos)
+    closed = pyqtSignal()
     _ocr_done = pyqtSignal(str)  # internal signal for thread-safe OCR result delivery
 
     def __init__(
@@ -290,8 +312,7 @@ class ScreenshotOverlay(QWidget):
     ):
         super().__init__(parent)
         self._ocr_engine_service = ocr_engine_service
-        # Snapshot theme so toolbar, OCR panel and selection accents all match
-        # the active app theme.
+        # OCR follows the app theme; capture chrome uses a paired dark palette.
         self._theme = style.get_current_theme()
         self._toolbar_qss = _toolbar_style(self._theme)
         self._start = QPoint()
@@ -342,6 +363,34 @@ class ScreenshotOverlay(QWidget):
         self._setup_window()
         self._capture_frozen()
         self._ocr_done.connect(self._on_ocr_ready)
+        self._install_action_shortcuts()
+
+    def _install_action_shortcuts(self):
+        from PyQt6.QtGui import QKeySequence, QShortcut
+        bindings = read_hotkeys()
+        self._action_shortcuts = []
+        seen = set()
+        for action in get_hotkey_actions():
+            combo = normalize_combo(bindings.get(action.id, ""))
+            if action.scope != "screenshot" or not combo or combo in seen:
+                continue
+            seen.add(combo)
+            shortcut = QShortcut(QKeySequence(combo.replace("win+", "Meta+")), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.setAutoRepeat(False)
+            shortcut.activated.connect(lambda key=action.id: self.trigger_shortcut(key))
+            self._action_shortcuts.append(shortcut)
+
+    def trigger_shortcut(self, action: str) -> bool:
+        """Screenshot operations are local to a visible, selected capture region."""
+        if (not self.isVisible() or not self.isActiveWindow()
+                or self._state != "SELECTED" or not self._has_selection()
+                or self._text_editor is not None or self._draft_annotation is not None):
+            return False
+        if action not in {a.id for a in get_hotkey_actions() if a.scope == "screenshot"}:
+            return False
+        self._on_action(action.split(":", 1)[1])
+        return True
 
     # ── Window ─────────────────────────────────────────────────────────
 
@@ -583,6 +632,8 @@ class ScreenshotOverlay(QWidget):
             text_beside=True,
         )
         ai_menu = QMenu(ai_btn)
+        ai_menu.setObjectName("snipAiMenu")
+        ai_menu.setStyleSheet(style.menu_stylesheet(_SNIP_CHROME, "QMenu#snipAiMenu"))
         from app.ui.vision_actions import VISION_ACTIONS
 
         for action in VISION_ACTIONS:
@@ -1775,4 +1826,5 @@ class ScreenshotOverlay(QWidget):
     def closeEvent(self, event):
         self._guide_fade.stop()
         self._clear_resize_cursor()
+        self.closed.emit()
         super().closeEvent(event)

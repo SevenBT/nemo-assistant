@@ -18,6 +18,8 @@ class _Config:
     hotkeyToggleWindow = "toggle_window"
     hotkeyQuickAsk = "quick_ask"
     hotkeySelection = "selection"
+    hotkeyBindings = "bindings"
+    selectionActions = "selection_actions"
     settingsWidth = "width"
     settingsHeight = "height"
     settingsPage = "page"
@@ -29,6 +31,8 @@ class _Config:
             "width": 640,
             "height": 480,
             "page": 4,
+            "bindings": {},
+            "selection_actions": None,
         }
         self.saved = None
 
@@ -40,12 +44,6 @@ class _Config:
 
     def save(self):
         self.saved = self.values.copy()
-
-
-@pytest.fixture(scope="module")
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    yield app
 
 
 @pytest.fixture

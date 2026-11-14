@@ -1,9 +1,8 @@
 """Hotkey settings tab — capture, display, and save global hotkey bindings."""
-import threading
-
-from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QKeySequence
 from PyQt6.QtWidgets import (
-    QFormLayout,
+    QApplication,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -11,6 +10,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import CheckBox, SearchLineEdit, SegmentedWidget
 
 try:
     import keyboard as _kb
@@ -19,28 +19,21 @@ except ImportError:
     _KB_OK = False
 
 from app.i18n import t
+from app.ui.style import set_text_role
+from app.core.hotkey_actions import GROUPS, MODIFIERS, normalize_combo, scopes_overlap
 
-# (action id, i18n key) — 标签运行时按当前语言取（语言在启动时锁定）。
-_ACTIONS = [
-    ("screenshot",    "hotkeys.action.screenshot"),
-    ("new_note",      "hotkeys.action.newNote"),
-    ("toggle_window", "hotkeys.action.toggleWindow"),
-    ("quick_ask",     "hotkeys.action.quickAsk"),
-    ("selection",     "hotkeys.action.selection"),
-]
-
-# 录制单个快捷键的最长等待（毫秒）；超时自动取消，避免 suppress 录制卡死吞键。
+# 录制只接收当前应用的 Qt 键盘事件；超时自动取消。
 _CAPTURE_TIMEOUT_MS = 8000
 
-# 合法组合键必须包含至少一个修饰键，否则注册后会全局吞掉该普通键。
-_MODIFIERS = {"ctrl", "control", "alt", "shift", "win", "windows", "cmd"}
+# 全局动作和上下文动作统一要求修饰键，避免普通打字误触。
+_MODIFIERS = set(MODIFIERS)
 
 
 def _validate_combo(combo: str) -> str:
     """校验录入的组合键，返回错误信息；合法返回空串。"""
     if not combo:
         return t("hotkeys.err.noKey")
-    parts = [p.strip().lower() for p in combo.split("+") if p.strip()]
+    parts = normalize_combo(combo).split("+")
     if not parts:
         return t("hotkeys.err.noKey")
     has_modifier = any(p in _MODIFIERS for p in parts)
@@ -49,6 +42,10 @@ def _validate_combo(combo: str) -> str:
         return t("hotkeys.err.needModifier")
     if not has_normal:
         return t("hotkeys.err.needNormal")
+    if sum(p not in _MODIFIERS for p in parts) != 1:
+        return t("hotkeys.err.needNormal")
+    if normalize_combo(combo) in {"ctrl+alt+delete", "win+l"}:
+        return t("hotkeys.err.reserved")
     return ""
 
 
@@ -72,45 +69,6 @@ def _fmt(combo: str) -> str:
     return "+".join(_cap(p) for p in combo.split("+"))
 
 
-class _Capture(QObject):
-    """Runs keyboard.read_hotkey in a background thread, signals the result.
-
-    Emits finished("") on Escape or error; emits finished(combo) otherwise.
-    """
-    finished = pyqtSignal(str)
-
-    def start(self):
-        threading.Thread(target=self._run, daemon=True).start()
-
-    def _run(self):
-        result = ""
-        if _KB_OK:
-            try:
-                combo = _kb.read_hotkey(suppress=True)
-                result = "" if combo.lower() == "escape" else combo
-            except Exception:
-                result = ""
-        self._safe_emit(result)
-
-    def _safe_emit(self, result: str):
-        """录制阻塞期间承载本对象的设置页可能已被销毁；emit 前确认对象仍存活。
-
-        read_hotkey(suppress=True) 会一直阻塞到有按键，期间若对话框关闭，
-        底层 C++ 对象已删除，直接 emit 会抛 RuntimeError 并使线程崩溃。
-        """
-        try:
-            from PyQt6 import sip
-            if sip.isdeleted(self):
-                return
-        except Exception:
-            pass
-        try:
-            self.finished.emit(result)
-        except RuntimeError:
-            # 对象已在 emit 前一刻被删除，安全忽略。
-            pass
-
-
 class _HotkeyRow(QWidget):
     """One settings row: current combo label + 修改 button."""
     combo_changed = pyqtSignal(str, str)  # (action, new_combo)
@@ -128,7 +86,7 @@ class _HotkeyRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._combo_lbl = QLabel(_fmt(combo))
-        self._combo_lbl.setMinimumWidth(160)
+        self._combo_lbl.setMinimumWidth(100)
         self._combo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._btn = QPushButton(t("hotkeys.modify"))
@@ -140,6 +98,9 @@ class _HotkeyRow(QWidget):
 
         layout.addWidget(self._combo_lbl, 1)
         layout.addWidget(self._btn)
+        self._clear_btn = QPushButton(t("hotkeys.clear"))
+        self._clear_btn.clicked.connect(self._clear_combo)
+        layout.addWidget(self._clear_btn)
 
     # ─────────────────────────────────────────────── public
     @property
@@ -161,32 +122,52 @@ class _HotkeyRow(QWidget):
         self._combo_lbl.setText(t("hotkeys.pressPrompt"))
         self._capturing = True
         if self._hotkey_mgr:
-            self._hotkey_mgr.stop()
-        cap = _Capture(self)
-        cap.finished.connect(self._on_captured)
-        cap.start()
-        # 超时兜底：suppress 录制期间全局吞键，避免线程卡住导致键盘失灵。
+            self._hotkey_mgr.suspend("recording")
+        QApplication.instance().installEventFilter(self)
+        self.setFocus()
         self._timeout = QTimer(self)
         self._timeout.setSingleShot(True)
         self._timeout.timeout.connect(self._on_capture_timeout)
         self._timeout.start(_CAPTURE_TIMEOUT_MS)
 
     def _on_capture_timeout(self):
-        if not self._capturing:
-            return
-        # 模拟 Esc 让后台 read_hotkey 返回，视作取消。
-        if _KB_OK:
-            try:
-                _kb.press_and_release("esc")
-            except Exception:
-                pass
+        self._on_captured("")
+
+    def eventFilter(self, obj, event):
+        if self._capturing and event.type() == QEvent.Type.KeyPress:
+            if event.isAutoRepeat():
+                return True
+            if event.key() == Qt.Key.Key_Escape:
+                self._on_captured("")
+            elif event.key() not in (Qt.Key.Key_Control, Qt.Key.Key_Alt,
+                                      Qt.Key.Key_Shift, Qt.Key.Key_Meta):
+                self._on_captured(QKeySequence(event.keyCombination()).toString(
+                    QKeySequence.SequenceFormat.PortableText))
+            return True
+        if self._capturing and event.type() == QEvent.Type.ApplicationDeactivate:
+            self._on_captured("")
+        return super().eventFilter(obj, event)
+
+    def hideEvent(self, event):
+        if self._capturing:
+            self._on_captured("")
+        super().hideEvent(event)
+
+    def _clear_combo(self):
+        if self._capturing:
+            self._on_captured("")
+        self.reset_combo("")
+        self.combo_changed.emit(self._action, "")
 
     def _on_captured(self, combo: str):
         if not self._capturing:
             return
         self._capturing = False
+        QApplication.instance().removeEventFilter(self)
         if hasattr(self, "_timeout"):
             self._timeout.stop()
+        if self._hotkey_mgr and hasattr(self._hotkey_mgr, "resume"):
+            self._hotkey_mgr.resume("recording")
         self._btn.setEnabled(True)
         self._btn.setText(t("hotkeys.modify"))
 
@@ -210,9 +191,9 @@ class _HotkeyRow(QWidget):
                 self._hotkey_mgr.reload()
             return
 
-        self._combo = combo
-        self._combo_lbl.setText(_fmt(combo))
-        self.combo_changed.emit(self._action, combo)
+        self._combo = normalize_combo(combo)
+        self._combo_lbl.setText(_fmt(self._combo))
+        self.combo_changed.emit(self._action, self._combo)
         if self._hotkey_mgr:
             self._hotkey_mgr.reload()
 
@@ -225,36 +206,96 @@ class HotkeySettingsWidget(QWidget):
         self._config = config
         self._hotkey_mgr = hotkey_mgr
         self._rows: list[_HotkeyRow] = []
+        self._current_group = "selection"
         self._build()
 
     # ------------------------------------------------------------------ build
     def _build(self):
         layout = QVBoxLayout(self)
-        hotkeys = self._config.hotkeys
-        form = QFormLayout()
-
-        for action, label_key in _ACTIONS:
-            combo = hotkeys.get(action, "")
-            row = _HotkeyRow(action, combo, self._hotkey_mgr)
-            row.conflict_checker = self._find_conflict
-            self._rows.append(row)
-            form.addRow(t(label_key) + ":", row)
-
-        layout.addLayout(form)
+        self._search = SearchLineEdit()
+        self._search.setPlaceholderText(t("hotkeys.search"))
+        self._search.textChanged.connect(self._apply_filter)
+        layout.addWidget(self._search)
+        self._pivot = SegmentedWidget()
+        for group in GROUPS:
+            self._pivot.addItem(group, t(f"hotkeys.group.{group}"))
+        self._pivot.setCurrentItem(self._current_group)
+        self._pivot.currentItemChanged.connect(self._on_group_changed)
+        layout.addWidget(self._pivot)
+        self._bound_only = CheckBox(t("hotkeys.boundOnly"))
+        self._bound_only.toggled.connect(self._apply_filter)
+        layout.addWidget(self._bound_only)
+        self._rows_widget = QWidget()
+        self._form = QVBoxLayout(self._rows_widget)
+        self._form.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._rows_widget)
+        self.refresh_actions()
         layout.addStretch()
-
-        reset_btn = QPushButton(t("hotkeys.restoreDefault"))
-        reset_btn.clicked.connect(self._reset_defaults)
-        layout.addWidget(reset_btn, alignment=Qt.AlignmentFlag.AlignRight)
+        footer = QHBoxLayout()
+        reset_btn = QPushButton(t("hotkeys.restoreGroup"))
+        reset_btn.clicked.connect(lambda: self._reset_defaults(self._current_group))
+        footer.addWidget(reset_btn)
+        layout.addLayout(footer)
 
         if not _KB_OK:
             warn = QLabel(t("hotkeys.kbMissing"))
-            warn.setStyleSheet("color: orange;")
+            set_text_role(warn, "warning")
             layout.insertWidget(0, warn)
+
+    def refresh_actions(self):
+        pending = {row.action: row.current_combo for row in self._rows}
+        for row in self._rows:
+            if row._capturing:
+                row._on_captured("")
+        while self._form.count():
+            item = self._form.takeAt(0)
+            if item.widget():
+                item.widget().hide()
+                item.widget().deleteLater()
+        self._rows.clear()
+        self._actions = {a.id: a for a in self._config.actions}
+        self._containers = {}
+        hotkeys = {**self._config.hotkeys, **pending}
+        for action in self._actions.values():
+            container = QWidget()
+            content = QHBoxLayout(container)
+            content.setContentsMargins(0, 8, 0, 8)
+            label = QLabel(self._label(action.id))
+            label.setWordWrap(True)
+            content.addWidget(label, 1)
+            row = _HotkeyRow(action.id, hotkeys.get(action.id, ""), self._hotkey_mgr)
+            row.conflict_checker = self._find_conflict
+            row.combo_changed.connect(lambda *_: self._apply_filter())
+            content.addWidget(row)
+            self._rows.append(row)
+            self._containers[action.id] = container
+            self._form.addWidget(container)
+        self._apply_filter()
+
+    def _label(self, action_id):
+        action = self._actions[action_id]
+        return action.label or t(action.label_key)
+
+    def _on_group_changed(self, group):
+        self._current_group = group
+        self._apply_filter()
+
+    def _apply_filter(self, *_):
+        query = self._search.text().strip().lower()
+        for row in self._rows:
+            action = self._actions[row.action]
+            searchable = f"{self._label(row.action)} {row.current_combo} {_fmt(row.current_combo)}"
+            visible = (query in searchable.lower() if query else action.group == self._current_group)
+            if self._bound_only.isChecked() and not row.current_combo:
+                visible = False
+            self._containers[row.action].setVisible(visible)
 
     # ------------------------------------------------------------------ public
     def save(self):
         """Write pending changes to config and reload hotkey manager."""
+        for row in self._rows:
+            if row._capturing:
+                row._on_captured("")
         updates = {row.action: row.current_combo for row in self._rows}
         self._config.update_hotkeys(updates)
         if self._hotkey_mgr:
@@ -264,11 +305,15 @@ class HotkeySettingsWidget(QWidget):
     # ------------------------------------------------------------------ private
     def _find_conflict(self, action: str, combo: str) -> str | None:
         """若 combo 已被其它 action 占用，返回那个 action 的标签；否则 None。"""
-        norm = combo.strip().lower()
-        labels = dict(_ACTIONS)
+        norm = normalize_combo(combo)
+        action_scope = self._actions[action].scope
+        if action_scope == "screenshot" and norm in {"ctrl+z", "ctrl+y", "ctrl+shift+z"}:
+            return t("hotkeys.captureHistory")
         for row in self._rows:
-            if row.action != action and row.current_combo.strip().lower() == norm:
-                return t(labels.get(row.action, row.action))
+            if (row.action != action and row.current_combo
+                    and normalize_combo(row.current_combo) == norm
+                    and scopes_overlap(action_scope, self._actions[row.action].scope)):
+                return self._label(row.action)
         return None
 
     def _warn_failed_registrations(self):
@@ -276,15 +321,23 @@ class HotkeySettingsWidget(QWidget):
         failed = getattr(self._hotkey_mgr, "failed_actions", None)
         if not failed:
             return
-        labels = dict(_ACTIONS)
-        names = "、".join(t(labels.get(a, a)) for a in failed)
+        names = "、".join(self._label(a) if a in self._actions else a for a in failed)
         QMessageBox.warning(
             self,
             t("hotkeys.err.registerFailedTitle"),
             t("hotkeys.err.registerFailedBody", names=names),
         )
 
-    def _reset_defaults(self):
-        from app.core.hotkey_manager import DEFAULT_HOTKEYS
-        for row in self._rows:
-            row.reset_combo(DEFAULT_HOTKEYS.get(row.action, ""))
+    def _reset_defaults(self, group=None):
+        targets = [row for row in self._rows
+                   if group is None or self._actions[row.action].group == group]
+        # Release bindings within this group together before restoring defaults,
+        # so a user-swapped pair does not block its own reset.
+        for row in targets:
+            row.reset_combo("")
+        for row in targets:
+            action = self._actions[row.action]
+            if action.default and self._find_conflict(action.id, action.default):
+                continue
+            row.reset_combo(action.default)
+        self._apply_filter()

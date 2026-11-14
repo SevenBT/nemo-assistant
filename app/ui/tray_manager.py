@@ -15,6 +15,9 @@ class TrayManager(QObject):
     settings_requested = pyqtSignal()
     screenshot_requested = pyqtSignal()
     quit_requested = pyqtSignal()
+    pause_hotkeys_requested = pyqtSignal()
+    shortcuts_requested = pyqtSignal()
+    stickies_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -57,12 +60,23 @@ class TrayManager(QObject):
         snap_act = QAction(t("tray.screenshot"), menu)
         snap_act.triggered.connect(self.screenshot_requested)
         menu.addAction(snap_act)
+        sticky_act = QAction(t("sticky.manager"), menu)
+        sticky_act.triggered.connect(self.stickies_requested)
+        menu.addAction(sticky_act)
 
         menu.addSeparator()
 
         settings_act = QAction(t("tray.settings"), menu)
         settings_act.triggered.connect(self.settings_requested)
         menu.addAction(settings_act)
+
+        self._pause_act = QAction(t("hotkeys.pauseAll"), menu)
+        self._pause_act.setCheckable(True)
+        self._pause_act.triggered.connect(self.pause_hotkeys_requested)
+        menu.addAction(self._pause_act)
+        shortcuts_act = QAction(t("hotkeys.action.overview"), menu)
+        shortcuts_act.triggered.connect(self.shortcuts_requested)
+        menu.addAction(shortcuts_act)
 
         menu.addSeparator()
 
@@ -71,6 +85,10 @@ class TrayManager(QObject):
         menu.addAction(quit_act)
 
         self._tray.setContextMenu(menu)
+
+    def set_hotkeys_paused(self, paused: bool):
+        self._pause_act.setChecked(paused)
+        self._pause_act.setText(t("hotkeys.resumeAll" if paused else "hotkeys.pauseAll"))
 
     def _on_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:

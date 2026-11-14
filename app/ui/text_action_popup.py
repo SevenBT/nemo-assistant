@@ -86,7 +86,7 @@ def _build_popup_style(theme: dict) -> str:
     }}
     #textActionCard TransparentToolButton:hover {{
         background: {theme["accent_subtle"]};
-        color: {theme["accent"]};
+        color: {style.theme_text_color('accent', theme, background=theme['surface_raised'])};
     }}
     #textActionDivider {{
         background: {theme["border_solid"]};

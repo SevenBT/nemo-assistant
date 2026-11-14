@@ -3,6 +3,7 @@
 from PyQt6.QtWidgets import QVBoxLayout, QScrollArea, QWidget
 
 from app.core.config import cfg
+from app.core.hotkey_actions import get_hotkey_actions, read_hotkeys, write_hotkeys
 from app.ui.hotkey_settings_widget import HotkeySettingsWidget
 
 
@@ -11,25 +12,14 @@ class _HotkeyConfigAdapter:
 
     @property
     def hotkeys(self) -> dict:
-        return {
-            "screenshot": cfg.get(cfg.hotkeyScreenshot),
-            "new_note": cfg.get(cfg.hotkeyNewNote),
-            "toggle_window": cfg.get(cfg.hotkeyToggleWindow),
-            "quick_ask": cfg.get(cfg.hotkeyQuickAsk),
-            "selection": cfg.get(cfg.hotkeySelection),
-        }
+        return read_hotkeys(cfg)
+
+    @property
+    def actions(self):
+        return get_hotkey_actions(cfg)
 
     def update_hotkeys(self, updates: dict) -> None:
-        _MAP = {
-            "screenshot": cfg.hotkeyScreenshot,
-            "new_note": cfg.hotkeyNewNote,
-            "toggle_window": cfg.hotkeyToggleWindow,
-            "quick_ask": cfg.hotkeyQuickAsk,
-            "selection": cfg.hotkeySelection,
-        }
-        for action, combo in updates.items():
-            if action in _MAP:
-                cfg.set(_MAP[action], combo)
+        write_hotkeys(updates, cfg)
 
 
 class HotkeysPage(QScrollArea):
@@ -44,3 +34,7 @@ class HotkeysPage(QScrollArea):
 
     def save(self):
         self._widget.save()
+
+    def showEvent(self, event):
+        self._widget.refresh_actions()
+        super().showEvent(event)

@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.i18n import t
+from app.ui.style import set_text_role
 from app.tools.registry import ToolRegistry
 from app.tools.script_adapter import ScriptToolAdapter
 
@@ -102,7 +103,8 @@ class ToolTestDialog(QDialog):
         btn_row.addWidget(self._run_btn)
 
         self._status_label = QLabel()
-        self._status_label.setStyleSheet("font-size: 11px; color: #9CA3AF;")
+        self._status_label.setStyleSheet("font-size: 11px;")
+        set_text_role(self._status_label, "secondary")
         btn_row.addWidget(self._status_label)
         btn_row.addStretch()
         layout.addLayout(btn_row)
@@ -157,9 +159,9 @@ class ToolTestDialog(QDialog):
         self._status_label.setText(f"{icon} {status}  ({elapsed:.2f}s)")
 
         if status == "success":
-            self._status_label.setStyleSheet("font-size: 11px; color: #34D399;")
+            set_text_role(self._status_label, "success")
         else:
-            self._status_label.setStyleSheet("font-size: 11px; color: #F87171;")
+            set_text_role(self._status_label, "error")
 
         formatted = json.dumps(result, ensure_ascii=False, indent=2)
         self._output.setPlainText(formatted)
