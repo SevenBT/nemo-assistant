@@ -413,7 +413,7 @@ class ChatSessionController(QObject):
         assistant 占位消息、并设好 live 状态后调用此方法，避免重复的
         worker 装配逻辑。
 
-        对话压缩已迁移至 ConsolidatorHook（before_turn），不再在此直接调用
+        对话压缩由工厂注入的 RequestPreparer 按请求执行，不再在此直接调用
         consolidator。
         """
         self._input.set_running(True)

@@ -79,6 +79,7 @@ def default_prompt(language="zh"):
 def execute(case, workdir: Path, mode="offline", config=None, variant=None):
     from app.adapters.agent.tools import RegistryToolRuntime
     from app.agent.agent import Agent
+    from app.agent.execution_policy import ExecutionPolicy
     from app.agent.agent_context import AgentContext
     from app.agent.agent_interface import AgentCallbacks
     from app.agent.agent_hooks import AgentHook, reject
@@ -168,7 +169,9 @@ def execute(case, workdir: Path, mode="offline", config=None, variant=None):
         agent = Agent(AgentContext(
             llm_gateway=gateway, registry=RegistryToolRuntime(registry), callbacks=AgentCallbacks.silent(),
             hooks=[EvidenceHook()], checkpoint_store=IsolatedCheckpoints(workdir),
-        ), messages, session_id="", max_turns=case.get("limits", {}).get("max_iterations_per_step", 6))
+        ), messages, session_id="", policy=ExecutionPolicy(
+            max_turns=case.get("limits", {}).get("max_iterations_per_step", 6),
+        ))
         result = agent.run_sync()
         answer = result.get("answer", "")
         step_results.append({"step": step_id, "trace_id": agent.trace_id, "status": result["status"], "answer": answer, "error": result["error"]})
@@ -192,7 +195,6 @@ def execute(case, workdir: Path, mode="offline", config=None, variant=None):
                             payload = next((c["result"] for c in calls if c["call_id"] == call["id"] and c["step"] == step_id), None)
                         tool_calls.append(ToolCall(id=call["id"], name=call["function"]["name"], arguments=json.loads(call["function"]["arguments"]), result=payload, extra_content=call.get("extra_content", {})))
                     history.append(Message(role="assistant", content=message.get("content") or "", tool_calls=tool_calls, provider_state=message.get("provider_state", {}), reasoning_content=message.get("reasoning_content")))
-            history.append(Message(role="assistant", content=answer))
     if mode == "offline" and gateway.script:
         status, error = "error", "Model script contains unused calls"
     artifacts = {}

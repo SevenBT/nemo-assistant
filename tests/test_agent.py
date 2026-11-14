@@ -25,6 +25,7 @@ from app.agent.agent_interface import AgentCallbacks
 from app.llm.llm_gateway import CancellationToken
 from app.adapters.agent.tools import RegistryToolRuntime
 from app.agent.agent import Agent
+from app.agent.agent_loop import AgentLoop
 from app.agent.agent_context import AgentContext
 from app.agent.turn_context import StateTraceEntry, TurnContext, TurnState
 from app.tools.registry import ToolErrorType, ToolRegistry
@@ -118,7 +119,7 @@ class _FakeTraceStore:
 
 def _make_agent(registry=None, gateway=None, hooks=None, callbacks=None,
                 messages=None, session_id="s1", max_turns=10, trace_store=None,
-                cancel_token=None) -> Agent:
+                cancel_token=None, agent_class=Agent) -> Agent:
     """便捷构造 Agent 用于测试。"""
     ctx = AgentContext(
         callbacks=callbacks or AgentCallbacks.silent(),
@@ -127,13 +128,17 @@ def _make_agent(registry=None, gateway=None, hooks=None, callbacks=None,
         hooks=hooks or [],
         cancel_token=cancel_token or CancellationToken(),
     )
-    return Agent(
+    return agent_class(
         ctx=ctx,
         messages=messages or [],
         session_id=session_id,
         max_turns=max_turns,
         trace_store=trace_store,
     )
+
+
+def _make_loop(**kwargs):
+    return _make_agent(agent_class=AgentLoop, **kwargs)
 
 
 def _tc(call_id, name="x", arguments=None):
@@ -182,11 +187,11 @@ class InitValidationTest(unittest.TestCase):
 
     def test_max_turns_default(self):
         agent = _make_agent()
-        self.assertEqual(agent._max_turns, 10)
+        self.assertEqual(agent._policy.max_turns, 10)
 
     def test_custom_max_turns(self):
         agent = _make_agent(max_turns=3)
-        self.assertEqual(agent._max_turns, 3)
+        self.assertEqual(agent._policy.max_turns, 3)
 
     def test_messages_copied_not_aliased(self):
         msgs = [{"role": "user", "content": "hi"}]
@@ -201,11 +206,11 @@ class InitValidationTest(unittest.TestCase):
             registry=RegistryToolRuntime(_FakeRegistry({})),
         )
         agent = Agent(ctx=ctx, messages=[])
-        self.assertIsNone(agent._hook)
+        self.assertIsNone(agent._ctx.composite_hook)
 
     def test_empty_hooks_produces_none_composite(self):
         agent = _make_agent(hooks=[])
-        self.assertIsNone(agent._hook)
+        self.assertIsNone(agent._ctx.composite_hook)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -214,13 +219,13 @@ class InitValidationTest(unittest.TestCase):
 
 class StatePrepareTest(unittest.TestCase):
     def test_empty_messages_returns_empty(self):
-        agent = _make_agent(messages=[])
+        agent = _make_loop(messages=[])
         ctx = TurnContext(messages=[], tools=None)
         event = agent._state_prepare(ctx)
         self.assertEqual(event, "empty")
 
     def test_with_messages_returns_ok(self):
-        agent = _make_agent(messages=[{"role": "user", "content": "hi"}])
+        agent = _make_loop(messages=[{"role": "user", "content": "hi"}])
         ctx = TurnContext(
             messages=[{"role": "user", "content": "hi"}],
             tools=None,
@@ -229,7 +234,7 @@ class StatePrepareTest(unittest.TestCase):
         self.assertEqual(event, "ok")
 
     def test_resets_turn_on_ok(self):
-        agent = _make_agent(messages=[{"role": "user", "content": "q"}])
+        agent = _make_loop(messages=[{"role": "user", "content": "q"}])
         ctx = TurnContext(
             messages=[{"role": "user", "content": "q"}],
             tools=None,
@@ -246,7 +251,7 @@ class StatePrepareTest(unittest.TestCase):
             def before_turn(self, ctx: BeforeTurnContext):
                 return [{"role": "system", "content": "injected"}]
 
-        agent = _make_agent(
+        agent = _make_loop(
             hooks=[_ModifyHook()],
             messages=[{"role": "user", "content": "original"}],
         )
@@ -256,14 +261,15 @@ class StatePrepareTest(unittest.TestCase):
         )
         agent._state_prepare(ctx)
         self.assertEqual(len(ctx.messages), 1)
-        self.assertEqual(ctx.messages[0]["content"], "injected")
+        self.assertEqual(ctx.messages[0]["content"], "original")
+        self.assertEqual(agent._initial_view[0]["content"], "injected")
 
     def test_before_turn_hook_returns_none_preserves_messages(self):
         class _NoopHook(AgentHook):
             def before_turn(self, ctx: BeforeTurnContext):
                 return None
 
-        agent = _make_agent(
+        agent = _make_loop(
             hooks=[_NoopHook()],
             messages=[{"role": "user", "content": "original"}],
         )
@@ -279,7 +285,7 @@ class StatePrepareTest(unittest.TestCase):
             def before_turn(self, ctx: BeforeTurnContext):
                 raise RuntimeError("oops")
 
-        agent = _make_agent(
+        agent = _make_loop(
             hooks=[_BadHook()],
             messages=[{"role": "user", "content": "original"}],
         )
@@ -311,7 +317,7 @@ class StateStreamTest(unittest.TestCase):
                     def after_iteration(self, ctx):
                         iterations.append(ctx)
 
-                agent = _make_agent(gateway=_FakeGateway(chunks), hooks=[_CaptureHook()])
+                agent = _make_loop(gateway=_FakeGateway(chunks), hooks=[_CaptureHook()])
                 ctx = TurnContext(messages=[{"role": "user", "content": "hi"}], tools=None)
 
                 self.assertEqual(agent._state_stream(ctx), "error")
@@ -326,7 +332,7 @@ class StateStreamTest(unittest.TestCase):
             {"type": "done"},
         ]
         gw = _FakeGateway(chunks)
-        agent = _make_agent(gateway=gw)
+        agent = _make_loop(gateway=gw)
         ctx = TurnContext(messages=[{"role": "user"}], tools=None)
         event = agent._state_stream(ctx)
         self.assertEqual(event, "no_tools")
@@ -338,7 +344,7 @@ class StateStreamTest(unittest.TestCase):
             {"type": "done"},
         ]
         gw = _FakeGateway(chunks)
-        agent = _make_agent(gateway=gw)
+        agent = _make_loop(gateway=gw)
         ctx = TurnContext(messages=[{"role": "user"}], tools=[{"type": "function"}])
         event = agent._state_stream(ctx)
         self.assertEqual(event, "has_tools")
@@ -348,7 +354,7 @@ class StateStreamTest(unittest.TestCase):
     def test_error_chunk_returns_error(self):
         chunks = [{"type": "error", "message": "model overloaded"}]
         gw = _FakeGateway(chunks)
-        agent = _make_agent(gateway=gw)
+        agent = _make_loop(gateway=gw)
         ctx = TurnContext(messages=[{"role": "user"}], tools=None)
         event = agent._state_stream(ctx)
         self.assertEqual(event, "error")
@@ -360,7 +366,7 @@ class StateStreamTest(unittest.TestCase):
             {"type": "done", "reasoning_content": "I think..."},
         ]
         gw = _FakeGateway(chunks)
-        agent = _make_agent(gateway=gw)
+        agent = _make_loop(gateway=gw)
         ctx = TurnContext(messages=[{"role": "user"}], tools=None)
         agent._state_stream(ctx)
         self.assertEqual(ctx.reasoning_content, "I think...")
@@ -383,7 +389,7 @@ class StateStreamTest(unittest.TestCase):
 
         gw.chat_stream = cancelling_stream
 
-        agent = _make_agent(gateway=gw, cancel_token=cancel_token)
+        agent = _make_loop(gateway=gw, cancel_token=cancel_token)
         ctx = TurnContext(messages=[{"role": "user"}], tools=None)
         event = agent._state_stream(ctx)
         self.assertEqual(event, "cancelled")
@@ -391,7 +397,7 @@ class StateStreamTest(unittest.TestCase):
     def test_resets_turn_before_stream(self):
         chunks = [{"type": "done"}]
         gw = _FakeGateway(chunks)
-        agent = _make_agent(gateway=gw)
+        agent = _make_loop(gateway=gw)
         ctx = TurnContext(messages=[{"role": "user"}], tools=None)
         ctx.full_text = "stale"
         ctx.tool_calls = [{"stale": True}]
@@ -405,7 +411,7 @@ class StateStreamTest(unittest.TestCase):
             {"type": "done"},
         ]
         gw = _FakeGateway(chunks)
-        agent = _make_agent(gateway=gw)
+        agent = _make_loop(gateway=gw)
         ctx = TurnContext(messages=[{"role": "user"}], tools=[{"type": "function"}])
         event = agent._state_stream(ctx)
         self.assertEqual(event, "has_tools")
@@ -425,7 +431,7 @@ class StateExecuteTest(unittest.TestCase):
 
     def test_single_successful_execution(self):
         reg = _FakeRegistry({"tool_a": False}, execute_fn=lambda n, p: {"status": "success", "data": {"result": "ok"}})
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         ctx = self._ctx_with_calls()
         event = agent._state_execute(ctx)
         self.assertEqual(event, "ok")
@@ -439,7 +445,7 @@ class StateExecuteTest(unittest.TestCase):
             "status": "error",
             "data": {"message": "not found", "error_type": ToolErrorType.TOOL_NOT_FOUND.value, "retryable": False},
         })
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         ctx = self._ctx_with_calls([_tc("1", "bad_tool")])
         event = agent._state_execute(ctx)
         self.assertEqual(event, "error")
@@ -450,7 +456,7 @@ class StateExecuteTest(unittest.TestCase):
             "status": "error",
             "data": {"message": "denied", "error_type": ToolErrorType.PERMISSION.value, "retryable": False},
         })
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         ctx = self._ctx_with_calls([_tc("1", "danger")])
         event = agent._state_execute(ctx)
         self.assertEqual(event, "error")
@@ -463,7 +469,7 @@ class StateExecuteTest(unittest.TestCase):
             return {"status": "error", "data": {"message": "fail", "error_type": ToolErrorType.RUNTIME.value, "retryable": True}}
 
         reg = _FakeRegistry({"flaky": False}, execute_fn=flaky_tool)
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         # 连续失败 6 次（每轮 1 次调用 = 6 轮触发阈值 5）
         agent._tool_failure_counts["flaky"] = 4  # 起始已有 4 次失败
         ctx = self._ctx_with_calls([_tc("1", "flaky")])
@@ -473,7 +479,7 @@ class StateExecuteTest(unittest.TestCase):
 
     def test_success_resets_failure_count(self):
         reg = _FakeRegistry({"tool_a": False}, execute_fn=lambda n, p: {"status": "success", "data": {}})
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         agent._tool_failure_counts["tool_a"] = 3
         ctx = self._ctx_with_calls([_tc("1", "tool_a")])
         agent._state_execute(ctx)
@@ -481,7 +487,7 @@ class StateExecuteTest(unittest.TestCase):
 
     def test_assistant_message_includes_reasoning(self):
         reg = _FakeRegistry({"tool_a": False}, execute_fn=lambda n, p: {"status": "success", "data": {}})
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         ctx = self._ctx_with_calls()
         ctx.reasoning_content = "Let me think..."
         agent._state_execute(ctx)
@@ -489,7 +495,7 @@ class StateExecuteTest(unittest.TestCase):
 
     def test_assistant_message_omits_reasoning_when_none(self):
         reg = _FakeRegistry({"tool_a": False}, execute_fn=lambda n, p: {"status": "success", "data": {}})
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         ctx = self._ctx_with_calls()
         ctx.reasoning_content = None
         agent._state_execute(ctx)
@@ -499,7 +505,7 @@ class StateExecuteTest(unittest.TestCase):
         cancel_token = CancellationToken()
         cancel_token.cancel()
         reg = _FakeRegistry({"tool_a": False})
-        agent = _make_agent(registry=reg, cancel_token=cancel_token)
+        agent = _make_loop(registry=reg, cancel_token=cancel_token)
         ctx = self._ctx_with_calls([_tc("1", "tool_a")])
         event = agent._state_execute(ctx)
         self.assertEqual(event, "cancelled")
@@ -511,7 +517,7 @@ class StateExecuteTest(unittest.TestCase):
 
         reg = _FakeRegistry({"tool_a": False, "tool_b": False},
                             execute_fn=lambda n, p: {"status": "success", "data": {}})
-        agent = _make_agent(registry=reg, hooks=[_RejectA()])
+        agent = _make_loop(registry=reg, hooks=[_RejectA()])
         ctx = self._ctx_with_calls([_tc("1", "tool_a"), _tc("2", "tool_b")])
         event = agent._state_execute(ctx)
         self.assertEqual(event, "ok")
@@ -531,7 +537,7 @@ class StateExecuteTest(unittest.TestCase):
             return {"status": "success", "data": {}}
 
         reg = _FakeRegistry({"tool_a": False, "tool_b": False}, execute_fn=track)
-        agent = _make_agent(registry=reg, hooks=[_RejectOne()])
+        agent = _make_loop(registry=reg, hooks=[_RejectOne()])
         ctx = self._ctx_with_calls([_tc("1", "tool_a"), _tc("2", "tool_b")])
         agent._state_execute(ctx)
         # tool_a 被拒绝不执行；tool_b 执行
@@ -545,28 +551,28 @@ class StateExecuteTest(unittest.TestCase):
 
 class StateFeedbackTest(unittest.TestCase):
     def test_increments_turn_count(self):
-        agent = _make_agent()
+        agent = _make_loop()
         ctx = TurnContext(messages=[{"role": "user"}], tools=None, max_turns=10)
         ctx.turn_count = 0
         agent._state_feedback(ctx)
         self.assertEqual(ctx.turn_count, 1)
 
     def test_continue_when_under_max_turns(self):
-        agent = _make_agent()
+        agent = _make_loop()
         ctx = TurnContext(messages=[{"role": "user"}], tools=None, max_turns=10)
         ctx.turn_count = 0
         event = agent._state_feedback(ctx)
         self.assertEqual(event, "continue")
 
     def test_max_turns_reached_returns_max_turns(self):
-        agent = _make_agent()
+        agent = _make_loop(max_turns=2)
         ctx = TurnContext(messages=[{"role": "user"}], tools=None, max_turns=2)
         ctx.turn_count = 1  # 下一轮就是第 2 轮，达到 max
         event = agent._state_feedback(ctx)
         self.assertEqual(event, "max_turns")
 
     def test_injects_queued_messages(self):
-        agent = _make_agent()
+        agent = _make_loop()
         agent._inject_queue.put({"role": "user", "content": "injected"})
         ctx = TurnContext(messages=[{"role": "user", "content": "original"}], tools=None, max_turns=10)
         agent._state_feedback(ctx)
@@ -574,7 +580,7 @@ class StateFeedbackTest(unittest.TestCase):
         self.assertEqual(ctx.messages[1]["content"], "injected")
 
     def test_injects_multiple_queued_messages(self):
-        agent = _make_agent()
+        agent = _make_loop()
         agent._inject_queue.put({"role": "user", "content": "first"})
         agent._inject_queue.put({"role": "user", "content": "second"})
         ctx = TurnContext(messages=[{"role": "user", "content": "original"}], tools=None, max_turns=10)
@@ -582,7 +588,7 @@ class StateFeedbackTest(unittest.TestCase):
         self.assertEqual(len(ctx.messages), 3)
 
     def test_empty_queue_no_injection(self):
-        agent = _make_agent()
+        agent = _make_loop()
         ctx = TurnContext(messages=[{"role": "user"}], tools=None, max_turns=10)
         agent._state_feedback(ctx)
         self.assertEqual(len(ctx.messages), 1)
@@ -593,47 +599,12 @@ class StateFeedbackTest(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════
 
 class StateFinalizeTest(unittest.TestCase):
-    def test_returns_ok(self):
-        agent = _make_agent()
-        ctx = TurnContext(messages=[{"role": "user"}], tools=None)
-        event = agent._state_finalize(ctx)
-        self.assertEqual(event, "ok")
+    def test_finalize_leaves_notification_to_facade(self):
+        done = []
+        loop = _make_loop(callbacks=AgentCallbacks(on_done=done.append))
+        self.assertEqual(loop._state_finalize(TurnContext(messages=[], tools=None)), "ok")
+        self.assertEqual(done, [])
 
-    def test_emits_done_with_error(self):
-        results = []
-        cb = AgentCallbacks(on_done=lambda info: results.append(info))
-        agent = _make_agent(callbacks=cb)
-        ctx = TurnContext(messages=[{"role": "user"}], tools=None)
-        ctx.error_message = "something went wrong"
-        agent._state_finalize(ctx)
-        self.assertEqual(len(results), 1)
-        self.assertFalse(results[0]["ok"])
-        self.assertEqual(results[0]["error"], "something went wrong")
-
-    def test_emits_done_with_success(self):
-        results = []
-        cb = AgentCallbacks(on_done=lambda info: results.append(info))
-        agent = _make_agent(callbacks=cb)
-        ctx = TurnContext(messages=[{"role": "user"}], tools=None)
-        agent._state_finalize(ctx)
-        self.assertEqual(len(results), 1)
-        self.assertTrue(results[0]["ok"])
-        self.assertIsNone(results[0]["error"])
-
-    def test_trace_included_in_done(self):
-        results = []
-        cb = AgentCallbacks(on_done=lambda info: results.append(info))
-        agent = _make_agent(callbacks=cb)
-        ctx = TurnContext(messages=[{"role": "user"}], tools=None)
-        ctx.trace.append(StateTraceEntry(state=TurnState.PREPARE, event="ok", duration_ms=5.0))
-        agent._state_finalize(ctx)
-        self.assertEqual(len(results[0]["trace"]), 1)
-        self.assertEqual(results[0]["trace"][0]["state"], "PREPARE")
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# 7. _execute_one
-# ══════════════════════════════════════════════════════════════════════════
 
 class ExecuteOneTest(unittest.TestCase):
     def test_injects_session_id(self):
@@ -644,7 +615,7 @@ class ExecuteOneTest(unittest.TestCase):
             return {"status": "success", "data": {}}
 
         reg = _FakeRegistry({"my_tool": False}, execute_fn=capture)
-        agent = _make_agent(registry=reg, session_id="sess-42")
+        agent = _make_loop(registry=reg, session_id="sess-42")
         result = agent._execute_one(_tc("1", "my_tool", {"arg1": "val"}))
         self.assertEqual(result["status"], "success")
         self.assertEqual(captured_params.get("_session_id"), "sess-42")
@@ -656,21 +627,21 @@ class ExecuteOneTest(unittest.TestCase):
             on_tool_done=lambda cid, name, result: events.append(("done", cid, name)),
         )
         reg = _FakeRegistry({"my_tool": False}, execute_fn=lambda n, p: {"status": "success", "data": {}})
-        agent = _make_agent(registry=reg, callbacks=cb)
+        agent = _make_loop(registry=reg, callbacks=cb)
         agent._execute_one(_tc("1", "my_tool"))
         self.assertEqual(events[0], ("start", "1", "my_tool"))
         self.assertEqual(events[1], ("done", "1", "my_tool"))
 
     def test_result_has_status_and_data(self):
         reg = _FakeRegistry({"my_tool": False}, execute_fn=lambda n, p: {"status": "success", "data": {"x": 1}})
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         result = agent._execute_one(_tc("1", "my_tool"))
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["data"]["x"], 1)
 
     def test_no_session_id_no_injection(self):
         reg = _FakeRegistry({"my_tool": False}, execute_fn=lambda n, p: {"status": "success", "data": {}})
-        agent = _make_agent(registry=reg, session_id="")
+        agent = _make_loop(registry=reg, session_id="")
         agent._execute_one(_tc("1", "my_tool"))
         # 不抛异常即可
 
@@ -683,7 +654,7 @@ class ExecuteConcurrentBatchTest(unittest.TestCase):
     def test_all_successful_concurrent(self):
         reg = _FakeRegistry({"a": True, "b": True, "c": True},
                             execute_fn=lambda n, p: {"status": "success", "data": {"tool": n}})
-        agent = _make_agent(registry=reg, session_id="sess-concurrent")
+        agent = _make_loop(registry=reg, session_id="sess-concurrent")
         batch = [_tc("1", "a"), _tc("2", "b"), _tc("3", "c")]
         results = agent._execute_concurrent_batch(batch)
         self.assertEqual(len(results), 3)
@@ -698,7 +669,7 @@ class ExecuteConcurrentBatchTest(unittest.TestCase):
             return {"status": "success", "data": {}}
 
         reg = _FakeRegistry({"a": True, "b": True}, execute_fn=capture)
-        agent = _make_agent(registry=reg, session_id="sess-cc")
+        agent = _make_loop(registry=reg, session_id="sess-cc")
         batch = [_tc("1", "a"), _tc("2", "b")]
         agent._execute_concurrent_batch(batch)
         self.assertEqual(captured.get("a"), "sess-cc")
@@ -711,7 +682,7 @@ class ExecuteConcurrentBatchTest(unittest.TestCase):
             return {"status": "success", "data": {}}
 
         reg = _FakeRegistry({"good": True, "bad": True}, execute_fn=flaky)
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         batch = [_tc("1", "good"), _tc("2", "bad")]
         results = agent._execute_concurrent_batch(batch)
         self.assertEqual(len(results), 2)
@@ -721,7 +692,7 @@ class ExecuteConcurrentBatchTest(unittest.TestCase):
 
     def test_no_session_id_no_injection(self):
         reg = _FakeRegistry({"a": True}, execute_fn=lambda n, p: {"status": "success", "data": {}})
-        agent = _make_agent(registry=reg, session_id="")
+        agent = _make_loop(registry=reg, session_id="")
         batch = [_tc("1", "a")]
         agent._execute_concurrent_batch(batch)
         # 不抛异常即可
@@ -734,7 +705,7 @@ class ExecuteConcurrentBatchTest(unittest.TestCase):
             on_tool_done=lambda cid, n, r: dones.append(cid),
         )
         reg = _FakeRegistry({"a": True, "b": True}, execute_fn=lambda n, p: {"status": "success", "data": {}})
-        agent = _make_agent(registry=reg, callbacks=cb)
+        agent = _make_loop(registry=reg, callbacks=cb)
         batch = [_tc("1", "a"), _tc("2", "b")]
         agent._execute_concurrent_batch(batch)
         self.assertEqual(set(starts), {"1", "2"})
@@ -747,7 +718,7 @@ class ExecuteConcurrentBatchTest(unittest.TestCase):
 
 class ApplyBeforeTurnHookTest(unittest.TestCase):
     def test_no_hook_returns_none(self):
-        agent = _make_agent(hooks=[])
+        agent = _make_loop(hooks=[])
         ctx = TurnContext(messages=[{"role": "user"}], tools=None)
         result = agent._apply_before_turn_hook(ctx)
         self.assertIsNone(result)
@@ -757,7 +728,7 @@ class ApplyBeforeTurnHookTest(unittest.TestCase):
             def before_turn(self, ctx: BeforeTurnContext):
                 return [{"role": "system", "content": "sys"}] + ctx.messages
 
-        agent = _make_agent(hooks=[_AddSystem()])
+        agent = _make_loop(hooks=[_AddSystem()])
         ctx = TurnContext(messages=[{"role": "user", "content": "hi"}], tools=None)
         result = agent._apply_before_turn_hook(ctx)
         self.assertEqual(len(result), 2)
@@ -768,7 +739,7 @@ class ApplyBeforeTurnHookTest(unittest.TestCase):
             def before_turn(self, ctx: BeforeTurnContext):
                 raise RuntimeError("fail")
 
-        agent = _make_agent(hooks=[_Bad()])
+        agent = _make_loop(hooks=[_Bad()])
         ctx = TurnContext(messages=[{"role": "user"}], tools=None)
         result = agent._apply_before_turn_hook(ctx)
         self.assertIsNone(result)
@@ -776,7 +747,7 @@ class ApplyBeforeTurnHookTest(unittest.TestCase):
 
 class ApplyBeforeToolsHookTest(unittest.TestCase):
     def test_no_hook_returns_empty_dict(self):
-        agent = _make_agent(hooks=[])
+        agent = _make_loop(hooks=[])
         ctx = TurnContext(messages=[], tools=None)
         ctx.tool_calls = [_tc("1", "a")]
         self.assertEqual(agent._apply_before_tools_hook(ctx), {})
@@ -786,7 +757,7 @@ class ApplyBeforeToolsHookTest(unittest.TestCase):
             def before_execute_tools(self, ctx: BeforeToolsContext):
                 return [reject(tc.id, "nope") for tc in ctx.tool_calls]
 
-        agent = _make_agent(hooks=[_AllReject()])
+        agent = _make_loop(hooks=[_AllReject()])
         ctx = TurnContext(messages=[], tools=None)
         ctx.tool_calls = [_tc("1", "a"), _tc("2", "b")]
         rejections = agent._apply_before_tools_hook(ctx)
@@ -799,7 +770,7 @@ class ApplyBeforeToolsHookTest(unittest.TestCase):
             def before_execute_tools(self, ctx: BeforeToolsContext):
                 raise RuntimeError("boom")
 
-        agent = _make_agent(hooks=[_Boom()])
+        agent = _make_loop(hooks=[_Boom()])
         ctx = TurnContext(messages=[], tools=None)
         ctx.tool_calls = [_tc("1", "a"), _tc("2", "b")]
         rejections = agent._apply_before_tools_hook(ctx)
@@ -811,7 +782,7 @@ class ApplyBeforeToolsHookTest(unittest.TestCase):
             def before_execute_tools(self, ctx: BeforeToolsContext):
                 return None
 
-        agent = _make_agent(hooks=[_AllowAll()])
+        agent = _make_loop(hooks=[_AllowAll()])
         ctx = TurnContext(messages=[], tools=None)
         ctx.tool_calls = [_tc("1", "a")]
         self.assertEqual(agent._apply_before_tools_hook(ctx), {})
@@ -819,7 +790,7 @@ class ApplyBeforeToolsHookTest(unittest.TestCase):
 
 class FireAfterIterationTest(unittest.TestCase):
     def test_no_hook_does_nothing(self):
-        agent = _make_agent(hooks=[])
+        agent = _make_loop(hooks=[])
         ctx = TurnContext(messages=[], tools=None)
         # 不应抛异常
         agent._fire_after_iteration(ctx, [])
@@ -831,7 +802,7 @@ class FireAfterIterationTest(unittest.TestCase):
             def after_iteration(self, ctx: AfterIterationContext):
                 received.append(ctx)
 
-        agent = _make_agent(hooks=[_Recorder()])
+        agent = _make_loop(hooks=[_Recorder()])
         ctx = TurnContext(messages=[{"role": "user"}], tools=None)
         ctx.full_text = "result"
         ctx.error_message = "err"
@@ -847,7 +818,7 @@ class FireAfterIterationTest(unittest.TestCase):
             def after_iteration(self, ctx: AfterIterationContext):
                 raise RuntimeError("oops")
 
-        agent = _make_agent(hooks=[_Bad()])
+        agent = _make_loop(hooks=[_Bad()])
         ctx = TurnContext(messages=[], tools=None)
         agent._fire_after_iteration(ctx, [])
         # 不抛异常
@@ -877,7 +848,7 @@ class TraceMethodsTest(unittest.TestCase):
         ctx = TurnContext(messages=[], tools=None)
         ctx.turn_count = 3
         ctx.trace.append(StateTraceEntry(state=TurnState.STREAM, event="no_tools", duration_ms=10.0))
-        agent._trace_finish(ctx, "ok", time.perf_counter() - 1.0, error=None)
+        agent._trace_finish({"trace": AgentLoop._serialize_trace(ctx), "status": "ok", "error": None}, ctx.turn_count, time.perf_counter()-1)
         self.assertEqual(len(store.state_traces), 1)
         self.assertEqual(len(store.finishes), 1)
         self.assertEqual(store.finishes[0]["status"], "ok")
@@ -887,20 +858,20 @@ class TraceMethodsTest(unittest.TestCase):
         store = _FakeTraceStore()
         agent = _make_agent(trace_store=store)
         ctx = TurnContext(messages=[], tools=None)
-        agent._trace_finish(ctx, "error", time.perf_counter() - 1.0, error="fail")
+        agent._trace_finish({"trace": [], "status": "error", "error": "fail"}, 0, time.perf_counter()-1)
         self.assertEqual(store.finishes[0]["status"], "error")
         self.assertEqual(store.finishes[0]["error"], "fail")
 
     def test_trace_tool_call(self):
         store = _FakeTraceStore()
-        agent = _make_agent(trace_store=store)
+        agent = _make_loop(trace_store=store)
         agent._trace_tool_call("c1", "search", {"q": "x"}, {"status": "success"}, 42.0)
         self.assertEqual(len(store.tool_calls), 1)
         self.assertEqual(store.tool_calls[0]["call_id"], "c1")
         self.assertEqual(store.tool_calls[0]["duration_ms"], 42.0)
 
     def test_trace_tool_call_when_store_none(self):
-        agent = _make_agent(trace_store=None)
+        agent = _make_loop(trace_store=None)
         agent._trace_tool_call("c1", "x", {}, {}, 0.0)
         # 不抛异常
 
@@ -916,13 +887,13 @@ class TraceMethodsTest(unittest.TestCase):
         store.record_state_trace.side_effect = RuntimeError("oops")
         agent = _make_agent(trace_store=store)
         ctx = TurnContext(messages=[], tools=None)
-        agent._trace_finish(ctx, "ok", time.perf_counter(), error=None)
+        agent._trace_finish({"trace": [], "status": "ok", "error": None}, 0, time.perf_counter())
         # 不抛异常
 
     def test_trace_tool_call_store_raises_no_crash(self):
         store = MagicMock()
         store.record_tool_call.side_effect = RuntimeError("oops")
-        agent = _make_agent(trace_store=store)
+        agent = _make_loop(trace_store=store)
         agent._trace_tool_call("c1", "x", {}, {}, 0.0)
         # 不抛异常
 
@@ -935,71 +906,71 @@ class CallbackEmissionTest(unittest.TestCase):
     def test_text_chunk_callback(self):
         chunks = []
         cb = AgentCallbacks(on_text_chunk=lambda d: chunks.append(d))
-        agent = _make_agent(callbacks=cb)
+        agent = _make_loop(callbacks=cb)
         agent._emit_text_chunk("hello")
         agent._emit_text_chunk(" world")
         self.assertEqual(chunks, ["hello", " world"])
 
     def test_text_chunk_no_callback_no_crash(self):
-        agent = _make_agent(callbacks=AgentCallbacks.silent())
+        agent = _make_loop(callbacks=AgentCallbacks.silent())
         agent._emit_text_chunk("x")
 
     def test_tool_start_callback(self):
         starts = []
         cb = AgentCallbacks(on_tool_start=lambda cid, n, p: starts.append((cid, n)))
-        agent = _make_agent(callbacks=cb)
+        agent = _make_loop(callbacks=cb)
         agent._emit_tool_start("c1", "search", {"q": "x"})
         self.assertEqual(starts, [("c1", "search")])
 
     def test_tool_done_callback(self):
         dones = []
         cb = AgentCallbacks(on_tool_done=lambda cid, n, r: dones.append((cid, n)))
-        agent = _make_agent(callbacks=cb)
+        agent = _make_loop(callbacks=cb)
         agent._emit_tool_done("c1", "search", {"status": "success"})
         self.assertEqual(dones, [("c1", "search")])
 
     def test_state_change_callback(self):
         states = []
         cb = AgentCallbacks(on_state_change=lambda s: states.append(s))
-        agent = _make_agent(callbacks=cb)
+        agent = _make_loop(callbacks=cb)
         agent._emit_state_change("STREAM")
         self.assertEqual(states, ["STREAM"])
 
     def test_new_turn_callback(self):
         turns = []
         cb = AgentCallbacks(on_new_turn=lambda tc: turns.append(tc))
-        agent = _make_agent(callbacks=cb)
+        agent = _make_loop(callbacks=cb)
         agent._emit_new_turn(3)
         self.assertEqual(turns, [3])
 
     def test_done_callback(self):
         results = []
         cb = AgentCallbacks(on_done=lambda info: results.append(info))
-        agent = _make_agent(callbacks=cb)
-        agent._emit_done({"ok": True})
+        agent = _make_loop(callbacks=cb)
+        _make_agent(callbacks=cb).run_sync()
         self.assertEqual(len(results), 1)
         self.assertTrue(results[0]["ok"])
 
     def test_callback_raises_no_crash(self):
         cb = AgentCallbacks(on_text_chunk=lambda d: (_ for _ in ()).throw(RuntimeError("boom")))
-        agent = _make_agent(callbacks=cb)
+        agent = _make_loop(callbacks=cb)
         agent._emit_text_chunk("x")
         # 不抛异常
 
     def test_all_callbacks_fire_with_collect(self):
         collector: dict = {}
         cb = AgentCallbacks.collect(collector)
-        agent = _make_agent(callbacks=cb)
+        agent = _make_loop(callbacks=cb)
         agent._emit_text_chunk("t1")
         agent._emit_tool_start("c1", "t", {})
         agent._emit_tool_done("c1", "t", {})
         agent._emit_state_change("EXECUTE")
         agent._emit_new_turn(2)
-        agent._emit_done({"ok": True})
+        _make_agent(callbacks=cb).run_sync()
 
         self.assertEqual(collector["text"], ["t1"])
         self.assertEqual(len(collector["tools"]), 2)
-        self.assertEqual(collector["states"], ["EXECUTE"])
+        self.assertEqual(collector["states"], ["EXECUTE", "PREPARE"])
         self.assertEqual(collector["turns"], [2])
         self.assertEqual(len(collector["result"]), 1)
 
@@ -1295,27 +1266,25 @@ class LifecycleTest(unittest.TestCase):
         self.assertTrue(result["ok"])
 
     def test_start_already_running_raises(self):
-        def test_start_already_running_raises(self):
-            started = threading.Event()
-            proceed = threading.Event()
-    
-            class _BlockingGateway:
-                def chat_stream(self, messages, tools, **kwargs):
-                    started.set()
-                    proceed.wait(timeout=5.0)
-                    yield {"type": "text", "delta": "ok"}
-                    yield {"type": "done"}
-    
-            gw = _BlockingGateway()
-            agent = _make_agent(gateway=gw, messages=[{"role": "user", "content": "hi"}])
-            self._agents.append(agent)
+        started = threading.Event()
+        proceed = threading.Event()
+        class _BlockingGateway:
+            def chat_stream(self, messages, tools, **kwargs):
+                started.set()
+                proceed.wait(timeout=5.0)
+                yield {"type": "text", "delta": "ok"}
+                yield {"type": "done"}
+        gw = _BlockingGateway()
+        agent = _make_agent(gateway=gw, messages=[{"role": "user", "content": "hi"}])
+        self._agents.append(agent)
+        agent.start()
+        started.wait(timeout=2.0)
+        with self.assertRaises(RuntimeError) as cm:
             agent.start()
-            started.wait(timeout=2.0)
-            with self.assertRaises(RuntimeError) as cm:
-                agent.start()
-            self.assertIn("already running", str(cm.exception))
-            proceed.set()
-            agent.wait(timeout=5.0)
+        self.assertIn("single-use", str(cm.exception))
+        proceed.set()
+        agent.wait(timeout=5.0)
+
     def test_wait_timeout_returns_none(self):
         # 构造一个长时间运行的 agent
         chunks = [
@@ -1359,7 +1328,7 @@ class LifecycleTest(unittest.TestCase):
 
 class RemainingCallsComprehensiveTest(unittest.TestCase):
     def test_middle_batch(self):
-        agent = _make_agent()
+        agent = _make_loop()
         b1 = [_tc("1"), _tc("2")]
         b2 = [_tc("3")]
         b3 = [_tc("4"), _tc("5")]
@@ -1368,7 +1337,7 @@ class RemainingCallsComprehensiveTest(unittest.TestCase):
         self.assertEqual([tc["id"] for tc in remaining], ["4", "5"])
 
     def test_first_batch(self):
-        agent = _make_agent()
+        agent = _make_loop()
         b1 = [_tc("1")]
         b2 = [_tc("2")]
         all_batches = [("serial", b1), ("serial", b2)]
@@ -1376,7 +1345,7 @@ class RemainingCallsComprehensiveTest(unittest.TestCase):
         self.assertEqual([tc["id"] for tc in remaining], ["2"])
 
     def test_last_batch_returns_empty(self):
-        agent = _make_agent()
+        agent = _make_loop()
         b1 = [_tc("1")]
         b2 = [_tc("2")]
         all_batches = [("serial", b1), ("serial", b2)]
@@ -1384,12 +1353,12 @@ class RemainingCallsComprehensiveTest(unittest.TestCase):
         self.assertEqual(remaining, [])
 
     def test_empty_batches(self):
-        agent = _make_agent()
+        agent = _make_loop()
         remaining = agent._get_remaining_calls([], [], [])
         self.assertEqual(remaining, [])
 
     def test_batch_not_found_returns_empty(self):
-        agent = _make_agent()
+        agent = _make_loop()
         b1 = [_tc("1")]
         unknown = [_tc("99")]
         all_batches = [("serial", b1)]
@@ -1432,7 +1401,7 @@ class IntegrationScenariosTest(unittest.TestCase):
             {"type": "done"},
         ]
         gw = _FakeGateway(chunks)
-        agent = _make_agent(gateway=gw)
+        agent = _make_loop(gateway=gw)
         ctx = TurnContext(messages=[{"role": "user"}], tools=[{"type": "function"}])
         event = agent._state_stream(ctx)
         self.assertEqual(event, "has_tools")
@@ -1449,7 +1418,7 @@ class IntegrationScenariosTest(unittest.TestCase):
 
         # read_only=True → concurrent, read_only=False → serial
         reg = _FakeRegistry({"ro1": True, "ro2": True, "rw": False, "ro3": True}, execute_fn=track)
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         ctx = TurnContext(messages=[{"role": "user"}], tools=None)
         ctx.tool_calls = [
             _tc("1", "ro1"),
@@ -1469,7 +1438,7 @@ class IntegrationScenariosTest(unittest.TestCase):
     def test_multiple_tool_calls_in_assistant_message_format(self):
         """验证 assistant 消息的 tool_calls 格式化正确。"""
         reg = _FakeRegistry({"a": False}, execute_fn=lambda n, p: {"status": "success", "data": {}})
-        agent = _make_agent(registry=reg)
+        agent = _make_loop(registry=reg)
         ctx = TurnContext(messages=[{"role": "user"}], tools=None)
         ctx.tool_calls = [
             {"id": "c1", "name": "a", "arguments": {"x": 1}},

@@ -27,6 +27,7 @@ from app.agent.contracts import (
     ToolRuntime, TraceSink,
 )
 from app.runtime.cancellation import CancellationToken
+from app.agent.request_context import IdentityRequestPreparer, RequestPreparer
 
 
 @dataclass
@@ -74,6 +75,9 @@ class AgentContext:
 
     trace_store: TraceSink = field(default_factory=NullTraceSink)
     """Explicit trace backend; the default discards observations."""
+
+    request_preparer: RequestPreparer = field(default_factory=IdentityRequestPreparer)
+    """Per-run request view preparation; never replaces authoritative history."""
 
     # ── 便捷属性 ──
 

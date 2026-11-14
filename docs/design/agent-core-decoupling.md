@@ -202,3 +202,5 @@ uv run --no-sync python -m scripts.agent_headless
 ```
 
 此示例仅验证核心接线，不请求模型、不启用工具，也不加载桌面服务或写入业务数据。
+
+后续核心职责拆分见[第二阶段方案](agent-loop-refactor.md)；R1–R4 已实施，验证记录独立列在该文档中。

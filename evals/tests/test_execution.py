@@ -26,6 +26,10 @@ def test_production_agent_runs_multi_turn_and_recovery_without_qt(tmp_path):
     assert execution["requests"][1]["messages"][0]["role"] == "system"
     assert any(m["role"] == "tool" for m in execution["requests"][1]["messages"])
     assert len(execution["model_requests"]) == 4
+    first_answer = execution["steps"][0]["answer"]
+    carried_answers = [m for m in execution["requests"][1]["messages"]
+                       if m["role"] == "assistant" and m.get("content") == first_answer]
+    assert len(carried_answers) == 1
     assert any(m["role"] == "tool" for m in execution["model_requests"][-1]["messages"])
     assert execution["artifacts"]["revised.txt"]["text"] == "日期：2026-11-10\n负责人：甲\n"
 

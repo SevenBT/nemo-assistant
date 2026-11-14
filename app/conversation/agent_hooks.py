@@ -41,7 +41,9 @@ def _api_dicts_to_messages(api_dicts: list[dict[str, Any]]) -> list["Message"]:
 
 
 class ConsolidatorHook(AgentHook):
-    """将 Consolidator 适配为 AgentHook，在每轮对话前自动压缩旧消息。
+    """旧调用方兼容入口。桌面组装改用 ConsolidatingRequestPreparer。
+
+    此 Hook 仅在运行开始时压缩初始请求视图，不改权威历史。
 
     用法::
 
@@ -50,7 +52,7 @@ class ConsolidatorHook(AgentHook):
 
         consolidator = Consolidator(llm_gateway, memory_mgr, model="gpt-4o")
         hook = ConsolidatorHook(consolidator)
-        agent = AgentThread(..., hooks=[hook])
+        context = AgentContext(..., hooks=[hook])
     """
 
     def __init__(self, consolidator):

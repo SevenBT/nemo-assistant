@@ -17,7 +17,7 @@
     转而向 LLM 回灌一条拒绝说明，loop 照常继续——LLM 能看到拒绝并改走别的路。
 
 三个关键挂载点：
-    before_turn           每轮对话开始前，可读取/修改消息列表。
+    before_turn           单次运行开始时，可调整初始请求视图。
                           —— 对话压缩（consolidation）的天然挂载点。
     before_execute_tools  工具执行前，可读取 tool_calls 并裁决（放行/拒绝）。
                           —— 安全审批的天然挂载点。
@@ -95,9 +95,10 @@ class AfterIterationContext:
 
 @dataclass
 class BeforeTurnContext:
-    """before_turn 的上下文：每轮对话开始前的快照。
+    """before_turn 的上下文：单次运行开始前的快照。
 
-    hook 可返回新的消息列表来替换 ctx.messages（例如压缩后的消息）。
+    hook 返回的新消息列表仅替换初始请求视图，不修改权威运行历史。
+    每次模型请求的压缩应使用 RequestPreparer。
     返回 None 表示不修改。
     """
 
@@ -124,7 +125,7 @@ class AgentHook:
         return None
 
     def before_turn(self, ctx: BeforeTurnContext) -> list[dict[str, Any]] | None:
-        """每轮对话开始前调用。返回新的消息列表以替换，None 表示不修改。"""
+        """运行开始时调用一次；返回初始请求视图，None 表示不修改。"""
         return None
 
     def after_iteration(self, ctx: AfterIterationContext) -> None:

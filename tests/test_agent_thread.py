@@ -8,7 +8,7 @@ import unittest
 from app.agent.agent_hooks import AgentHook, BeforeToolsContext, reject
 from app.agent.agent_interface import AgentCallbacks
 from app.adapters.agent.tools import RegistryToolRuntime
-from app.agent.agent import Agent
+from app.agent.agent_loop import AgentLoop
 from app.agent.agent_context import AgentContext
 from app.agent.turn_context import StateTraceEntry, TurnContext, TurnState
 
@@ -33,14 +33,14 @@ class _FakeRegistry:
         return []
 
 
-def _make_agent(registry, **kwargs) -> Agent:
+def _make_agent(registry, **kwargs) -> AgentLoop:
     ctx = AgentContext(
         callbacks=AgentCallbacks.silent(),
         llm_gateway=object(),
         registry=RegistryToolRuntime(registry),
         **kwargs,
     )
-    return Agent(
+    return AgentLoop(
         ctx=ctx,
         messages=[],
         session_id="s1",
@@ -118,7 +118,7 @@ class SerializeTraceTest(unittest.TestCase):
         ctx = TurnContext(messages=[], tools=None)
         ctx.trace.append(StateTraceEntry(state=TurnState.STREAM, event="has_tools", duration_ms=12.345))
         ctx.trace.append(StateTraceEntry(state=TurnState.EXECUTE, event="ok", duration_ms=7.0))
-        out = Agent._serialize_trace(ctx)
+        out = AgentLoop._serialize_trace(ctx)
         self.assertEqual(out, [
             {"state": "STREAM", "event": "has_tools", "duration_ms": 12.3},
             {"state": "EXECUTE", "event": "ok", "duration_ms": 7.0},
@@ -172,7 +172,7 @@ class BeforeToolsHookTest(unittest.TestCase):
             registry=RegistryToolRuntime(_FakeRegistry({})),
             hooks=[_RejectAllHook()],
         )
-        agent = Agent(ctx=ctx, messages=[], session_id="s1")
+        agent = AgentLoop(ctx=ctx, messages=[], session_id="s1")
         rejections = agent._apply_before_tools_hook(self._ctx_with_calls())
         self.assertEqual(set(rejections.keys()), {"1", "2"})
         self.assertTrue(all(d.is_reject for d in rejections.values()))
@@ -185,7 +185,7 @@ class BeforeToolsHookTest(unittest.TestCase):
             registry=RegistryToolRuntime(_FakeRegistry({})),
             hooks=[_BoomHook()],
         )
-        agent = Agent(ctx=ctx, messages=[], session_id="s1")
+        agent = AgentLoop(ctx=ctx, messages=[], session_id="s1")
         rejections = agent._apply_before_tools_hook(self._ctx_with_calls())
         self.assertEqual(set(rejections.keys()), {"1", "2"})
         self.assertTrue(all(d.is_reject for d in rejections.values()))
@@ -211,7 +211,7 @@ class WrapUpStateTest(unittest.TestCase):
             llm_gateway=gw,
             registry=RegistryToolRuntime(_FakeRegistry({})),
         )
-        agent = Agent(ctx=ctx, messages=[], session_id="s1")
+        agent = AgentLoop(ctx=ctx, messages=[], session_id="s1")
         return agent, gw
 
     def test_wrap_up_emits_text_and_returns_ok(self):
