@@ -6,6 +6,38 @@ This project follows a lightweight changelog format inspired by Keep a Changelog
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-15
+
+### Added
+
+- Custom selection actions with editable prompts, icons, ordering, and rewrite previews.
+- A local file picker beside the chat input for adding attachments.
+- Screenshot annotations, capture actions, and an active screenshot pin highlight.
+- Rich-text desktop stickies with images, local reminders, per-note appearance, templates, and TXT/PNG export.
+- Categorized, searchable shortcut settings with scoped selection/capture actions, custom-action bindings, and tray pause/resume controls.
+- A generated-tool build and review workflow with validation before installation.
+- Redacted diagnostic export with an editable preview for reviewing Agent runs.
+- An independent evaluation CLI with offline production Agent scenarios and opt-in real-model evaluation and judging.
+
+### Changed
+
+- Replaced LiteLLM and provider SDKs with shared httpx transport and explicit Chat Completions, Responses, Claude Messages, and Cohere Chat v2 protocols, preserving existing model settings and keyring entries.
+- Separated Agent execution, request preparation, desktop integration, and evaluation boundaries.
+- Improved context budgeting with tiktoken, bounded conversation compression, and append-only prompt cache prefixes.
+- Updated run records to retain provider-reported usage and charges when available; removed local price estimates and user-maintained price tables.
+- Simplified sticky-note editing: legacy checklists become ordinary paragraphs while retaining text, other rich formatting, and images. Checkbox state is no longer retained.
+- Moved evaluation out of desktop settings into the standalone evaluation package.
+
+### Fixed
+
+- Improved selection popup timing, sizing, and capture reliability.
+- Stabilized screenshot capture and shortcut restoration after leaving capture mode.
+- Brought selection and screenshot follow-up actions into the chat view.
+- Improved theme contrast, font rendering at fractional display scales, and sticky-editor focus after window activation.
+- Hardened Agent cancellation and settlement, malformed tool-call handling, disabled-tool execution, and conflicting user-tool names.
+- Rejected empty conversation summaries and enforced compression budgets.
+- Included local OCR models, configuration, and UI Automation DLLs in the Windows executable.
+
 ## [0.2.0] - 2026-07-19
 
 ### Changed

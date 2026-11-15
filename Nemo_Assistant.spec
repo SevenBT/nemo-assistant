@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 httpx_datas, httpx_binaries, httpx_hiddenimports = collect_all('httpx')
 httpcore_datas, httpcore_binaries, httpcore_hiddenimports = collect_all('httpcore')
@@ -9,6 +9,12 @@ httpcore_datas, httpcore_binaries, httpcore_hiddenimports = collect_all('httpcor
 # found: []". collect_all grabs the plugin submodules + tiktoken's data files.
 tiktoken_datas, tiktoken_binaries, tiktoken_hiddenimports = collect_all('tiktoken')
 tiktoken_ext_hiddenimports = collect_submodules('tiktoken_ext')
+
+# RapidOCR opens its config, character dictionary and ONNX models by path.
+# UI Automation loads its architecture-specific DLL from the package's bin/.
+# Neither package's non-Python resources are found by import analysis alone.
+ocr_datas = collect_data_files('rapidocr_onnxruntime')
+uia_datas = collect_data_files('uiautomation')
 
 # Built-in tools are discovered dynamically at runtime (pkgutil), so PyInstaller's
 # static analysis won't see them. Force-collect every app.tools.* submodule.
@@ -22,6 +28,8 @@ a = Analysis(
         *httpx_datas,
         *httpcore_datas,
         *tiktoken_datas,
+        *ocr_datas,
+        *uia_datas,
         # Bundle app assets. In onefile mode the bootloader unpacks these into
         # sys._MEIPASS at runtime; config.py resolves ASSETS_DIR against that
         # dir. Built-in tools live in the app.tools package (collected
