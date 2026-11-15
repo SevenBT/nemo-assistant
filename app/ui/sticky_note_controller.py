@@ -78,14 +78,10 @@ class StickyNoteController(QObject):
         elif source.startswith("template:"):
             key = source.split(":", 1)[1]
             editor.setPlainText(t("sticky.template." + key + "Body"))
-            if key in ("today", "shopping"):
-                editor.append("")
-                editor.insert_todo()
         elif source.startswith("saved:"):
             record = next((r for r in self._notes.get_sticky_templates() if str(r["id"]) == source.split(":", 1)[1]), None)
             if record:
                 editor.load_content(record["content"])
-                editor.reset_completed()
                 settings = json.loads(record["settings"])
         content = editor.toHtml() if not editor.document().isEmpty() else ""
         editor.deleteLater()

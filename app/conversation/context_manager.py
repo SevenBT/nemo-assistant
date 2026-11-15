@@ -221,6 +221,10 @@ class ContextManager:
         """计算文本的 token 数量。"""
         return count_tokens(text, self.model)
 
+    @property
+    def usable_tokens(self) -> int:
+        return self._usable_context
+
     def count_messages_tokens(self, messages: list["Message"]) -> int:
         """计算一组消息的 token 数量。"""
         return count_messages_tokens(messages, self.model)

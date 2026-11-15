@@ -3,7 +3,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.agent.agent_hooks import BeforeTurnContext, ConsolidatorHook
+from app.agent.agent_hooks import BeforeTurnContext
+from app.conversation.agent_hooks import ConsolidatorHook
 from app.conversation.consolidator import Consolidator, _messages_to_text
 from app.models.message import Message, MessageRole, ToolCall
 

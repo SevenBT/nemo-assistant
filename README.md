@@ -83,7 +83,7 @@ Screenshot support is built into the floating-window workflow rather than delega
 - **Notebook**: supports Markdown, folders, tags, keyword search, `[[wiki links]]`, and syntax highlighting.
 - **AI collaboration**: chat can read and create notes, and important information can be saved as long-term memory.
 
-Stickies support mixed checklists and images, local one-time/daily/weekly reminders, per-note appearance, collapse/lock/edge hiding, templates, and TXT/PNG export. Hidden notes remain in the notebook. See the [sticky-note guide](docs/zh/sticky-notes.md).
+Stickies support rich text and images, local one-time/daily/weekly reminders, per-note appearance, collapse/lock/edge hiding, templates, and TXT/PNG export. Hidden notes remain in the notebook. See the [sticky-note guide](docs/zh/sticky-notes.md).
 
 <p align="center">
   <img src="assets/screenshots/notes-and-stickies.png" alt="Notes and stickies" width="860">

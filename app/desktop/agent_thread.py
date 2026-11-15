@@ -4,7 +4,7 @@ AgentThread — thin Qt shell around Agent.
 Architecture:
     AgentThread subclasses QThread. On its background thread it creates an
     Agent (pure Python, zero Qt) and bridges its AgentCallbacks to
-    Qt signals. All state machine logic lives in Agent; AgentThread is
+    Qt signals. All state machine logic lives in AgentLoop; AgentThread is
     only responsible for the Qt adaptation layer.
 
 AgentThread — Agent 的 Qt 壳。
@@ -12,18 +12,16 @@ AgentThread — Agent 的 Qt 壳。
 整体架构：
     AgentThread 继承 QThread，在后台线程中创建 Agent（纯 Python，零 Qt 依赖）。
     通过 AgentCallbacks 将 Agent 的事件桥接到 Qt 信号，供 UI 层消费。
-    所有状态机逻辑都在 Agent 中；AgentThread 仅负责 Qt 适配层。
+    所有状态机逻辑都在 AgentLoop 中；AgentThread 仅负责 Qt 适配层。
 """
 import logging
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from app.agent.agent_hooks import AgentHook
 from app.agent.agent_interface import AgentCallbacks
-from app.llm.llm_gateway import LLMGateway
 from app.agent.agent import Agent
 from app.agent.agent_context import AgentContext
-from app.tools.registry import ToolRegistry
+from app.agent.execution_policy import ExecutionPolicy, resolve_policy
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +32,7 @@ class AgentThread(QThread):
     Bridges Agent's pure-Python callbacks to Qt signals for UI
     consumption.  The state machine (PREPARE → STREAM → EXECUTE →
     FEEDBACK → WRAP_UP → FINALIZE → DONE) is implemented entirely in
-    Agent.
+    AgentLoop.
 
     Signals (unchanged from original AgentThread):
         text_chunk(str)          — streaming text delta
@@ -55,31 +53,26 @@ class AgentThread(QThread):
 
     def __init__(
         self,
-        llm_gateway: LLMGateway,
-        registry: ToolRegistry,
+        context: AgentContext,
         api_messages: list[dict],
         session_id: str = "",
-        max_turns: int = 10,
-        trace_store=None,
-        hooks: list[AgentHook] | None = None,
+        max_turns: int | None = None,
         parent=None,
+        *, policy: ExecutionPolicy | None = None,
     ):
         super().__init__(parent)
-        self._llm = llm_gateway
-        self._registry = registry
+        self._ctx = context
         self._messages = api_messages
         self._session_id = session_id
-        self._max_turns = max_turns
-        self._trace_store = trace_store
-        self._hooks = hooks or []
+        self._policy = resolve_policy(max_turns, policy)
 
         self._agent: Agent | None = None
-        self._ctx: AgentContext | None = None
 
     # ── External Control Interface ──────────────────────────────────────────
 
     def cancel(self):
         """Request cancellation of the current agent run (thread-safe)."""
+        self._ctx.cancel()
         if self._agent is not None:
             self._agent.cancel()
 
@@ -97,7 +90,7 @@ class AgentThread(QThread):
     def _trace_id(self) -> str:
         """Expose Agent's trace_id for eval runner post-run inspection."""
         if self._agent is not None:
-            return self._agent._trace_id
+            return self._agent.trace_id
         return ""
 
     # ── QThread Entry Point ─────────────────────────────────────────────────
@@ -130,19 +123,13 @@ class AgentThread(QThread):
             on_done=lambda info: self.done.emit(info),
         )
 
-        self._ctx = AgentContext(
-            callbacks=callbacks,
-            hooks=list(self._hooks),
-            llm_gateway=self._llm,
-            registry=self._registry,
-        )
+        self._ctx.callbacks = callbacks
 
         self._agent = Agent(
             ctx=self._ctx,
             messages=self._messages,
             session_id=self._session_id,
-            max_turns=self._max_turns,
-            trace_store=self._trace_store,
+            policy=self._policy,
         )
 
         self._agent.run_sync()

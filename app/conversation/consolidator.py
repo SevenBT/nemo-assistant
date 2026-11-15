@@ -2,11 +2,14 @@
 Consolidator — 对话 token 超限时自动压缩旧消息为摘要。
 
 工作流程：
-  1. 每轮对话前检查当前 session 消息的 token 精确计数（使用 tiktoken）
+  1. 桌面请求准备器按文本 token 估算检查请求视图
   2. 超过阈值时，取最旧的一批消息
   3. 调用 LLM 生成摘要
   4. 摘要存入 memories 表 (category=archive)
-  5. 从 session 消息列表中移除已压缩的消息，替换为摘要系统消息
+  5. 请求视图使用摘要和完整近期消息；不删除会话或 Agent 权威历史
+
+maybe_consolidate 保留为旧调用方的列表转换接口；桌面使用每次运行独立的
+ConsolidatingRequestPreparer，负责固定指令、工具组及摘要归档去重。
 """
 from __future__ import annotations
 
@@ -16,6 +19,8 @@ from typing import TYPE_CHECKING
 
 from app.conversation.context_manager import MAX_CONSOLIDATION_RATIO, ContextManager, content_to_text
 from app.models.memory import MemoryCategory, MemoryScope
+from app.agent.request_context import RequestCancelled, check_cancelled
+from app.runtime.cancellation import CancellationToken, _close_resource
 
 if TYPE_CHECKING:
     from app.llm.llm_gateway import LLMGateway
@@ -38,13 +43,15 @@ _CONSOLIDATION_PROMPT = """你是对话摘要助手。请将以下对话内容�
 
 
 def _messages_to_text(messages: list["Message"]) -> str:
-    """将消息列表转为纯文本用于摘要（不包含 tool_calls，避免摘要过长）。"""
+    """将正文和工具参数转为有长度限制的摘要素材，隐藏图片载荷。"""
     lines = []
     for m in messages:
         role_label = {"user": "用户", "assistant": "AI", "system": "系统"}.get(m.role, m.role)
         content = content_to_text(m.content)
         if content:
             lines.append(f"{role_label}: {content[:500]}")
+        for call in getattr(m, "tool_calls", None) or []:
+            lines.append(f"工具 {call.name}: {str(call.arguments)[:500]}")
     return "\n".join(lines)
 
 
@@ -70,6 +77,25 @@ class Consolidator:
         self._ratio = consolidation_ratio
         self._ctx_mgr = ContextManager(model=model, reserve_ratio=0.2)
         self._ctx_mgr.consolidation_budget(consolidation_ratio)
+
+    @property
+    def context_manager(self) -> ContextManager:
+        return self._ctx_mgr
+
+    @property
+    def target_tokens(self) -> int:
+        return self._ctx_mgr.consolidation_budget(self._ratio)
+
+    def archive(self, summary: str, session_id: str, cancel_token: CancellationToken) -> None:
+        check_cancelled(cancel_token)
+        self._mem.add(
+            content=summary, category=MemoryCategory.ARCHIVE, scope=MemoryScope.SESSION,
+            session_id=session_id, importance=3, source="consolidator",
+        )
+
+    def summarize(self, messages: list["Message"], max_tokens: int,
+                  cancel_token: CancellationToken) -> str:
+        return self._summarize(messages, max_tokens, cancel_token=cancel_token)
 
     def maybe_consolidate(
         self,
@@ -146,30 +172,44 @@ class Consolidator:
             summary_msg.content = self._ctx_mgr.truncate_text(summary_msg.content, available)
         return result
 
-    def _summarize(self, messages: list["Message"], max_tokens: int) -> str:
+    def _summarize(self, messages: list["Message"], max_tokens: int,
+                   cancel_token: CancellationToken | None = None) -> str:
         """调用 LLM 生成摘要。失败时返回 raw 截断。"""
         text = _messages_to_text(messages)
         prompt = f"摘要正文不得超过 {max_tokens} tokens。\n\n" + _CONSOLIDATION_PROMPT + text
 
+        stream = None
         try:
+            check_cancelled(cancel_token)
             result_parts = []
-            for event in self._llm.chat_stream(
+            stream = self._llm.chat_stream(
                 [{"role": "user", "content": prompt}],
                 tools=None,
-            ):
+                cancel_token=cancel_token,
+            )
+            for event in stream:
+                check_cancelled(cancel_token)
                 if event["type"] == "text":
                     result_parts.append(event["delta"])
                 elif event["type"] == "error":
                     raise RuntimeError(event["message"])
+            check_cancelled(cancel_token)
             summary = "".join(result_parts).strip()
             if summary:
                 return summary
+        except RequestCancelled:
+            raise
         except Exception as e:
+            check_cancelled(cancel_token)
             logger.warning(f"[Consolidator] LLM summarization failed: {e}, using raw truncation")
+        finally:
+            _close_resource(stream)
 
         # fallback: 取每条消息的前 100 字符
         lines = []
         for m in messages:
             if m.content:
-                lines.append(f"- {m.content[:100]}")
+                lines.append(f"- {content_to_text(m.content)[:100]}")
+            for call in getattr(m, "tool_calls", None) or []:
+                lines.append(f"- {call.name}: {str(call.arguments)[:100]}")
         return "\n".join(lines[-20:])

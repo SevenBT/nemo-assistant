@@ -360,7 +360,7 @@ class NotesPanel(QWidget):
         list_panel_layout.addLayout(header_row)
 
         self._sticky_filter = ComboBox()
-        for key in ("all", "visible", "hidden", "reminders", "tasks"):
+        for key in ("all", "visible", "hidden", "reminders"):
             self._sticky_filter.addItem(t("sticky.filter." + key), userData=key)
         self._sticky_filter.currentIndexChanged.connect(lambda: self.refresh())
         self._sticky_filter.hide()
@@ -656,11 +656,7 @@ class NotesPanel(QWidget):
             return not visible
         if key == "reminders":
             return self._mgr.get_sticky_reminder(note.id) is not None
-        editor = StickyEditor()
-        editor.load_content(note.content)
-        done, total = editor.task_counts()
-        editor.deleteLater()
-        return done < total
+        return True
 
     def _set_sticky_item_metadata(self, item, note):
         from app.ui.sticky_note_window import _note_palette
@@ -671,14 +667,8 @@ class NotesPanel(QWidget):
         color = palette[names.index(key)] if key in names else palette[note.id % len(palette)] if key == "auto" else key
         if QColor(color).isValid():
             item.setData(_ROLE_COLOR, color)
-        editor = StickyEditor()
-        editor.load_content(note.content)
-        done, total = editor.task_counts()
-        editor.deleteLater()
         date_str = datetime.fromisoformat(note.updated_at).strftime("%m-%d %H:%M")
         parts = [note.title, date_str]
-        if total:
-            parts.append(t("sticky.tasks.progress", done=done, total=total))
         reminder = self._mgr.get_sticky_reminder(note.id)
         if reminder:
             parts.append(t("sticky.reminder.next", time=datetime.fromisoformat(reminder["next_at"]).astimezone().strftime("%m-%d %H:%M")) if reminder["enabled"] else t("sticky.reminder.paused"))

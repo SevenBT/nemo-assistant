@@ -6,9 +6,8 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
-from app.agent.agent_hooks import ConsolidatorHook
+from app.desktop.agent_factory import create_agent_worker
 from app.desktop.agent_thread import AgentThread
-from app.agent.audit_hooks import IterationTraceHook, SecurityAuditHook
 from app.config.config import cfg
 from app.i18n import t, all_translations
 from app.models.message import Message, MessageRole, ToolCall
@@ -414,7 +413,7 @@ class ChatSessionController(QObject):
         assistant 占位消息、并设好 live 状态后调用此方法，避免重复的
         worker 装配逻辑。
 
-        对话压缩已迁移至 ConsolidatorHook（before_turn），不再在此直接调用
+        对话压缩由工厂注入的 RequestPreparer 按请求执行，不再在此直接调用
         consolidator。
         """
         self._input.set_running(True)
@@ -425,13 +424,13 @@ class ChatSessionController(QObject):
 
         api_msgs = self._prompt_builder.build(session.messages[:-1], sid)
 
-        worker = AgentThread(
+        worker = create_agent_worker(
             llm_gateway=self._llm,
             registry=self._registry,
             api_messages=api_msgs,
             session_id=sid,
             trace_store=self._trace_store,
-            hooks=self._build_hooks(),
+            consolidator=self._consolidator,
         )
         self._workers[sid] = worker
         self._connect_worker(sid, worker)
@@ -516,23 +515,6 @@ class ChatSessionController(QObject):
             if messages[i].role == MessageRole.USER:
                 return i
         return None
-
-    def _build_hooks(self) -> list:
-        """构建本次 turn 的生命周期 hook（对话压缩 + 安全审计 + 运行观测）。
-
-        trace_store 为 None（遥测禁用）时不挂安全/观测 hook，省去无意义开销。
-        安全 hook 默认只审计不拦截；后续若要按工具开关拦截，传 blocked_tools。
-        ConsolidatorHook 独立于 trace_store，有 consolidator 就挂。
-        """
-        hooks: list = []
-        if self._trace_store is not None:
-            hooks.extend([
-                SecurityAuditHook(self._trace_store),
-                IterationTraceHook(self._trace_store),
-            ])
-        if self._consolidator is not None:
-            hooks.append(ConsolidatorHook(self._consolidator))
-        return hooks
 
     # ── 划词「续入/新建会话」：填入快速会话输入框，等用户手动发 ──────────────
     def compose_in_reading(self, text: str, *, force_new: bool) -> str:

@@ -11,6 +11,19 @@ from app.i18n import t
 
 
 class StickyNoteFeatures:
+    def activateWindow(self):
+        """Activate the note and hand focus to its editor after Qt settles."""
+        super().activateWindow()
+        if getattr(self, "_content_edit", None) is not None and self.isVisible():
+            QTimer.singleShot(0, self._focus_editor_after_activation)
+
+    def _focus_editor_after_activation(self):
+        if not self.isVisible() or self._menu_open:
+            return
+        editor = getattr(self, "_content_edit", None)
+        if editor is not None and not editor.hasFocus():
+            editor.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+
     def _set_pref(self, key, value):
         self._save_position()
         self._settings[key] = value
@@ -37,7 +50,6 @@ class StickyNoteFeatures:
             self._content_edit.setStyleSheet(f"QTextEdit{{background:transparent;color:{ink};border:none;padding:8px 10px;font-size:{self._settings['font_size']}px}}")
             self._content_edit.apply_text_color("#f3f3f3" if QColor(color).lightness() < 128 else "#252525")
             self._content_edit.setReadOnly(self._settings["locked"])
-            self._content_edit.hide_completed(self._settings["hide_completed"])
             was_visible = self.isVisible()
             self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self._settings["top"])
             if was_visible:
@@ -139,7 +151,7 @@ class StickyNoteFeatures:
         appearance.addAction(t("sticky.defaultSize"), self._default_size)
         appearance.addAction(t("sticky.resetAppearance"), self._reset_appearance)
         display = menu.addMenu(t("sticky.display"))
-        for key, text in (("top", "top"), ("collapsed", "collapse"), ("locked", "lock"), ("edge", "edge"), ("hide_completed", "hideCompleted")):
+        for key, text in (("top", "top"), ("collapsed", "collapse"), ("locked", "lock"), ("edge", "edge")):
             action = display.addAction(t("sticky." + text))
             action.setCheckable(True)
             action.setChecked(self._settings[key])
@@ -196,12 +208,7 @@ class StickyNoteFeatures:
     def _save_template(self):
         name, ok = QInputDialog.getText(self, t("sticky.saveTemplate"), t("sticky.templateName"))
         if ok and name.strip() and self._note_mgr:
-            from app.ui.components.sticky_editor import StickyEditor
-            editor = StickyEditor()
-            editor.load_content(self._content_edit.toHtml())
-            editor.reset_completed()
-            self._note_mgr.save_sticky_template(name.strip(), editor.toHtml(), self._settings)
-            editor.deleteLater()
+            self._note_mgr.save_sticky_template(name.strip(), self._content_edit.toHtml(), self._settings)
 
     def _export(self, image):
         name = "".join(c if c not in '<>:"/\\|?*' else '_' for c in self._title)[:60] or "sticky"

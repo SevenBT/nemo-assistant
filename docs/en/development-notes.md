@@ -28,8 +28,18 @@ These notes capture implementation trade-offs that are useful for contributors. 
 - Usage remains unknown when absent; partial fields do not imply zero. No local pricing lookup is performed. Errors are sanitized before UI/log persistence. Logs include provider/model/protocol/profile revision, without prompts or keys.
 - Offline wire contracts, SDK-forbidden subprocesses, loopback cancellation tests and independent evaluation cover this implementation. These are not live certification for every supplier/model. See [the implementation design](../design/shared-lightweight-provider-design.md).
 
+## Agent Execution
+
+- `Agent` owns one run: `start()` and `run_sync()` share an atomic single-use guard. Construct a fresh Agent and context for the next run. `is_running` includes synchronous execution and settlement. `wait()` returns after settlement; the execution thread must read `result` instead of waiting for itself.
+- `AgentLoop` owns the synchronous state machine and read-only tool pool. Qt's `AgentThread` calls `Agent.run_sync()` on its QThread. The facade publishes a result snapshot, finalizes Trace, sends one complete `on_done` snapshot and releases waiters even if a callback fails.
+- `result.messages` preserves the input prefix and includes the final assistant response with provider metadata. Consumers must not append `answer` again. Cancelled or failed tool groups can remain partial evidence; they are not replayable completed groups.
+- `RequestPreparer` runs before every normal and wrap-up request; wrap-up always disables tools. Legacy `before_turn` runs once and changes only the initial request view. The desktop factory creates a fresh `ConsolidatingRequestPreparer` for each run, preserving authoritative history and deduplicating summary/archive writes by source fingerprint.
+- Compression retains system/developer instructions, the latest user input and the latest complete tool group. Surviving messages keep opaque provider fields and image content. The shared budget includes tool schemas and serialized provider fields; image token costs remain provider-specific estimates. Mandatory context that cannot fit the compression budget fails explicitly. Summary cancellation closes the stream and prevents subsequent archive/model work.
+- Immutable `ExecutionPolicy` controls turn, worker and failure limits; defaults remain 10 turns, 4 workers and 5 failures. Writes remain serial barriers; registry execution gates and retries remain in the tool adapter. See [the refactor design](../design/agent-loop-refactor.md).
+
 ## Theming
 
+- Application fonts use outline antialiasing and vertical hinting to avoid horizontal pixel snapping at fractional display scales. Fluent's font-family configuration shares the application fallback chain in memory; keep explicit code/icon fonts and user-selected sizes intact.
 - FluentWindow may reapply internal styles after widgets are constructed.
 - QTextEdit foreground colors sometimes need reinforcement when focus changes.
 - QPlainTextEdit does not support `setTextColor`; use its Text palette and syntax highlighter. Changing character formats on focus can emit `textChanged` and incorrectly update note timestamps.

@@ -17,7 +17,7 @@
     转而向 LLM 回灌一条拒绝说明，loop 照常继续——LLM 能看到拒绝并改走别的路。
 
 三个关键挂载点：
-    before_turn           每轮对话开始前，可读取/修改消息列表。
+    before_turn           单次运行开始时，可调整初始请求视图。
                           —— 对话压缩（consolidation）的天然挂载点。
     before_execute_tools  工具执行前，可读取 tool_calls 并裁决（放行/拒绝）。
                           —— 安全审批的天然挂载点。
@@ -26,13 +26,10 @@
 """
 from __future__ import annotations
 
-import json as _json
+import copy
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from app.models.message import Message
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +40,7 @@ REJECT = "reject"
 
 @dataclass(frozen=True)
 class ToolCallView:
-    """传给 hook 的工具调用只读视图（不暴露可变内部结构）。"""
+    """工具调用快照；组合器为各 Hook 隔离嵌套参数，修改不影响执行。"""
 
     id: str
     name: str
@@ -98,9 +95,10 @@ class AfterIterationContext:
 
 @dataclass
 class BeforeTurnContext:
-    """before_turn 的上下文：每轮对话开始前的快照。
+    """before_turn 的上下文：单次运行开始前的快照。
 
-    hook 可返回新的消息列表来替换 ctx.messages（例如压缩后的消息）。
+    hook 返回的新消息列表仅替换初始请求视图，不修改权威运行历史。
+    每次模型请求的压缩应使用 RequestPreparer。
     返回 None 表示不修改。
     """
 
@@ -127,7 +125,7 @@ class AgentHook:
         return None
 
     def before_turn(self, ctx: BeforeTurnContext) -> list[dict[str, Any]] | None:
-        """每轮对话开始前调用。返回新的消息列表以替换，None 表示不修改。"""
+        """运行开始时调用一次；返回初始请求视图，None 表示不修改。"""
         return None
 
     def after_iteration(self, ctx: AfterIterationContext) -> None:
@@ -151,7 +149,7 @@ class CompositeHook(AgentHook):
         merged: dict[str, ToolDecision] = {}
         for hook in self._hooks:
             try:
-                decisions = hook.before_execute_tools(ctx)
+                decisions = hook.before_execute_tools(copy.deepcopy(ctx))
             except Exception:
                 logger.exception(
                     "[Hook] %s.before_execute_tools failed", type(hook).__name__
@@ -198,72 +196,10 @@ class CompositeHook(AgentHook):
     def after_iteration(self, ctx: AfterIterationContext) -> None:
         for hook in self._hooks:
             try:
-                hook.after_iteration(ctx)
+                hook.after_iteration(copy.deepcopy(ctx))
             except Exception:
                 logger.exception(
                     "[Hook] %s.after_iteration failed", type(hook).__name__
                 )
                 if hook.reraise:
                     raise
-
-
-# ── 工具函数：API dict ↔ Message 转换 ──────────────────────────────────
-
-
-def _api_dicts_to_messages(api_dicts: list[dict[str, Any]]) -> list["Message"]:
-    """将 OpenAI API 格式的 dict 列表转换为 Message 对象列表（供 Consolidator 使用）。"""
-    from app.models.message import Message as _Msg, ToolCall
-
-    result: list["Message"] = []
-    for d in api_dicts:
-        tool_calls = []
-        if d.get("tool_calls"):
-            for tc in d["tool_calls"]:
-                args_str = tc.get("function", {}).get("arguments", "{}")
-                args = _json.loads(args_str) if isinstance(args_str, str) else args_str
-                tool_calls.append(ToolCall(id=tc["id"], name=tc["function"]["name"], arguments=args,
-                                           extra_content=tc.get("extra_content", {})))
-        result.append(_Msg(
-            role=d["role"],
-            content=d.get("content") or "",
-            tool_calls=tool_calls,
-            tool_call_id=d.get("tool_call_id"),
-            reasoning_content=d.get("reasoning_content"),
-            provider_state=d.get("provider_state", {}),
-        ))
-    return result
-
-
-# ── 内置 Hook 实现 ─────────────────────────────────────────────────────
-
-
-class ConsolidatorHook(AgentHook):
-    """将 Consolidator 适配为 AgentHook，在每轮对话前自动压缩旧消息。
-
-    用法::
-
-        from app.conversation.consolidator import Consolidator
-        from app.agent.agent_hooks import ConsolidatorHook
-
-        consolidator = Consolidator(llm_gateway, memory_mgr, model="gpt-4o")
-        hook = ConsolidatorHook(consolidator)
-        agent = AgentThread(..., hooks=[hook])
-    """
-
-    def __init__(self, consolidator):
-        from app.conversation.consolidator import Consolidator as _C
-
-        if not isinstance(consolidator, _C):
-            raise TypeError(f"Expected Consolidator, got {type(consolidator).__name__}")
-        self._consolidator = consolidator
-
-    def before_turn(self, ctx: BeforeTurnContext) -> list[dict[str, Any]] | None:
-        messages = _api_dicts_to_messages(ctx.messages)
-        compressed = self._consolidator.maybe_consolidate(messages, ctx.session_id)
-        if compressed is not messages:
-            logger.info(
-                "[ConsolidatorHook] Compressed %d → %d messages",
-                len(messages), len(compressed),
-            )
-            return [m.to_api_dict() for m in compressed]
-        return None

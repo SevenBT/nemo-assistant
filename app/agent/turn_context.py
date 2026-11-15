@@ -73,6 +73,7 @@ class TurnContext:
     provider_state: dict = field(default_factory=dict)
     tool_calls: list[dict] = field(default_factory=list)
     error_message: str | None = None
+    iteration_results: list[tuple[dict, dict]] = field(default_factory=list)
 
     # ── 追踪 ──
     trace: list[StateTraceEntry] = field(default_factory=list)
@@ -83,3 +84,4 @@ class TurnContext:
         self.reasoning_content = None
         self.provider_state = {}
         self.tool_calls = []
+        self.iteration_results = []

@@ -7,7 +7,6 @@ DEFAULT_STICKY_SETTINGS = {
     "version": 1, "color": "auto", "opacity": 100, "width": 280, "height": 260,
     "top": True, "collapsed": False, "locked": False, "edge": False,
     "visible": True, "font_family": "", "font_size": 13,
-    "hide_completed": False,
 }
 
 
@@ -87,7 +86,7 @@ class StickyStore:
             return [dict(row) for row in conn.execute("SELECT * FROM sticky_templates ORDER BY id")]
 
     def save_sticky_template(self, name, content, settings):
-        # Never propagate active reminders, window position or completed state.
+        # Never propagate active reminders or window position.
         appearance = {key: settings[key] for key in ("color", "opacity", "font_family", "font_size", "width", "height") if key in settings}
         with self.db.get_connection() as conn:
             cursor = conn.execute("INSERT INTO sticky_templates(name,content,settings) VALUES(?,?,?)",

@@ -28,8 +28,18 @@
 - usage 缺失保持未知，部分字段缺失不当作零。不读取本地价格表；错误展示和落库前脱敏。日志记录 provider/model/protocol/profile revision，不记录提示词和密钥。
 - 验证使用离线协议、禁止 SDK 导入的子进程、真实本机连接取消及独立评估；不等于所有厂商/模型已经实网认证。详见[实现方案](../design/shared-lightweight-provider-design.md)。
 
+## Agent 执行
+
+- `Agent` 表示一次运行；`start()` 与 `run_sync()` 共用原子启动登记，不可重用。下一次运行创建新的 Agent 和上下文。`is_running` 覆盖同步执行及结算；`wait()` 在结算后返回，执行线程应读取 `result`，不能等待自身。
+- `AgentLoop` 管理同步状态机及只读工具线程池。Qt 的 `AgentThread` 在 QThread 上调用 `Agent.run_sync()`。外观层发布结果快照、完成 Trace、发送一次完整 `on_done`，回调异常也会释放等待者。
+- `result.messages` 保留输入前缀，包含最终 assistant 答复及服务商元数据；消费方不要再次追加 `answer`。取消或失败时未闭合的工具组只是部分执行证据，不可当作已完成组重放。
+- 每次正常请求和收尾请求都经过 `RequestPreparer`，收尾始终禁用工具。旧 `before_turn` 仅运行一次，返回值只影响初始请求视图。桌面工厂为每次运行创建独立 `ConsolidatingRequestPreparer`，不修改权威历史，按源内容指纹复用摘要并去重归档。
+- 压缩固定保留 system/developer 指令、最近用户输入和最新完整工具组，保留下来的消息不丢服务商扩展字段和图片。预算包含工具 schema 及序列化服务商字段；图片 token 消耗仍取决于服务商。必留内容无法满足压缩预算时明确报错。摘要期间取消会关闭流，不再进行后续归档或模型请求。
+- 不可变 `ExecutionPolicy` 管理轮数、并发数、失败阈值，默认仍为 10 轮、4 并发、5 次失败。写工具仍形成串行屏障；执行门禁和重试继续由工具适配器负责。详见[重构方案](../design/agent-loop-refactor.md)。
+
 ## 主题
 
+- 应用字体使用轮廓抗锯齿和垂直 hinting，避免分数缩放下横向像素对齐造成笔画生硬。Fluent 控件在内存中共享应用字体回退链；保留专用代码字体、图标字体及用户设置的字号。
 - FluentWindow 可能在控件构造完成后重新应用内部样式。
 - QTextEdit 的前景色有时需要在焦点变化时重新加固。
 - QPlainTextEdit 不支持 `setTextColor`；使用 Text 调色板和语法高亮器。获焦时修改字符格式可能触发 `textChanged`，导致笔记修改时间误更新。

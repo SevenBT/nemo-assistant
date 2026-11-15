@@ -10,7 +10,8 @@ import pytest
 from PyQt6.QtCore import QMimeData
 from PyQt6.QtGui import QColor, QImage
 
-from app.agent.agent_hooks import BeforeTurnContext, ConsolidatorHook
+from app.agent.agent_hooks import BeforeTurnContext
+from app.conversation.agent_hooks import ConsolidatorHook
 from app.conversation.consolidator import Consolidator, _messages_to_text
 from app.conversation.context_manager import count_messages_tokens, message_to_token_text
 from app.conversation.conversation_prompt_builder import merge_attachments_to_content
