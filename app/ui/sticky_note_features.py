@@ -11,6 +11,19 @@ from app.i18n import t
 
 
 class StickyNoteFeatures:
+    def activateWindow(self):
+        """Activate the note and hand focus to its editor after Qt settles."""
+        super().activateWindow()
+        if getattr(self, "_content_edit", None) is not None and self.isVisible():
+            QTimer.singleShot(0, self._focus_editor_after_activation)
+
+    def _focus_editor_after_activation(self):
+        if not self.isVisible() or self._menu_open:
+            return
+        editor = getattr(self, "_content_edit", None)
+        if editor is not None and not editor.hasFocus():
+            editor.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+
     def _set_pref(self, key, value):
         self._save_position()
         self._settings[key] = value
