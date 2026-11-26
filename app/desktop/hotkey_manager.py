@@ -45,6 +45,8 @@ class HotkeyManager(QObject):
         # 最近一次 _register_all 中注册失败的 action 列表（供 UI 反馈）。
         self.failed_actions: list[str] = []
         self._handles = []
+        self._release_handles = {}
+        self._held_keys: set[str] = set()
         self._running = False
         self._suspended: set[str] = set()
         self._paused = False
@@ -113,6 +115,14 @@ class HotkeyManager(QObject):
         self._waiting_for_release = False
         self._unhook()
 
+        for handle in self._release_handles.values():
+            try:
+                _kb.unhook(handle)
+            except Exception:
+                logger.debug("Failed to unregister key release listener", exc_info=True)
+        self._release_handles.clear()
+        self._held_keys.clear()
+
     # ------------------------------------------------------------------ 内部实现
     def _unhook(self):
         self._generation += 1
@@ -159,7 +169,22 @@ class HotkeyManager(QObject):
             # keyboard uses commas to separate sequences; the comma key needs
             # its named form, whereas Qt/config use the literal character.
             backend_combo = "+".join("comma" if part == "," else part for part in combo.split("+"))
-            handle = _kb.add_hotkey(backend_combo, callback, suppress=False, trigger_on_release=True)
+            key = backend_combo.split("+")[-1]
+            if key not in self._release_handles:
+                # Keep release listeners and held state across reloads: pause
+                # toggles re-register hotkeys while their keys are still down.
+                self._release_handles[key] = _kb.on_release_key(
+                    key, lambda event, key=key: self._held_keys.discard(key), suppress=False
+                )
+
+            def once_per_press():
+                if key not in self._held_keys:
+                    self._held_keys.add(key)
+                    callback()
+
+            # keyboard 0.13.5 can silently skip release-triggered callbacks on
+            # Windows. Trigger on key-down so registered global hotkeys fire.
+            handle = _kb.add_hotkey(backend_combo, once_per_press, suppress=False, trigger_on_release=False)
             self._handles.append(handle)
             return True
         except Exception:
