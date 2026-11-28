@@ -41,9 +41,21 @@ class Keyboard:
     def __init__(self):
         self.bindings = {}
         self.counter = 0
+        self.release_callbacks = {}
+
+    def on_release_key(self, key, callback, suppress=False):
+        assert not suppress
+        self.release_callbacks[key] = callback
+        return key
+
+    def unhook(self, handle):
+        del self.release_callbacks[handle]
+
+    def release(self, key):
+        self.release_callbacks[key](SimpleNamespace(event_type="up", name=key))
 
     def add_hotkey(self, combo, callback, **kwargs):
-        assert kwargs == {"suppress": False, "trigger_on_release": True}
+        assert kwargs == {"suppress": False, "trigger_on_release": False}
         self.counter += 1
         self.bindings[self.counter] = (combo, callback)
         return self.counter
@@ -163,6 +175,59 @@ def test_settings_shortcut_uses_keyboard_comma_name(shortcuts):
     write_hotkeys({"system:settings": "ctrl+alt+,"}, config)
     manager.start()
     assert "ctrl+alt+comma" in keyboard.combos()
+
+
+def test_long_press_fires_once_until_main_key_is_released(shortcuts, monkeypatch):
+    config, manager, keyboard = shortcuts
+    clock = [10.0]
+    monkeypatch.setattr(manager_module.time, "monotonic", lambda: clock[0])
+    received = []
+    manager.action_triggered.connect(received.append)
+    manager.start()
+    callback = next(cb for combo, cb in keyboard.bindings.values() if combo == "ctrl+alt+space")
+    callback()
+    clock[0] += 1
+    callback()
+    assert received == ["toggle_window"]
+    keyboard.release("space")
+    callback()
+    assert received == ["toggle_window", "toggle_window"]
+
+
+def test_pause_long_press_stays_paused_across_reload(shortcuts, monkeypatch):
+    config, manager, keyboard = shortcuts
+    clock = [10.0]
+    monkeypatch.setattr(manager_module.time, "monotonic", lambda: clock[0])
+    manager.action_triggered.connect(lambda _: manager.set_paused(not manager.paused))
+    manager.start()
+    next(cb for combo, cb in keyboard.bindings.values() if combo == "ctrl+alt+shift+space")()
+    assert manager.paused
+    clock[0] += 1
+    next(iter(keyboard.bindings.values()))[1]()
+    assert manager.paused
+    keyboard.release("space")
+    next(iter(keyboard.bindings.values()))[1]()
+    assert not manager.paused
+    manager.stop()
+    assert keyboard.release_callbacks == {}
+
+
+def test_stop_cleans_remaining_release_listeners_after_unhook_failure(shortcuts, monkeypatch):
+    config, manager, keyboard = shortcuts
+    manager.start()
+    handles = set(keyboard.release_callbacks)
+    removed = []
+
+    def unhook(handle):
+        removed.append(handle)
+        if len(removed) == 1:
+            raise RuntimeError("listener already removed")
+
+    monkeypatch.setattr(keyboard, "unhook", unhook)
+    manager.stop()
+    assert set(removed) == handles
+    assert manager._release_handles == {}
+    assert manager._held_keys == set()
 
 
 def test_capture_entrance_is_single_and_native_close_restores_global_hooks(shortcuts, qtbot, monkeypatch):
