@@ -8,20 +8,7 @@ from PyQt6.QtGui import QTextCursor
 
 from app.storage.db_manager import DatabaseManager
 from app.storage.note_manager import NoteManager
-from app.ui.notes_dialog import NotesPanel, _ROLE_DATE, _ROLE_ID
-from app.ui.sticky_note_controller import StickyNoteController
-
-
-@pytest.fixture
-def notebook(tmp_path, qtbot):
-    notes = NoteManager(DatabaseManager(tmp_path / "notes.db"))
-    panel = NotesPanel(notes)
-    qtbot.addWidget(panel)
-    controller = StickyNoteController(notes, panel)
-    panel.note_updated.connect(controller.sync_note_update)
-    controller.note_updated.connect(lambda key, *_: panel.refresh_note(key))
-    yield notes, panel, controller
-    controller.shutdown()
+from app.ui.notes_dialog import _ROLE_DATE, _ROLE_ID
 
 
 def set_old_time(notes, key):

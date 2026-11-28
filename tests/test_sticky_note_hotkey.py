@@ -7,26 +7,15 @@ from PyQt6.QtGui import QTextDocument
 from app.storage.db_manager import DatabaseManager
 from app.storage.note_manager import NoteManager
 from app.i18n import current_language, init_language, t
-from app.ui.notes_dialog import NotesPanel
 from app.ui.sticky_note_controller import StickyNoteController
 
 
 @pytest.fixture
-def sticky_context(qtbot, tmp_path):
+def sticky_context(notebook):
     language = current_language()
-    manager = NoteManager(DatabaseManager(tmp_path / "notes.db"))
-    panel = NotesPanel(manager)
-    qtbot.addWidget(panel)
-    controller = StickyNoteController(manager, panel)
-    # The main window forwards sticky edits to these two surfaces.
+    _, _, controller = notebook
     controller.note_updated.connect(controller.sync_note_update)
-    controller.note_updated.connect(lambda note_id, *_: panel.refresh_note(note_id))
-    yield manager, panel, controller
-    controller.shutdown()
-    for window in panel._pin_windows[:]:
-        window.close()
-    controller.deleteLater()
-    qtbot.wait(1)
+    yield notebook
     init_language(language)
 
 
@@ -100,15 +89,15 @@ def test_hotkey_sticky_auto_saves_and_restores_rich_content(sticky_context, qtbo
     # A new manager runs startup migrations; stickies must keep their HTML.
     reopened = NoteManager(DatabaseManager(manager.db.db_path))
     assert reopened.get(note_id).content == saved_content
-    restored = StickyNoteController(reopened, panel)
+    restored = StickyNoteController(reopened, panel, parent=panel)
     try:
         restored.restore_pinned()
         restored_window, = restored._windows
         assert restored_window._content_edit.toPlainText() == "Saved sticky"
         assert restored_window._content_edit.toHtml() == saved_content
     finally:
-        for restored_window in restored._windows[:]:
-            restored_window.dispose()
+        restored.shutdown()
+        panel._sticky_controller = controller
 
     panel._pivot.setCurrentItem("sticky")
     panel._list.setCurrentRow(0)
