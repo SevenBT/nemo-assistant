@@ -1,4 +1,13 @@
 import pytest
+from PyQt6.QtCore import QCoreApplication, QEvent
+
+
+@pytest.fixture(autouse=True)
+def finish_qt_deferred_deletes():
+    """Deliver deleteLater requests in the test that scheduled them."""
+    yield
+    if QCoreApplication.instance() is not None:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 @pytest.fixture
@@ -12,7 +21,6 @@ def notes(tmp_path):
 @pytest.fixture
 def notebook(notes, qapp):
     """Dispose desktop windows before their panel and signal receivers."""
-    from PyQt6.QtCore import QEvent
     from app.ui.notes_dialog import NotesPanel
     from app.ui.sticky_note_controller import StickyNoteController
 
