@@ -4,32 +4,30 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from PyQt6.QtCore import Qt, QMimeData, QUrl
+from PyQt6.QtCore import QEvent, Qt, QMimeData, QUrl
 from PyQt6.QtGui import QImage, QTextBlockFormat, QTextCursor, QTextDocument
 
 from app.storage.db_manager import DatabaseManager
 from app.storage.note_manager import NoteManager
 from app.desktop.sticky_reminders import StickyReminderService, next_occurrence
 from app.ui.components.sticky_editor import StickyEditor
-from app.ui.notes_dialog import NotesPanel
-from app.ui.sticky_note_controller import StickyNoteController
 from app.ui.sticky_reminders import StickyReminderDialog, StickyReminderCard
 
 
 @pytest.fixture
-def notes(tmp_path):
-    return NoteManager(DatabaseManager(tmp_path / "notes.db"))
+def desktop(notebook):
+    _, panel, controller = notebook
+    return panel, controller
 
 
 @pytest.fixture
-def desktop(notes, qtbot):
-    panel = NotesPanel(notes)
-    qtbot.addWidget(panel)
-    controller = StickyNoteController(notes, panel)
-    controller.note_updated.connect(lambda key, *_: panel.refresh_note(key))
-    panel.note_updated.connect(controller.sync_note_update)
-    yield panel, controller
-    controller.shutdown()
+def reminder_parent(qapp):
+    from PyQt6.QtWidgets import QWidget
+
+    parent = QWidget()
+    yield parent
+    parent.deleteLater()
+    qapp.sendPostedEvents(parent, QEvent.Type.DeferredDelete)
 
 
 def test_preferences_and_reminders_survive_reload_without_mutating_content(notes):
@@ -309,18 +307,16 @@ def test_weekly_rule_respects_selected_days_and_future_boundary():
     assert next_at > start
 
 
-def test_reminder_settings_and_card_are_actionable(notes, qtbot):
+def test_reminder_settings_and_card_are_actionable(notes, reminder_parent):
     note = notes.create("reminder note", note_type="sticky")
     service = StickyReminderService(notes, None)
-    dialog = StickyReminderDialog(service, note.id)
-    qtbot.addWidget(dialog)
+    dialog = StickyReminderDialog(service, note.id, parent=reminder_parent)
     dialog.repeat.setCurrentIndex(2)
     assert all(check.isHidden() is False for check in dialog.days)
     dialog.save()
     assert notes.get_sticky_reminder(note.id)["rule"]["repeat"] == "weekly"
     controller = Mock()
-    card = StickyReminderCard(service, controller, [note.id])
-    qtbot.addWidget(card)
+    card = StickyReminderCard(service, controller, [note.id], parent=reminder_parent)
     from PyQt6.QtWidgets import QPushButton
     button = next(button for button in card.findChildren(QPushButton) if button.text() == note.title)
     button.click()
@@ -564,7 +560,7 @@ def qapp_screen_contains(window):
     return any(screen.availableGeometry().contains(window.geometry()) for screen in QApplication.screens())
 
 
-def test_invalid_display_settings_and_pause_old_reminder(notes, qtbot):
+def test_invalid_display_settings_and_pause_old_reminder(notes, reminder_parent):
     note = notes.create("bad settings", note_type="sticky")
     settings = notes.set_sticky_settings(note.id, color=None, width="oops", locked="false", opacity=None)
     assert settings["color"] == "auto"
@@ -574,8 +570,7 @@ def test_invalid_display_settings_and_pause_old_reminder(notes, qtbot):
     now = datetime.now(timezone.utc)
     service = StickyReminderService(notes, None)
     service.configure(note.id, now - timedelta(days=1), enabled=False)
-    dialog = StickyReminderDialog(service, note.id)
-    qtbot.addWidget(dialog)
+    dialog = StickyReminderDialog(service, note.id, parent=reminder_parent)
     dialog.save()
     assert not notes.get_sticky_reminder(note.id)["enabled"]
     service.stop()
